@@ -1,0 +1,62 @@
+name: Deploy to Production
+
+# Manual only, deliberately - production shouldn't redeploy on every push to
+# main the way staging does. The real approval gate is a required-reviewer
+# protection rule on the 'production' GitHub Environment (Settings ->
+# Environments -> production -> Required reviewers), not anything in this
+# YAML - set that up before relying on this as a safety net.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for OIDC login - no client secret anywhere
+  contents: read
+
+env:
+  AZURE_WEBAPP_NAME: website-tangentatlas-ledger-production
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    # Matches the federated credential's subject
+    # (repo:<org>/<repo>:environment:production) - see Deploy-ManagedIdentities.ps1.
+    # NOTE: that credential currently trusts a different repo name than this
+    # one - update it there (and re-run) before this workflow can log in.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      - name: Publish
+        run: >
+          dotnet publish TangentAtlas.LedgerService/TangentAtlas.LedgerService.csproj
+          --configuration Release
+          --no-build
+          --output ${{ github.workspace }}/publish
+
+      - name: Azure login (OIDC - no client secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: ${{ github.workspace }}/publish

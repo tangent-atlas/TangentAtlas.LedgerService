@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+.vscode/
+publish/
+
+# Secrets — NEVER commit
+appsettings.Production.json
+appsettings.Staging.json
+secrets.json
+**/*.pfx
+**/*.p12
+**/*.key

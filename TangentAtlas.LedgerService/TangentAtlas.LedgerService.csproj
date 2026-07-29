@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <AssemblyName>TangentAtlas.LedgerService</AssemblyName>
@@ -10,7 +10,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <UserSecretsId>tangentatlas-ledgerservice</UserSecretsId>
-    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,16 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Matches AtlasLedger.Model's own Microsoft.OpenApi version - both
-         must agree, and 2.11.0 is the version already confirmed working in
-         the real codebase (an earlier guess in this conversation of 2.3.9
-         was wrong - 2.11.0 is what's actually proven to build). -->
     <PackageReference Include="Asp.Versioning.Mvc" Version="10.0.0" />
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.0.0" />
     <PackageReference Include="Asp.Versioning.OpenApi" Version="10.0.0-rc.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Identity.Web" Version="4.14.0" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.14.1" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.16.16" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556">
@@ -41,14 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- TEMPORARY: a sibling-checkout project reference, so this builds
-         standalone even before AtlasLedger.Model has shipped its first
-         NuGet release (Condition guards it - see the atlas-ledger repo's
-         publish-nuget.yml, which fires on a published GitHub Release).
-         Swap for a versioned PackageReference once that release exists -
-         see README.md, "Wiring up AtlasLedger.Model". -->
-    <ProjectReference Include="..\..\atlas-ledger\AtlasLedger.Model\AtlasLedger.Model.csproj"
-                       Condition="Exists('..\..\atlas-ledger\AtlasLedger.Model\AtlasLedger.Model.csproj')" />
+    <PackageReference Include="AtlasLedger.Model" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

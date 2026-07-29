@@ -1,3 +1,7 @@
+// <copyright file="Program.cs" company="Tangent Atlas">
+//    Copyright © Tangent Atlas. All rights reserved.
+// </copyright>
+// <author>Donald Airey</author>
 using System.Threading.RateLimiting;
 using Asp.Versioning;
 using AtlasLedger.Model;
@@ -23,8 +27,8 @@ webApplicationBuilder.Services
 // AccountsController's hand-written) controllers from the AtlasLedger.Model
 // package.
 webApplicationBuilder.Services
-    .AddControllers()
-    .AddLedgerControllers();
+    .AddControllers().
+    AddLedgerControllers();
 
 // API Configuration
 webApplicationBuilder.Services

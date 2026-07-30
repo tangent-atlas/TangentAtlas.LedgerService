@@ -1,5 +1,5 @@
 // <copyright file="ErrorHandlingMiddleware.cs" company="Tangent Atlas">
-//    Copyright © AtlasLedger. All rights reserved.
+//    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
 using System.Net;

@@ -19,25 +19,17 @@ It deliberately owns **none** of the ledger engine itself, the data model,
 or the generated controllers - those live in the public `atlas-ledger` repo
 (MIT), as the `AtlasLedger.Model` package.
 
-## Wiring up AtlasLedger.Model
+## Consuming AtlasLedger.Model
 
-`TangentAtlas.LedgerService.csproj` currently references `AtlasLedger.Model`
-via a **temporary** relative `ProjectReference`, guarded by
-`Condition="Exists(...)"` so this builds standalone even before that path
-exists locally:
-
-```xml
-<ProjectReference Include="..\..\atlas-ledger\AtlasLedger.Model\AtlasLedger.Model.csproj"
-                   Condition="Exists('..\..\atlas-ledger\AtlasLedger.Model\AtlasLedger.Model.csproj')" />
-```
-
-Once `AtlasLedger.Model` has shipped its first NuGet release (the
-`atlas-ledger` repo's `publish-nuget.yml` fires on a published GitHub
-Release), replace that with a normal, version-pinned package reference:
+`TangentAtlas.LedgerService.csproj` references the real, published package
+from nuget.org - not a local project/source reference:
 
 ```xml
 <PackageReference Include="AtlasLedger.Model" Version="0.1.0" />
 ```
+
+This replaced an earlier temporary sibling-checkout `ProjectReference` used
+before `AtlasLedger.Model` had shipped its first NuGet release.
 
 Pin the version deliberately and bump it on purpose after testing - don't
 float `latest`, even though it's your own package.

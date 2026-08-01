@@ -25,6 +25,10 @@
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.0.0" />
     <PackageReference Include="Asp.Versioning.OpenApi" Version="10.0.0-rc.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.14.1" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
@@ -36,7 +40,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AtlasLedger.Model" Version="0.1.0" />
+    <ProjectReference Include="..\..\..\atlas-ledger\AtlasLedger\AtlasLedger.Model\AtlasLedger.Model.csproj" />
   </ItemGroup>
 
 </Project>

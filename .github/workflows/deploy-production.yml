@@ -60,11 +60,19 @@ jobs:
           --output migration.sql
 
       - name: Azure login as migrator (OIDC - no client secret)
+        # allow-no-subscriptions: true is required here - this identity
+        # deliberately has ZERO Azure RBAC role assignments (see
+        # Deploy-ManagedIdentities.ps1's migrator entries: it never touches
+        # the Web App, only SQL via a separate, non-ARM authorization path).
+        # Without this flag, azure/login's default subscription-enumeration
+        # step fails outright ("No subscriptions found"), even though this
+        # job never needs subscription-level access at all.
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_MIGRATOR_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
 
       - name: Allow this runner through the SQL firewall (temporary)
         # GitHub-hosted runners are NOT covered by Azure SQL's "Allow Azure

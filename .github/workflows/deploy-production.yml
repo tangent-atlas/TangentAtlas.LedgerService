@@ -41,6 +41,13 @@ jobs:
       - name: Restore pinned dotnet tools (dotnet-ef)
         run: dotnet tool restore
 
+      - name: Restore project dependencies
+        # Separate from the tool restore above - this restores
+        # TangentAtlas.LedgerService's own NuGet package references
+        # (AtlasLedger.Model, EF Core, etc.), without which `dotnet ef`
+        # has no project.assets.json to load and fails with NETSDK1004.
+        run: dotnet restore TangentAtlas.LedgerService/TangentAtlas.LedgerService.csproj
+
       - name: Generate idempotent migration script
         # No live database connection needed here - this only reads the
         # compiled Migration classes (from AtlasLedger.Model, via

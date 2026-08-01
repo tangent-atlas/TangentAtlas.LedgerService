@@ -40,7 +40,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\atlas-ledger\AtlasLedger\AtlasLedger.Model\AtlasLedger.Model.csproj" />
+    <PackageReference Include="AtlasLedger.Model" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

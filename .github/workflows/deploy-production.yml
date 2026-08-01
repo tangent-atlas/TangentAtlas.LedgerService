@@ -60,13 +60,15 @@ jobs:
           --output migration.sql
 
       - name: Azure login as migrator (OIDC - no client secret)
-        # allow-no-subscriptions: true is required here - this identity
-        # deliberately has ZERO Azure RBAC role assignments (see
-        # Deploy-ManagedIdentities.ps1's migrator entries: it never touches
-        # the Web App, only SQL via a separate, non-ARM authorization path).
-        # Without this flag, azure/login's default subscription-enumeration
-        # step fails outright ("No subscriptions found"), even though this
-        # job never needs subscription-level access at all.
+        # This identity now has ONE narrow RBAC role - 'SQL Security
+        # Manager' on the SQL server only (see Deploy-ManagedIdentities.ps1) -
+        # needed because the firewall-rule steps below are ARM operations,
+        # not covered by the separate SQL data-plane grant
+        # (db_ddladmin/db_datawriter) Deploy-AtlasDatabase.ps1 makes.
+        # allow-no-subscriptions stays as a safety net for Entra role-
+        # propagation delay (the identity may be too fresh for the role to
+        # be visible yet on the very first run after Deploy-ManagedIdentities.ps1) -
+        # same replication-lag pattern seen elsewhere in this project.
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_MIGRATOR_CLIENT_ID }}

@@ -1,10 +1,13 @@
 name: Deploy to Staging
 
-# Deploys on every push to main. Production (deploy-production.yml) is
-# separate and NOT triggered by this - see that file for why.
+# TEMPORARY branch-based gate (see deploy-production.yml's header for the
+# full reasoning and the plan to retire this). Deploys on every push to the
+# 'staging' branch specifically - main itself is no longer the trigger, so
+# a plain push to main does nothing here. Promote code to staging with:
+#   git checkout staging && git merge main && git push origin staging
 on:
   push:
-    branches: [main]
+    branches: [staging]
   workflow_dispatch:
 
 permissions:

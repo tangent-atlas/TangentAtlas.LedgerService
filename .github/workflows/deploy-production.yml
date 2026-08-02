@@ -1,18 +1,28 @@
 name: Deploy to Production
 
-# Manual only, deliberately - production shouldn't redeploy on every push to
-# main the way staging does.
+# TEMPORARY branch-based gate, deliberately chosen for simplicity over the
+# next 2-3 months rather than paying for GitHub Team's required-PR-review
+# branch protection right now. Deploys on every push to the 'production'
+# branch specifically - main itself does NOT trigger this, so an ordinary
+# push to main is inert here. Promote code to production with:
+#   git checkout production && git merge main && git push origin production
+# workflow_dispatch stays available too, as a manual re-run/fallback path -
+# harmless to keep alongside the branch trigger.
 #
-# THE APPROVAL GATE: native GitHub Environment "required reviewers" is
-# NOT available here - that control is restricted to PUBLIC repositories
-# on GitHub Free/Pro/Team; private repos need GitHub Enterprise Cloud for
-# it. Since this repo is deliberately private, the 'approval' job below
-# uses trstringer/manual-approval instead - it opens a GitHub issue and
-# blocks until a named approver comments on it, achieving the same
-# blocking, auditable gate without needing Enterprise. Both later jobs
-# depend on it (directly or transitively), so nothing - not even the
-# database migration - proceeds without that approval.
+# THE HONEST TRADE-OFF: a merge into 'production' is a deliberate action,
+# but it is NOT a reviewed one - anyone with push access can do it alone,
+# same as clicking workflow_dispatch could. This is knowingly accepted for
+# now, given team size and the pre-revenue stage. Revisit once the org
+# upgrades to GitHub Team: switch back to a single `main` branch, add
+# required-PR-review branch protection there (Settings -> Branches ->
+# main -> Require a pull request before merging -> Require approvals,
+# with Include administrators on), and delete the 'staging'/'production'
+# branches entirely - deploy-staging.yml/deploy-production.yml would
+# revert to triggering off `main` and workflow_dispatch respectively, the
+# way they did before this change.
 on:
+  push:
+    branches: [production]
   workflow_dispatch:
 
 permissions:
@@ -27,29 +37,7 @@ env:
   DOTNET_VERSION: '10.0.x'
 
 jobs:
-  approval:
-    # Runs FIRST, before anything else - including the database migration,
-    # which is itself a production-affecting action and shouldn't proceed
-    # unreviewed just because code deploy is still pending.
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write   # required to create the approval issue
-    steps:
-      - uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ secrets.GITHUB_TOKEN }}   # built-in, not a secret you create
-          approvers: don-airey
-          minimum-approvals: 1
-          issue-title: "Approve production deploy of TangentAtlas.LedgerService (run ${{ github.run_id }})"
-          issue-body: "Commit: ${{ github.sha }}\nTriggered by: ${{ github.actor }}\n\nComment 'approved' to proceed, 'denied' to stop."
-          # false = the person who triggered the deploy CAN also approve it.
-          # Fine for a solo/small team; flip to true once there's a genuine
-          # second reviewer, so this becomes real two-person review rather
-          # than a formality.
-          exclude-workflow-initiator-as-approver: false
-
   migrate-database:
-    needs: approval
     # Runs BEFORE deploy, deliberately, using a SEPARATE identity from the
     # one that deploys code below - see Deploy-ManagedIdentities.ps1's
     # migrator entries. That identity never touches the Web App at all; its

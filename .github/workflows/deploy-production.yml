@@ -1,11 +1,17 @@
 name: Deploy to Production
 
 # Manual only, deliberately - production shouldn't redeploy on every push to
-# main the way staging does. The real approval gate is a required-reviewer
-# protection rule on the 'production' GitHub Environment (Settings ->
-# Environments -> production -> Required reviewers), not anything in this
-# YAML - that gate now covers the migration step below too, since it uses
-# the same GitHub Environment as the deploy step.
+# main the way staging does.
+#
+# THE APPROVAL GATE: native GitHub Environment "required reviewers" is
+# NOT available here - that control is restricted to PUBLIC repositories
+# on GitHub Free/Pro/Team; private repos need GitHub Enterprise Cloud for
+# it. Since this repo is deliberately private, the 'approval' job below
+# uses trstringer/manual-approval instead - it opens a GitHub issue and
+# blocks until a named approver comments on it, achieving the same
+# blocking, auditable gate without needing Enterprise. Both later jobs
+# depend on it (directly or transitively), so nothing - not even the
+# database migration - proceeds without that approval.
 on:
   workflow_dispatch:
 
@@ -21,13 +27,38 @@ env:
   DOTNET_VERSION: '10.0.x'
 
 jobs:
+  approval:
+    # Runs FIRST, before anything else - including the database migration,
+    # which is itself a production-affecting action and shouldn't proceed
+    # unreviewed just because code deploy is still pending.
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write   # required to create the approval issue
+    steps:
+      - uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}   # built-in, not a secret you create
+          approvers: don-airey
+          minimum-approvals: 1
+          issue-title: "Approve production deploy of TangentAtlas.LedgerService (run ${{ github.run_id }})"
+          issue-body: "Commit: ${{ github.sha }}\nTriggered by: ${{ github.actor }}\n\nComment 'approved' to proceed, 'denied' to stop."
+          # false = the person who triggered the deploy CAN also approve it.
+          # Fine for a solo/small team; flip to true once there's a genuine
+          # second reviewer, so this becomes real two-person review rather
+          # than a formality.
+          exclude-workflow-initiator-as-approver: false
+
   migrate-database:
+    needs: approval
     # Runs BEFORE deploy, deliberately, using a SEPARATE identity from the
     # one that deploys code below - see Deploy-ManagedIdentities.ps1's
     # migrator entries. That identity never touches the Web App at all; its
-    # only privilege is db_ddladmin/db_datawriter on this one database,
-    # granted by Deploy-AtlasDatabase.ps1. The app's own runtime identity
-    # (used by build-and-deploy's Web App) never has DDL rights, ever.
+    # only privilege is db_ddladmin/db_datareader/db_datawriter on this one
+    # database (Deploy-AtlasDatabase.ps1) plus 'SQL Security Manager' on the
+    # SQL server itself, for the firewall-rule steps below (an ARM
+    # operation, not covered by the data-plane grant). The app's own
+    # runtime identity (used by build-and-deploy's Web App) never has DDL
+    # rights, ever.
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -60,14 +91,14 @@ jobs:
           --output migration.sql
 
       - name: Azure login as migrator (OIDC - no client secret)
-        # This identity now has ONE narrow RBAC role - 'SQL Security
-        # Manager' on the SQL server only (see Deploy-ManagedIdentities.ps1) -
-        # needed because the firewall-rule steps below are ARM operations,
-        # not covered by the separate SQL data-plane grant
-        # (db_ddladmin/db_datawriter) Deploy-AtlasDatabase.ps1 makes.
-        # allow-no-subscriptions stays as a safety net for Entra role-
-        # propagation delay (the identity may be too fresh for the role to
-        # be visible yet on the very first run after Deploy-ManagedIdentities.ps1) -
+        # This identity has ONE narrow RBAC role - 'SQL Security Manager'
+        # on the SQL server only (see Deploy-ManagedIdentities.ps1) - needed
+        # because the firewall-rule steps below are ARM operations, not
+        # covered by the separate SQL data-plane grant
+        # (db_ddladmin/db_datareader/db_datawriter) Deploy-AtlasDatabase.ps1
+        # makes. allow-no-subscriptions stays as a safety net for Entra
+        # role-propagation delay (the identity may be too fresh for the
+        # role to be visible yet right after Deploy-ManagedIdentities.ps1) -
         # same replication-lag pattern seen elsewhere in this project.
         uses: azure/login@v2
         with:
@@ -108,7 +139,7 @@ jobs:
             --name "github-actions-run-${{ github.run_id }}" || true
 
   build-and-deploy:
-    needs: migrate-database
+    needs: migrate-database   # transitively also waits on 'approval'
     runs-on: ubuntu-latest
     # Matches the federated credential's subject
     # (repo:<org>/<repo>:environment:production) - see Deploy-ManagedIdentities.ps1.

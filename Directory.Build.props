@@ -1,0 +1,17 @@
+<Project>
+
+  <!-- Settings every project in the solution shares.  Package versions are in Directory.Packages.props. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Company>Tangent Atlas</Company>
+    <Product>Tangent Atlas</Product>
+    <Copyright>Copyright © Tangent Atlas. All rights reserved.</Copyright>
+    <!-- Report the naming rules in .editorconfig as build warnings, not only in the editor. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

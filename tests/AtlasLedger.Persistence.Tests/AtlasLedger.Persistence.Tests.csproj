@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Database tests: the generated SQL Server writer and loader against a real SQL Server.  Each test creates its own
+    database, applies the schema project's migrations, and drops it afterwards.  The server is SQL Server LocalDB on
+    Windows, or the one named by the BELLEROPHON_SQL_SERVER environment variable (a connection string without a database);
+    without one, the tests are skipped and say why.
+  -->
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AtlasLedger.Server\AtlasLedger.Server.csproj" Aliases="server" />
+    <ProjectReference Include="..\..\src\AtlasLedger.Client\AtlasLedger.Client.csproj" Aliases="client" />
+    <ProjectReference Include="..\..\src\AtlasLedger.Schema\AtlasLedger.Schema.csproj" />
+  </ItemGroup>
+
+</Project>

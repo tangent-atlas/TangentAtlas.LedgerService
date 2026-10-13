@@ -1,12 +1,18 @@
+# Build output
 bin/
 obj/
-.vs/
-*.user
-*.suo
-.vscode/
 publish/
 
-# Secrets — NEVER commit
+# Visual Studio and VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Test output
+TestResults/
+
+# Secrets: never commit.  Configuration that differs by environment comes from the Azure container app's settings.
 appsettings.Production.json
 appsettings.Staging.json
 secrets.json

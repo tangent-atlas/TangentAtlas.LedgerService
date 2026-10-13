@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    End-to-end tests: the real server and the real client, in one process, over HTTP on a free local port.  The two
+    programs generate the same model namespaces (one as Primary, one as Replica), so each is referenced under an alias.
+  -->
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AtlasLedger.Server\AtlasLedger.Server.csproj" Aliases="server" />
+    <ProjectReference Include="..\..\src\AtlasLedger.Client\AtlasLedger.Client.csproj" Aliases="client" />
+  </ItemGroup>
+
+</Project>

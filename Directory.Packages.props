@@ -1,0 +1,29 @@
+<Project>
+
+  <!--
+    Every package version in the solution, in one place (central package management).  Projects name packages without
+    versions.  To move to a new Bellerophon release, change BellerophonVersion: the generator and its libraries are
+    released together and must match.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <BellerophonVersion>0.4.0</BellerophonVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Bellerophon, from nuget.org. -->
+    <PackageVersion Include="Bellerophon" Version="$(BellerophonVersion)" />
+    <PackageVersion Include="Bellerophon.Runtime" Version="$(BellerophonVersion)" />
+    <PackageVersion Include="Bellerophon.SqlServer" Version="$(BellerophonVersion)" />
+    <PackageVersion Include="Bellerophon.Rules" Version="$(BellerophonVersion)" />
+    <PackageVersion Include="Bellerophon.Rules.NRules" Version="$(BellerophonVersion)" />
+
+    <!-- The schema project's Entity Framework model and migrations. -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+
+    <!-- Tests: xunit.v3 on Microsoft Testing Platform v2, opted into by global.json. -->
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,3 @@
+# Test methods are named for the behavior they verify and are never called by code, so they carry no Async suffix.
+[*.cs]
+dotnet_naming_rule.async_methods_end_with_async.severity = none

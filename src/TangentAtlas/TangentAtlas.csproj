@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The enums and custom types the model's datatypes name.  Bellerophon does not generate these; it resolves them by name
+    from whatever the project references.
+  -->
+  <PropertyGroup>
+    <RootNamespace>AtlasLedger.Model</RootNamespace>
+  </PropertyGroup>
+
+</Project>

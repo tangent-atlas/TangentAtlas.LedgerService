@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Atlas Ledger client (the Replica role): commands that work with a running server through its API, using the
+    generated DTOs and contract headers, and a local copy of a tenant to navigate.  No ASP.NET Core.
+    It generates from the server's model file, so server and client always share one model.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AtlasLedger.Client</RootNamespace>
+    <BellerophonRole>Replica</BellerophonRole>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The server owns the model; the client generates from the same file. -->
+    <AdditionalFiles Include="..\AtlasLedger.Server\bellerophon.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Scripts that load a tenant's data. -->
+    <None Include="Data\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Bellerophon" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TangentAtlas\TangentAtlas.csproj" />
+  </ItemGroup>
+
+</Project>

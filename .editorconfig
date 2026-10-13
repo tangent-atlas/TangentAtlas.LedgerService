@@ -1,0 +1,62 @@
+# Naming conventions, enforced on every build (EnforceCodeStyleInBuild in Directory.Build.props).
+# They follow the .NET Framework Design Guidelines and StyleCop; see "Naming" in README.md for the full guideline.
+root = true
+
+[*.cs]
+
+# Report naming violations (IDE1006) during builds; each rule below sets its own severity.
+dotnet_diagnostic.IDE1006.severity = warning
+
+# Interfaces start with I.
+dotnet_naming_rule.interfaces_start_with_i.symbols = interfaces
+dotnet_naming_rule.interfaces_start_with_i.style = begins_with_i
+dotnet_naming_rule.interfaces_start_with_i.severity = warning
+
+# Methods marked async end with Async.
+dotnet_naming_rule.async_methods_end_with_async.symbols = async_methods
+dotnet_naming_rule.async_methods_end_with_async.style = ends_with_async
+dotnet_naming_rule.async_methods_end_with_async.severity = warning
+
+# Constants, including local constants, are PascalCase.
+dotnet_naming_rule.constants_are_pascal_case.symbols = constants
+dotnet_naming_rule.constants_are_pascal_case.style = pascal_case
+dotnet_naming_rule.constants_are_pascal_case.severity = warning
+
+# Static readonly fields are PascalCase (StyleCop SA1311).
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.style = pascal_case
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.severity = warning
+
+# Other private fields are camelCase, without underscores (StyleCop SA1306, SA1309).
+dotnet_naming_rule.private_fields_are_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_are_camel_case.style = camel_case
+dotnet_naming_rule.private_fields_are_camel_case.severity = warning
+
+# Parameters and locals are camelCase.
+dotnet_naming_rule.parameters_and_locals_are_camel_case.symbols = parameters_and_locals
+dotnet_naming_rule.parameters_and_locals_are_camel_case.style = camel_case
+dotnet_naming_rule.parameters_and_locals_are_camel_case.severity = warning
+
+# Types, members (including local functions, which are methods), and namespaces are PascalCase.
+dotnet_naming_rule.types_and_members_are_pascal_case.symbols = types_and_members
+dotnet_naming_rule.types_and_members_are_pascal_case.style = pascal_case
+dotnet_naming_rule.types_and_members_are_pascal_case.severity = warning
+
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_symbols.async_methods.applicable_kinds = method, local_function
+dotnet_naming_symbols.async_methods.required_modifiers = async
+dotnet_naming_symbols.constants.applicable_kinds = field, local
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.parameters_and_locals.applicable_kinds = parameter, local
+dotnet_naming_symbols.types_and_members.applicable_kinds = namespace, class, struct, enum, interface, delegate, method, local_function, property, event
+
+dotnet_naming_style.begins_with_i.required_prefix = I
+dotnet_naming_style.begins_with_i.capitalization = pascal_case
+dotnet_naming_style.ends_with_async.required_suffix = Async
+dotnet_naming_style.ends_with_async.capitalization = pascal_case
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+dotnet_naming_style.camel_case.capitalization = camel_case

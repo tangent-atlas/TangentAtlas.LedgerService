@@ -1,0 +1,124 @@
+{
+  "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
+  "datatypes": {
+    "accountType": "AtlasLedger.Model.AccountType",
+    "email": { "maxLength": 128, "type": "System.String" },
+    "guid": "System.Guid",
+    "nodeStatus": "AtlasLedger.Model.NodeStatus",
+    "nodeType": "AtlasLedger.Model.NodeType",
+    "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
+    "string": "System.String",
+    "time": "System.DateTimeOffset",
+    "userType": "AtlasLedger.Model.UserType"
+  },
+  "name": "Ledger",
+  "namespace": "AtlasLedger.Model",
+  "tables": {
+    "Account": {
+      "columns": {
+        "AccountId": "guid",
+        "AccountType": "accountType"
+      },
+      "key": ["AccountId"],
+      "references": {
+        "Node": { "columns": ["AccountId"] }
+      }
+    },
+    "Alert": {
+      "columns": {
+        "AlertId": "guid",
+        "Message": { "maxLength": 256, "type": "string" },
+        "NodeId": "guid",
+        "Rule": { "maxLength": 64, "type": "string" }
+      },
+      "description": "A compliance violation found by the rules: one per node and rule, removed when the rule is satisfied again.",
+      "key": ["AlertId"],
+      "references": {
+        "Node": { "columns": ["NodeId"], "onDelete": "Cascade" }
+      },
+      "unique": {
+        "Subject": { "columns": ["NodeId", "Rule"], "idempotent": true }
+      }
+    },
+    "Dossier": {
+      "access": { "read": ["Dossier.Read"], "write": ["Dossier.Write"] },
+      "columns": {
+        "PersonId": "guid"
+      },
+      "key": ["PersonId"],
+      "references": {
+        "Person": { "columns": ["PersonId"] }
+      },
+      "sync": false
+    },
+    "Edge": {
+      "columns": {
+        "ChildNodeId": "guid",
+        "ParentNodeId": "guid"
+      },
+      "key": ["ParentNodeId", "ChildNodeId"],
+      "references": {
+        "Child": { "columns": ["ChildNodeId"], "table": "Node" },
+        "Parent": { "columns": ["ParentNodeId"], "table": "Node" }
+      }
+    },
+    "Member": {
+      "columns": {
+        "PersonId": "guid?",
+        "UserId": "guid",
+        "UserType": "userType"
+      },
+      "facts": false,
+      "key": ["UserId"],
+      "references": {
+        "Person": { "columns": ["PersonId"] },
+        "User": { "columns": ["UserId"] }
+      }
+    },
+    "Node": {
+      "columns": {
+        "Description": "string?",
+        "DisplayName": { "maxLength": 16, "type": "string" },
+        "FullName": { "maxLength": 64, "type": "string" },
+        "NodeId": "guid",
+        "NodeStatus": "nodeStatus",
+        "NodeType": "nodeType"
+      },
+      "key": ["NodeId"]
+    },
+    "Person": {
+      "columns": {
+        "Email": "email",
+        "PersonId": "guid"
+      },
+      "key": ["PersonId"],
+      "references": {
+        "Node": { "columns": ["PersonId"] }
+      }
+    },
+    "Price": {
+      "columns": {
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Last": "price",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "The latest price of a symbol, from the market data feed. Ticks are ephemeral: never persisted, synced, or served by the API.",
+      "key": ["Scheme", "Code"],
+      "persistence": "Ephemeral"
+    },
+    "Symbol": {
+      "columns": {
+        "Code": { "maxLength": 32, "type": "string" },
+        "NodeId": "guid",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "key": ["Scheme", "Code"],
+      "references": {
+        "Node": { "columns": ["NodeId"] }
+      }
+    }
+  },
+  "version": "1.0"
+}

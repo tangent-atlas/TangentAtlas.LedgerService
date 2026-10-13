@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Walkthrough": {
+      "commandName": "Project",
+      "commandLineArgs": "walkthrough"
+    },
+    "Tenants": {
+      "commandName": "Project",
+      "commandLineArgs": "tenants --as advisor"
+    }
+  }
+}

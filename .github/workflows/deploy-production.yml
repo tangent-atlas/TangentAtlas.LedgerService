@@ -1,170 +1,154 @@
+# Releases the ledger server to production: build and test, migrate the database, then build the image and roll it out.
+#
+#   Trigger:  push to the 'production' branch  (git checkout production && git merge main && git push origin production)
+#             or run it by hand: Actions -> Deploy to Production -> Run workflow.
+#
+# Two identities, one per job, both trusted only for this repository's 'production' environment (federated credentials
+# made by TangentAtlas.Platform's Deploy-ManagedIdentities.ps1, which also sets the variables used here):
+#   - AZURE_MIGRATOR_CLIENT_ID  id-ledger-migrate-prod: DDL on the ledger database, and the SQL firewall.  Nothing else.
+#   - AZURE_CLIENT_ID           id-ledger-deploy-prod:  push to the registry, and update this one container app.  No SQL.
+# The server's own identity (id-ledger-prod) reads and writes rows and never has DDL rights.
 name: Deploy to Production
 
-# TEMPORARY branch-based gate, deliberately chosen for simplicity over the
-# next 2-3 months rather than paying for GitHub Team's required-PR-review
-# branch protection right now. Deploys on every push to the 'production'
-# branch specifically - main itself does NOT trigger this, so an ordinary
-# push to main is inert here. Promote code to production with:
-#   git checkout production && git merge main && git push origin production
-# workflow_dispatch stays available too, as a manual re-run/fallback path -
-# harmless to keep alongside the branch trigger.
-#
-# THE HONEST TRADE-OFF: a merge into 'production' is a deliberate action,
-# but it is NOT a reviewed one - anyone with push access can do it alone,
-# same as clicking workflow_dispatch could. This is knowingly accepted for
-# now, given team size and the pre-revenue stage. Revisit once the org
-# upgrades to GitHub Team: switch back to a single `main` branch, add
-# required-PR-review branch protection there (Settings -> Branches ->
-# main -> Require a pull request before merging -> Require approvals,
-# with Include administrators on), and delete the 'staging'/'production'
-# branches entirely - deploy-staging.yml/deploy-production.yml would
-# revert to triggering off `main` and workflow_dispatch respectively, the
-# way they did before this change.
 on:
   push:
     branches: [production]
   workflow_dispatch:
 
 permissions:
-  id-token: write   # required for OIDC login - no client secret anywhere
+  id-token: write   # OIDC sign-in to Azure; no secret anywhere
   contents: read
 
+# One release at a time; a second waits rather than cancelling a migration halfway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 env:
-  AZURE_WEBAPP_NAME: website-tangentatlas-ledger-production
-  SQL_SERVER_NAME: sqlserver-tangentatlas-platform-production
-  SQL_DATABASE_NAME: database-tangentatlas-ledger-production
-  SQL_RESOURCE_GROUP: resourcegroup-tangentatlas-production
   DOTNET_VERSION: '10.0.x'
+  RESOURCE_GROUP: rg-platform-prod
+  SQL_SERVER: sql-tangentatlas-prod
+  SQL_DATABASE: sqldb-ledger-prod
+  REGISTRY: crtangentatlasprod
+  CONTAINER_APP: ca-ledger-prod
+  CONTAINER_NAME: atlasledger-server
+  IMAGE_NAME: atlasledger-server
 
 jobs:
-  migrate-database:
-    # Runs BEFORE deploy, deliberately, using a SEPARATE identity from the
-    # one that deploys code below - see Deploy-ManagedIdentities.ps1's
-    # migrator entries. That identity never touches the Web App at all; its
-    # only privilege is db_ddladmin/db_datareader/db_datawriter on this one
-    # database (Deploy-AtlasDatabase.ps1) plus 'SQL Security Manager' on the
-    # SQL server itself, for the firewall-rule steps below (an ARM
-    # operation, not covered by the data-plane grant). The app's own
-    # runtime identity (used by build-and-deploy's Web App) never has DDL
-    # rights, ever.
+  build:
+    name: Build and test
     runs-on: ubuntu-latest
-    environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore pinned dotnet tools (dotnet-ef)
-        run: dotnet tool restore
+      - name: Build
+        run: dotnet build TangentAtlas.LedgerService.sln --configuration Release
 
-      - name: Restore project dependencies
-        # Separate from the tool restore above - this restores
-        # TangentAtlas.LedgerService's own NuGet package references
-        # (AtlasLedger.Model, EF Core, etc.), without which `dotnet ef`
-        # has no project.assets.json to load and fails with NETSDK1004.
-        run: dotnet restore TangentAtlas.LedgerService/TangentAtlas.LedgerService.csproj
+      # The SQL Server tests skip here: they need LocalDB (Windows) or a server named by BELLEROPHON_SQL_SERVER.
+      - name: Test
+        run: dotnet test --solution TangentAtlas.LedgerService.sln --configuration Release --no-build
 
-      - name: Generate idempotent migration script
-        # No live database connection needed here - this only reads the
-        # compiled Migration classes (from AtlasLedger.Model, via
-        # LedgerContextFactory's design-time construction) and emits SQL
-        # text. Deliberately does NOT touch this app's own Program.cs
-        # hosting/auth setup - that's the whole point of the factory.
-        run: >
-          dotnet ef migrations script --idempotent
-          --project TangentAtlas.LedgerService/TangentAtlas.LedgerService.csproj
-          --output migration.sql
+  migrate:
+    name: Migrate the database
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
 
-      - name: Azure login as migrator (OIDC - no client secret)
-        # This identity has ONE narrow RBAC role - 'SQL Security Manager'
-        # on the SQL server only (see Deploy-ManagedIdentities.ps1) - needed
-        # because the firewall-rule steps below are ARM operations, not
-        # covered by the separate SQL data-plane grant
-        # (db_ddladmin/db_datareader/db_datawriter) Deploy-AtlasDatabase.ps1
-        # makes. allow-no-subscriptions stays as a safety net for Entra
-        # role-propagation delay (the identity may be too fresh for the
-        # role to be visible yet right after Deploy-ManagedIdentities.ps1) -
-        # same replication-lag pattern seen elsewhere in this project.
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: |
+          dotnet tool restore
+          dotnet build TangentAtlas.LedgerService.sln --configuration Release
+
+      - name: Sign in to Azure as the migrator
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_MIGRATOR_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          allow-no-subscriptions: true
 
-      - name: Allow this runner through the SQL firewall (temporary)
-        # GitHub-hosted runners are NOT covered by Azure SQL's "Allow Azure
-        # services" exception - that only covers Azure-hosted compute. This
-        # rule is scoped to just this run's own IP and removed in the
-        # cleanup step below, regardless of outcome (if: always()).
+      # GitHub's runners are not "Azure services" to the SQL firewall: let this run's address in, and only for this run.
+      - name: Open the SQL firewall to this runner
         run: |
-          RUNNER_IP=$(curl -s https://api.ipify.org)
-          az sql server firewall-rule create \
-            --resource-group "${{ env.SQL_RESOURCE_GROUP }}" \
-            --server "${{ env.SQL_SERVER_NAME }}" \
-            --name "github-actions-run-${{ github.run_id }}" \
+          RUNNER_IP=$(curl --silent --fail https://api.ipify.org)
+          az sql server firewall-rule create --only-show-errors --output none \
+            --resource-group "$RESOURCE_GROUP" --server "$SQL_SERVER" \
+            --name "github-run-${{ github.run_id }}" \
             --start-ip-address "$RUNNER_IP" --end-ip-address "$RUNNER_IP"
 
-      - name: Apply migration
-        shell: pwsh
-        run: |
-          Install-Module SqlServer -Force -Scope CurrentUser -AllowClobber
-          $accessToken = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
-          Invoke-Sqlcmd -ServerInstance "${{ env.SQL_SERVER_NAME }}.database.windows.net" `
-            -Database "${{ env.SQL_DATABASE_NAME }}" `
-            -AccessToken $accessToken `
-            -InputFile "migration.sql"
+      # Entity Framework applies any migration not yet in __EFMigrationsHistory; none pending is a no-op.  The token comes
+      # from the Azure CLI session above (Active Directory Default), so the connection string holds no secret.
+      - name: Apply the migrations
+        env:
+          LEDGER_SCHEMA_CONNECTION: Server=tcp:${{ env.SQL_SERVER }}.database.windows.net,1433;Database=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True
+        run: dotnet ef database update --project src/AtlasLedger.Schema --configuration Release --no-build
 
-      - name: Remove temporary firewall rule
+      # Creates the writer's table types, which the server's identity is not allowed to create.
+      - name: Prepare the database
+        env:
+          ConnectionStrings__Ledger: Server=tcp:${{ env.SQL_SERVER }}.database.windows.net,1433;Database=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True
+        run: dotnet run --project src/AtlasLedger.Server --configuration Release --no-build --no-launch-profile -- prepare-database
+
+      - name: Close the SQL firewall
         if: always()
         run: |
-          az sql server firewall-rule delete \
-            --resource-group "${{ env.SQL_RESOURCE_GROUP }}" \
-            --server "${{ env.SQL_SERVER_NAME }}" \
-            --name "github-actions-run-${{ github.run_id }}" || true
+          az sql server firewall-rule delete --only-show-errors \
+            --resource-group "$RESOURCE_GROUP" --server "$SQL_SERVER" \
+            --name "github-run-${{ github.run_id }}" || true
 
-  build-and-deploy:
-    needs: migrate-database   # transitively also waits on 'approval'
+  deploy:
+    name: Build the image and deploy
+    needs: migrate
     runs-on: ubuntu-latest
-    # Matches the federated credential's subject
-    # (repo:<org>/<repo>:environment:production) - see Deploy-ManagedIdentities.ps1.
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --configuration Release --no-restore
-
-      - name: Test
-        run: dotnet test --configuration Release --no-build
-
-      - name: Publish
-        run: >
-          dotnet publish TangentAtlas.LedgerService/TangentAtlas.LedgerService.csproj
-          --configuration Release
-          --no-build
-          --output ${{ github.workspace }}/publish
-
-      - name: Azure login (OIDC - no client secret)
+      - name: Sign in to Azure as the deployer
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          package: ${{ github.workspace }}/publish
+      # Tagged with the commit, so every running revision traces back to the exact source it was built from.
+      - name: Build and push the image
+        run: |
+          IMAGE="$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
+          az acr login --name "$REGISTRY"
+          docker build --file src/AtlasLedger.Server/Dockerfile --tag "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Roll out the new image
+        run: |
+          az extension add --name containerapp --upgrade --only-show-errors
+          az containerapp update --only-show-errors --output none \
+            --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
+            --container-name "$CONTAINER_NAME" \
+            --image "$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
+
+      # The ingress admits only the operator's address, so the runner cannot call /health; Container Apps reports instead
+      # whether the new revision started and passed its probes.  A server that cannot load its tenants never becomes ready.
+      - name: Wait for the new revision
+        run: |
+          for attempt in $(seq 1 30); do
+            read -r LATEST READY <<< "$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
+              --query '[properties.latestRevisionName, properties.latestReadyRevisionName]' --output tsv | tr '\n' ' ')"
+            if [ -n "$LATEST" ] && [ "$LATEST" = "$READY" ]; then
+              echo "Revision $LATEST is ready."
+              exit 0
+            fi
+            echo "Waiting for $LATEST (ready: ${READY:-none})..."
+            sleep 10
+          done
+          echo "::error::Revision $LATEST did not become ready in 5 minutes. Its logs: az containerapp logs show --name $CONTAINER_APP --resource-group $RESOURCE_GROUP --revision $LATEST --type console"
+          exit 1

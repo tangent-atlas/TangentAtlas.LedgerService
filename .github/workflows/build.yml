@@ -1,0 +1,33 @@
+# Builds and tests every push to main and every pull request, with Bellerophon's packages from nuget.org.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build TangentAtlas.LedgerService.sln --configuration Release
+
+      # The SQL Server tests skip here: they need LocalDB (Windows) or a server named by BELLEROPHON_SQL_SERVER.
+      - name: Test
+        run: dotnet test --solution TangentAtlas.LedgerService.sln --configuration Release --no-build
+
+      # Proves the migrations still produce a script, which the release pipeline will apply to Azure SQL.
+      - name: Migration script
+        run: |
+          dotnet tool restore
+          dotnet ef migrations script --idempotent --project src/AtlasLedger.Schema --configuration Release --no-build --output artifacts/migrate.sql

@@ -252,7 +252,6 @@ namespace AtlasLedger.Persistence.Tests
             {
                 "--environment", "Development",
                 "--urls", "http://127.0.0.1:0",
-                "--MarketFeed:Enabled=false",
                 "--Logging:LogLevel:Default=None",
                 $"--ConnectionStrings:Ledger={test.ConnectionString}",
             };

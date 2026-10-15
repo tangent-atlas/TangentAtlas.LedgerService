@@ -11,13 +11,14 @@ namespace AtlasLedger.Server.Market
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Switches;
     using Microsoft.Extensions.Hosting;
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.Options;
 
     /// <summary>
     /// Stands in for the market data feed: prices every symbol any tenant holds with a random walk, and now and then sends
-    /// a bad print.
+    /// a bad print.  It runs only while its switch (<see cref="ServiceSwitchboard.MarketFeed"/>) is on.
     /// </summary>
     /// <remarks>
     /// A real feed replaces this class and nothing else.  Prices go straight into each holding tenant's lock-free price
@@ -32,6 +33,8 @@ namespace AtlasLedger.Server.Market
 
         private readonly MarketFeedOptions options;
 
+        private readonly ServiceSwitch serviceSwitch;
+
         private readonly TimeProvider timeProvider;
 
         private readonly ILogger<SimulatedMarketFeed> logger;
@@ -43,11 +46,13 @@ namespace AtlasLedger.Server.Market
         /// </summary>
         /// <param name="ledger">The ledger.</param>
         /// <param name="options">The feed's settings.</param>
+        /// <param name="switchboard">The services' switches.</param>
         /// <param name="logger">The logger.</param>
-        public SimulatedMarketFeed(Ledger ledger, IOptions<MarketFeedOptions> options, ILogger<SimulatedMarketFeed> logger)
+        public SimulatedMarketFeed(Ledger ledger, IOptions<MarketFeedOptions> options, ServiceSwitchboard switchboard, ILogger<SimulatedMarketFeed> logger)
         {
             this.ledger = ledger;
             this.options = options.Value;
+            this.serviceSwitch = switchboard[ServiceSwitchboard.MarketFeed];
             this.timeProvider = TimeProvider.System;
             this.logger = logger;
         }
@@ -55,27 +60,41 @@ namespace AtlasLedger.Server.Market
         /// <inheritdoc/>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (!this.options.Enabled)
-            {
-                return;
-            }
-
-            var nextBadPrint = this.timeProvider.GetUtcNow() + this.options.BadPrintInterval;
-            using var timer = new PeriodicTimer(this.options.TickInterval, this.timeProvider);
             try
             {
-                while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    var now = this.timeProvider.GetUtcNow();
-                    var isBadPrint = this.options.BadPrintInterval > TimeSpan.Zero && now >= nextBadPrint;
-                    if (this.Tick(now, isBadPrint))
+                    if (!this.serviceSwitch.IsOn)
                     {
-                        nextBadPrint = now + this.options.BadPrintInterval;
+                        await this.serviceSwitch.WaitForChangeAsync(stoppingToken).ConfigureAwait(false);
+                        continue;
                     }
+
+                    this.LogSwitchedOn(this.serviceSwitch.OnUntil);
+                    await this.RunWhileOnAsync(stoppingToken).ConfigureAwait(false);
+                    this.LogSwitchedOff();
                 }
             }
             catch (OperationCanceledException)
             {
+            }
+        }
+
+        /// <summary>
+        /// Ticks until the switch is off; it is checked every tick, so the feed stops within one tick interval.
+        /// </summary>
+        private async Task RunWhileOnAsync(CancellationToken stoppingToken)
+        {
+            var nextBadPrint = this.timeProvider.GetUtcNow() + this.options.BadPrintInterval;
+            using var timer = new PeriodicTimer(this.options.TickInterval, this.timeProvider);
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false) && this.serviceSwitch.IsOn)
+            {
+                var now = this.timeProvider.GetUtcNow();
+                var isBadPrint = this.options.BadPrintInterval > TimeSpan.Zero && now >= nextBadPrint;
+                if (this.Tick(now, isBadPrint))
+                {
+                    nextBadPrint = now + this.options.BadPrintInterval;
+                }
             }
         }
 
@@ -130,6 +149,12 @@ namespace AtlasLedger.Server.Market
 
             return isBadPrint;
         }
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Market feed: switched on until {OnUntil}.")]
+        private partial void LogSwitchedOn(DateTimeOffset? onUntil);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Market feed: switched off.")]
+        private partial void LogSwitchedOff();
 
         [LoggerMessage(Level = LogLevel.Warning, Message = "Market feed: bad print for {Scheme}:{Code} (price 0); corrected on the next tick.")]
         private partial void LogBadPrint(string scheme, string code);

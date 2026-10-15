@@ -89,7 +89,6 @@ namespace AtlasLedger.Tests
                 "--environment", "Development",
                 "--urls", "http://127.0.0.1:0",
                 "--Batch:MaximumOperations=3",
-                "--MarketFeed:Enabled=false",
                 "--Logging:LogLevel:Default=None",
             });
             await limited.StartAsync(cancellationToken);

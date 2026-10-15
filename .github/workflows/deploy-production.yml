@@ -86,17 +86,31 @@ jobs:
             --start-ip-address "$RUNNER_IP" --end-ip-address "$RUNNER_IP"
 
       # Entity Framework applies any migration not yet in __EFMigrationsHistory; none pending is a no-op.  The token comes
-      # from the Azure CLI session above (Active Directory Default), so the connection string holds no secret.
+      # from the Azure CLI session above (Active Directory Default), so the connection string holds no secret.  The
+      # database may be paused (auto-pause): the first connections fail while it resumes, up to about a minute, so the
+      # step tries again for up to two minutes.  Both this step and the next are safe to repeat.
       - name: Apply the migrations
         env:
           LEDGER_SCHEMA_CONNECTION: Server=tcp:${{ env.SQL_SERVER }}.database.windows.net,1433;Database=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True
-        run: dotnet ef database update --project src/AtlasLedger.Schema --configuration Release --no-build
+        run: |
+          for attempt in 1 2 3 4 5 6 7; do
+            dotnet ef database update --project src/AtlasLedger.Schema --configuration Release --no-build && exit 0
+            echo "Attempt $attempt failed; the database may be resuming. Trying again in 20 seconds..."
+            sleep 20
+          done
+          exit 1
 
       # Creates the writer's table types, which the server's identity is not allowed to create.
       - name: Prepare the database
         env:
           ConnectionStrings__Ledger: Server=tcp:${{ env.SQL_SERVER }}.database.windows.net,1433;Database=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True
-        run: dotnet run --project src/AtlasLedger.Server --configuration Release --no-build --no-launch-profile -- prepare-database
+        run: |
+          for attempt in 1 2 3 4 5 6 7; do
+            dotnet run --project src/AtlasLedger.Server --configuration Release --no-build --no-launch-profile -- prepare-database && exit 0
+            echo "Attempt $attempt failed; the database may be resuming. Trying again in 20 seconds..."
+            sleep 20
+          done
+          exit 1
 
       - name: Close the SQL firewall
         if: always()

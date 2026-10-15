@@ -7,7 +7,7 @@ namespace AtlasLedger.Server.Market
     using System;
 
     /// <summary>
-    /// Settings for the simulated market data feed.
+    /// Settings for the simulated market data feed.  Whether it runs is not a setting: it runs while its switch is on.
     /// </summary>
     public sealed class MarketFeedOptions
     {
@@ -15,11 +15,6 @@ namespace AtlasLedger.Server.Market
         /// The settings section.
         /// </summary>
         public const string SectionName = "MarketFeed";
-
-        /// <summary>
-        /// Gets or sets a value indicating whether the feed runs.
-        /// </summary>
-        public bool Enabled { get; set; } = true;
 
         /// <summary>
         /// Gets or sets the time between ticks; each tick prices every held symbol.

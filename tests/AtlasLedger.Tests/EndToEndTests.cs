@@ -50,6 +50,18 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
+        /// The server says which build it is, without signing in: "development" when not built by the pipeline.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task TheServerReportsItsBuild()
+        {
+            using var response = await this.server.HttpClient.GetAsync("version", TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("development", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        /// <summary>
         /// A script exported from one tenant loads into another unchanged, and exporting that tenant gives the same rows.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>

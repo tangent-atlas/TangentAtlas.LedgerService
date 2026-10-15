@@ -6,7 +6,8 @@
 # Two identities, one per job, both trusted only for this repository's 'production' environment (federated credentials
 # made by TangentAtlas.Platform's Deploy-ManagedIdentities.ps1, which also sets the variables used here):
 #   - AZURE_MIGRATOR_CLIENT_ID  id-ledger-migrate-prod: DDL on the ledger database, and the SQL firewall.  Nothing else.
-#   - AZURE_CLIENT_ID           id-ledger-deploy-prod:  push to the registry, and update this one container app.  No SQL.
+#   - AZURE_CLIENT_ID           id-ledger-deploy-prod:  push to the registry, and point this one web app at the new image.
+#                                                       No SQL.
 # The server's own identity (id-ledger-prod) reads and writes rows and never has DDL rights.
 name: Deploy to Production
 
@@ -30,8 +31,7 @@ env:
   SQL_SERVER: sql-tangentatlas-prod
   SQL_DATABASE: sqldb-ledger-prod
   REGISTRY: crtangentatlasprod
-  CONTAINER_APP: ca-ledger-prod
-  CONTAINER_NAME: atlasledger-server
+  WEB_APP: app-tangentatlas-ledger-prod
   IMAGE_NAME: atlasledger-server
 
 jobs:
@@ -134,35 +134,51 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      # Tagged with the commit, so every running revision traces back to the exact source it was built from.
+      # Tagged with the commit, and the commit baked in (served at /version), so every running server traces back to the
+      # exact source it was built from.
       - name: Build and push the image
         run: |
           IMAGE="$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
           az acr login --name "$REGISTRY"
-          docker build --file src/AtlasLedger.Server/Dockerfile --tag "$IMAGE" .
+          docker build --file src/AtlasLedger.Server/Dockerfile --build-arg LEDGER_COMMIT=${{ github.sha }} --tag "$IMAGE" .
           docker push "$IMAGE"
 
+      # App Service pulls the image with the server's identity, starts it, and switches traffic once it answers.
       - name: Roll out the new image
         run: |
-          az extension add --name containerapp --upgrade --only-show-errors
-          az containerapp update --only-show-errors --output none \
-            --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-            --container-name "$CONTAINER_NAME" \
-            --image "$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
+          az webapp config set --only-show-errors --output none \
+            --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
+            --linux-fx-version "DOCKER|$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
 
-      # The ingress admits only the operator's address, so the runner cannot call /health; Container Apps reports instead
-      # whether the new revision started and passed its probes.  A server that cannot load its tenants never becomes ready.
-      - name: Wait for the new revision
+      # The app admits only the operator's address, so let this runner in for the check, and only for this run.
+      - name: Let this runner reach the app (temporary)
         run: |
-          for attempt in $(seq 1 30); do
-            read -r LATEST READY <<< "$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-              --query '[properties.latestRevisionName, properties.latestReadyRevisionName]' --output tsv | tr '\n' ' ')"
-            if [ -n "$LATEST" ] && [ "$LATEST" = "$READY" ]; then
-              echo "Revision $LATEST is ready."
+          RUNNER_IP=$(curl --silent --fail https://api.ipify.org)
+          az webapp config access-restriction add --only-show-errors --output none \
+            --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
+            --rule-name "github-run-${{ github.run_id }}" --action Allow --priority 200 \
+            --ip-address "$RUNNER_IP/32"
+
+      # Done when /version answers with this commit: the new server has loaded its tenants and is the one serving.
+      # A server that cannot load its tenants never answers, and the check fails after ten minutes.
+      - name: Wait for the new server
+        run: |
+          HOST=$(az webapp show --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" --query defaultHostName --output tsv)
+          for attempt in $(seq 1 60); do
+            RUNNING=$(curl --silent --max-time 10 "https://$HOST/version" || true)
+            if [ "$RUNNING" = "${{ github.sha }}" ]; then
+              echo "https://$HOST is running ${{ github.sha }}."
               exit 0
             fi
-            echo "Waiting for $LATEST (ready: ${READY:-none})..."
+            echo "Waiting: https://$HOST answers '${RUNNING:-nothing}'..."
             sleep 10
           done
-          echo "::error::Revision $LATEST did not become ready in 5 minutes. Its logs: az containerapp logs show --name $CONTAINER_APP --resource-group $RESOURCE_GROUP --revision $LATEST --type console"
+          echo "::error::The new build did not start within ten minutes. Its logs: portal, $WEB_APP, Log stream; or az webapp log tail --name $WEB_APP --resource-group $RESOURCE_GROUP"
           exit 1
+
+      - name: Remove this runner's access
+        if: always()
+        run: |
+          az webapp config access-restriction remove --only-show-errors --output none \
+            --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
+            --rule-name "github-run-${{ github.run_id }}" || true

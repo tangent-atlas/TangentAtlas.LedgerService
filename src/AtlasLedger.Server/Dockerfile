@@ -1,6 +1,6 @@
 # The Atlas Ledger server's container image.  Build from the repository root, which is the build context:
 #
-#   az acr build --registry crtangentatlasprod --image atlasledger-server:<tag> --file src/AtlasLedger.Server/Dockerfile .
+#   docker build --file src/AtlasLedger.Server/Dockerfile --build-arg LEDGER_COMMIT=<sha> --tag <registry>/atlasledger-server:<sha> .
 #
 # Bellerophon's packages come from nuget.org during the restore; nothing from the Bellerophon repository is needed.
 
@@ -10,6 +10,9 @@ COPY . .
 RUN dotnet publish src/AtlasLedger.Server/AtlasLedger.Server.csproj --configuration Release --output /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# The commit this image was built from (docker build --build-arg LEDGER_COMMIT=<sha>), served at /version.
+ARG LEDGER_COMMIT=development
+ENV LEDGER_COMMIT=$LEDGER_COMMIT
 WORKDIR /app
 COPY --from=build /app .
 EXPOSE 8080

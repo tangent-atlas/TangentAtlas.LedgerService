@@ -36,6 +36,11 @@ namespace AtlasLedger.Server
     public static class AtlasLedgerServer
     {
         /// <summary>
+        /// The environment variable holding the commit the server's image was built from.
+        /// </summary>
+        public const string CommitVariable = "LEDGER_COMMIT";
+
+        /// <summary>
         /// Builds the server, ready to run.
         /// </summary>
         /// <param name="args">Command-line arguments, which override the settings files: for example <c>--urls http://127.0.0.1:0</c>.</param>
@@ -121,6 +126,11 @@ namespace AtlasLedger.Server
             }
 
             application.MapHealthChecks("/health");
+
+            // The commit the running image was built from (LEDGER_COMMIT, set by the Dockerfile), so a deployment can confirm
+            // the new build is the one answering.  Anonymous like /health: a commit ID reveals nothing about any tenant.
+            var commit = Environment.GetEnvironmentVariable(CommitVariable) is { Length: > 0 } built ? built : "development";
+            application.MapGet("/version", () => commit).AllowAnonymous();
             application.UseLedgerContract();
             application.UseAuthentication();
             application.UseAuthorization();

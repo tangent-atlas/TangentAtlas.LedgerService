@@ -5,6 +5,8 @@
 namespace AtlasLedger.Client
 {
     using System;
+    using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Net;
@@ -181,5 +183,64 @@ namespace AtlasLedger.Client
                 output.WriteLine($"Not copied (not allowed): {string.Join(", ", forbidden)}.");
             }
         }
+
+        /// <summary>
+        /// Shows the server's optional services, or turns them on for a while or off: <c>services</c>, <c>services on
+        /// [name...] [--for hours]</c>, <c>services off [name...]</c>.  With no names, every service.
+        /// </summary>
+        /// <param name="api">The API, as an allowed tool.</param>
+        /// <param name="action"><c>status</c>, <c>on</c>, or <c>off</c>.</param>
+        /// <param name="names">The services; empty for every service.</param>
+        /// <param name="duration">How long to stay on; null for the server's default (four hours).</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the command is done.</returns>
+        public static async Task ServicesAsync(LedgerApiClient api, string action, IReadOnlyList<string> names, TimeSpan? duration, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(names);
+            ArgumentNullException.ThrowIfNull(output);
+            var services = await api.GetServicesAsync(cancellationToken).ConfigureAwait(false);
+            if (action is "on" or "off")
+            {
+                var chosen = names.Count == 0 ? services.Select(service => service.Name).ToList() : names;
+                var changed = new List<ServiceState>();
+                foreach (var name in chosen)
+                {
+                    changed.Add(await api.SetServiceAsync(name, action == "on", duration, cancellationToken).ConfigureAwait(false));
+                }
+
+                services = services.Select(service => changed.FirstOrDefault(each => string.Equals(each.Name, service.Name, StringComparison.OrdinalIgnoreCase)) ?? service).ToList();
+            }
+
+            var width = services.Count == 0 ? 0 : services.Max(service => service.Name.Length);
+            foreach (var service in services)
+            {
+                var state = service.OnUntil is { } until
+                    ? $"on until {until.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)} ({Remaining(until - DateTimeOffset.Now)} left)"
+                    : "off";
+                output.WriteLine($"{service.Name.PadRight(width)}  {state,-40}  {service.Description}");
+            }
+        }
+
+        /// <summary>
+        /// Reads a duration: hours as a number (<c>4</c>, <c>0.5</c>), or hours:minutes[:seconds] (<c>1:30</c>).
+        /// </summary>
+        /// <param name="text">The text.</param>
+        /// <param name="duration">The duration, if the text is one.</param>
+        /// <returns>True if the text is a duration longer than zero.</returns>
+        public static bool TryParseDuration(string text, out TimeSpan duration)
+        {
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var hours) && hours > 0 && hours < TimeSpan.MaxValue.TotalHours)
+            {
+                duration = TimeSpan.FromHours(hours);
+                return true;
+            }
+
+            return TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out duration) && duration > TimeSpan.Zero;
+        }
+
+        private static string Remaining(TimeSpan remaining) =>
+            remaining.TotalHours >= 1 ? $"{(int)remaining.TotalHours}h {remaining.Minutes:00}m" : $"{Math.Max(0, remaining.Minutes)}m";
     }
 }

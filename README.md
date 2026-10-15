@@ -42,3 +42,20 @@ dotnet ef database update --project src/AtlasLedger.Schema
 ```
 
 The server refuses to start outside the Development environment until bearer-token authentication is wired in.
+
+## Services: on while you work, off otherwise
+
+The base system (the API, persistence, and recovery) always runs.  The services on top of it, the market feed and
+compliance, run only while switched on, and every switch starts off, so an idle server does no work and its database
+can pause.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
+
+```
+dotnet run --project src/AtlasLedger.Client -- services                  # which are on, and until when
+dotnet run --project src/AtlasLedger.Client -- services on               # all, for four hours
+dotnet run --project src/AtlasLedger.Client -- services on compliance --for 1.5
+dotnet run --project src/AtlasLedger.Client -- services off              # all
+```
+
+Set `ATLAS_LEDGER_SERVER` (or pass `--server`) to reach the server in Azure.  The walkthrough turns on what it needs and
+turns it off again when it finishes.  The API is `v1/system/services`, the one route outside a tenant: only an allowed
+tool acting as itself may use it, and anyone else signed in gets 404.

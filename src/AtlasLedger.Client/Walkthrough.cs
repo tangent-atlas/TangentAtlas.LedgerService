@@ -39,6 +39,12 @@ namespace AtlasLedger.Client
 
         private readonly TextWriter output;
 
+        /// <summary>
+        /// How long the walkthrough turns services on for: long enough to finish, short enough to expire soon if it is
+        /// interrupted before it can turn them off.
+        /// </summary>
+        private static readonly TimeSpan ServiceDuration = TimeSpan.FromMinutes(15);
+
         private readonly TimeSpan marketWait;
 
         private readonly Guid firmA = Guid.NewGuid();
@@ -79,16 +85,69 @@ namespace AtlasLedger.Client
             this.failures = 0;
             await this.tool.WaitUntilReadyAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
             this.output.WriteLine($"Model {Ledger.ModelName} {Ledger.Version} ({Ledger.Fingerprint}). Firm A {this.firmA}, firm B {this.firmB}, firm C {this.firmC}.");
-            await this.LoadAsync(cancellationToken).ConfigureAwait(false);
-            await this.AdvisorAsync(cancellationToken).ConfigureAwait(false);
-            await this.BatchesAsync(cancellationToken).ConfigureAwait(false);
-            await this.ExportAndImportAsync(cancellationToken).ConfigureAwait(false);
-            await this.ComplianceAsync(cancellationToken).ConfigureAwait(false);
-            await this.MarketAsync(cancellationToken).ConfigureAwait(false);
-            await this.MirrorAsync(cancellationToken).ConfigureAwait(false);
+            var switchedOn = await this.ServicesOnAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await this.LoadAsync(cancellationToken).ConfigureAwait(false);
+                await this.AdvisorAsync(cancellationToken).ConfigureAwait(false);
+                await this.BatchesAsync(cancellationToken).ConfigureAwait(false);
+                await this.ExportAndImportAsync(cancellationToken).ConfigureAwait(false);
+                await this.ComplianceAsync(cancellationToken).ConfigureAwait(false);
+                await this.MarketAsync(cancellationToken).ConfigureAwait(false);
+                await this.MirrorAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                await this.ServicesOffAsync(switchedOn, CancellationToken.None).ConfigureAwait(false);
+            }
+
             this.output.WriteLine();
             this.output.WriteLine(this.failures == 0 ? "Every step got what it expected." : $"{this.failures} step(s) did not get what they expected.");
             return this.failures;
+        }
+
+        /// <summary>
+        /// Turns on, for the walkthrough, the services that are off: compliance and the market feed.
+        /// </summary>
+        /// <returns>The services this walkthrough turned on, to turn off again at the end.</returns>
+        private async Task<IReadOnlyList<string>> ServicesOnAsync(CancellationToken cancellationToken)
+        {
+            this.Section("Services: the tool turns on the market feed and compliance for the walkthrough:");
+            await this.StepAsync("Advisor asks for the services (only tools may: hidden)", HttpStatusCode.NotFound, () => this.advisor.GetServicesAsync(cancellationToken)).ConfigureAwait(false);
+            var services = await this.StepAsync("Tool lists the services", HttpStatusCode.OK, () => this.tool.GetServicesAsync(cancellationToken)).ConfigureAwait(false);
+            var switchedOn = new List<string>();
+            foreach (var service in services ?? Array.Empty<ServiceState>())
+            {
+                if (service.IsOn)
+                {
+                    this.output.WriteLine($"  {service.Name} is already on; left as it is.");
+                    continue;
+                }
+
+                var state = await this.StepAsync($"Tool turns on {service.Name} for {ServiceDuration.TotalMinutes:0} minutes", HttpStatusCode.OK, () => this.tool.SetServiceAsync(service.Name, true, ServiceDuration, cancellationToken)).ConfigureAwait(false);
+                this.Expect(state?.IsOn == true, $"{service.Name} is on");
+                switchedOn.Add(service.Name);
+            }
+
+            return switchedOn;
+        }
+
+        /// <summary>
+        /// Turns off the services the walkthrough turned on, so it leaves the server as it found it.
+        /// </summary>
+        private async Task ServicesOffAsync(IReadOnlyList<string> switchedOn, CancellationToken cancellationToken)
+        {
+            if (switchedOn.Count == 0)
+            {
+                return;
+            }
+
+            this.Section("Services: the tool turns off what the walkthrough turned on:");
+            foreach (var name in switchedOn)
+            {
+                var state = await this.StepAsync($"Tool turns off {name}", HttpStatusCode.OK, () => this.tool.SetServiceAsync(name, false, null, cancellationToken)).ConfigureAwait(false);
+                this.Expect(state?.IsOn == false, $"{name} is off");
+            }
         }
 
         private async Task LoadAsync(CancellationToken cancellationToken)

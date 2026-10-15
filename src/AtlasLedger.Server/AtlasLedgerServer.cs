@@ -13,6 +13,7 @@ namespace AtlasLedger.Server
     using AtlasLedger.Server.Market;
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
+    using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
     using Bellerophon.Runtime;
     using Bellerophon.Rules.NRules;
@@ -20,6 +21,7 @@ namespace AtlasLedger.Server
     using Microsoft.AspNetCore.Builder;
     using Microsoft.Extensions.Configuration;
     using Microsoft.Extensions.DependencyInjection;
+    using Microsoft.Extensions.DependencyInjection.Extensions;
     using Microsoft.Extensions.Hosting;
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.Options;
@@ -73,6 +75,13 @@ namespace AtlasLedger.Server
             builder.Services.AddHostedService<LedgerRecovery>();
             builder.Services.AddHostedService<LedgerFlusher>();
 
+            // The services on top of the base system (the market feed and compliance) run only while switched on, through
+            // v1/system/services.  Every switch starts off, so a restart lands in the cheap state: the server idles and the
+            // database can pause.
+            builder.Services.TryAddSingleton(TimeProvider.System);
+            builder.Services.AddSingleton<ServiceSwitchboard>();
+            builder.Services.Configure<ServiceSwitchOptions>(configuration.GetSection(ServiceSwitchOptions.SectionName));
+
             // Compliance: the rules are compiled once; each tenant gets its own engine and NRules session.
             builder.Services.Configure<ComplianceOptions>(configuration.GetSection(ComplianceOptions.SectionName));
             builder.Services.AddSingleton(services =>
@@ -85,7 +94,7 @@ namespace AtlasLedger.Server
             });
             builder.Services.AddHostedService<ComplianceService>();
 
-            // Market data: simulated until a real feed is connected.
+            // Market data: simulated until a real feed is connected.  Its switch decides whether it runs.
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));
             builder.Services.AddHostedService<SimulatedMarketFeed>();
 

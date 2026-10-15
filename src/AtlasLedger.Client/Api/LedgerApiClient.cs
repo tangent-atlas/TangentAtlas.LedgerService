@@ -34,6 +34,8 @@ namespace AtlasLedger.Client.Api
         /// </summary>
         public const int DefaultMaximumBatchOperations = 10_000;
 
+        private const string ServicesPath = "v1/system/services";
+
         private readonly HttpClient httpClient;
 
         private readonly string? caller;
@@ -198,6 +200,25 @@ namespace AtlasLedger.Client.Api
 
             return results;
         }
+
+        /// <summary>
+        /// Lists the server's optional services and whether each is on.  Only an allowed tool may.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The services.</returns>
+        public async Task<IReadOnlyList<ServiceState>> GetServicesAsync(CancellationToken cancellationToken = default) =>
+            await this.SendAsync<List<ServiceState>>(HttpMethod.Get, ServicesPath, null, cancellationToken).ConfigureAwait(false) ?? new List<ServiceState>();
+
+        /// <summary>
+        /// Turns one of the server's optional services on for a while, or off.  Only an allowed tool may.
+        /// </summary>
+        /// <param name="name">The service, for example <c>market-feed</c>.</param>
+        /// <param name="isOn">True to turn it on; false to turn it off.</param>
+        /// <param name="duration">How long to stay on; null for the server's default (four hours).</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The service, as it is now.</returns>
+        public async Task<ServiceState> SetServiceAsync(string name, bool isOn, TimeSpan? duration = null, CancellationToken cancellationToken = default) =>
+            (await this.SendAsync<ServiceState>(HttpMethod.Put, $"{ServicesPath}/{Uri.EscapeDataString(name)}", new { isOn, duration }, cancellationToken).ConfigureAwait(false))!;
 
         private static string TablePath(Guid tenantId, string table) => $"v1/tenants/{tenantId}/{RouteSegment(table)}";
 

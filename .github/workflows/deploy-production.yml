@@ -1,4 +1,4 @@
-# Releases the ledger server to production: build and test, migrate the database, then build the image and roll it out.
+# Releases the ledger server to production: build and test, migrate the database, then publish the code and deploy it.
 #
 #   Trigger:  push to the 'production' branch  (git checkout production && git merge main && git push origin production)
 #             or run it by hand: Actions -> Deploy to Production -> Run workflow.
@@ -6,8 +6,7 @@
 # Two identities, one per job, both trusted only for this repository's 'production' environment (federated credentials
 # made by TangentAtlas.Platform's Deploy-ManagedIdentities.ps1, which also sets the variables used here):
 #   - AZURE_MIGRATOR_CLIENT_ID  id-ledger-migrate-prod: DDL on the ledger database, and the SQL firewall.  Nothing else.
-#   - AZURE_CLIENT_ID           id-ledger-deploy-prod:  push to the registry, and point this one web app at the new image.
-#                                                       No SQL.
+#   - AZURE_CLIENT_ID           id-ledger-deploy-prod:  deploy code to this one web app.  No SQL.
 # The server's own identity (id-ledger-prod) reads and writes rows and never has DDL rights.
 name: Deploy to Production
 
@@ -30,9 +29,7 @@ env:
   RESOURCE_GROUP: rg-platform-prod
   SQL_SERVER: sql-tangentatlas-prod
   SQL_DATABASE: sqldb-ledger-prod
-  REGISTRY: crtangentatlasprod
   WEB_APP: app-tangentatlas-ledger-prod
-  IMAGE_NAME: atlasledger-server
 
 jobs:
   build:
@@ -120,12 +117,21 @@ jobs:
             --name "github-run-${{ github.run_id }}" || true
 
   deploy:
-    name: Build the image and deploy
+    name: Publish and deploy
     needs: migrate
     runs-on: ubuntu-24.04
     environment: production
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # The commit is stamped into the assembly (served at /version), so every running server traces back to the exact
+      # source it was built from.  App Service runs it on its own .NET 10 runtime: no image and no registry.
+      - name: Publish
+        run: dotnet publish src/AtlasLedger.Server --configuration Release --output publish -p:SourceRevisionId=${{ github.sha }}
 
       - name: Sign in to Azure as the deployer
         uses: azure/login@v3
@@ -134,23 +140,8 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      # Tagged with the commit, and the commit baked in (served at /version), so every running server traces back to the
-      # exact source it was built from.
-      - name: Build and push the image
-        run: |
-          IMAGE="$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
-          az acr login --name "$REGISTRY"
-          docker build --file src/AtlasLedger.Server/Dockerfile --build-arg LEDGER_COMMIT=${{ github.sha }} --tag "$IMAGE" .
-          docker push "$IMAGE"
-
-      # App Service pulls the image with the server's identity, starts it, and switches traffic once it answers.
-      - name: Roll out the new image
-        run: |
-          az webapp config set --only-show-errors --output none \
-            --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
-            --linux-fx-version "DOCKER|$REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
-
-      # The app admits only the operator's address, so let this runner in for the check, and only for this run.
+      # The app admits only the operator's address, and its deployment site (scm) follows the same rules, so let this
+      # runner in before deploying, and only for this run.
       - name: Let this runner reach the app (temporary)
         run: |
           RUNNER_IP=$(curl --silent --fail https://api.ipify.org)
@@ -158,6 +149,14 @@ jobs:
             --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
             --rule-name "github-run-${{ github.run_id }}" --action Allow --priority 200 \
             --ip-address "$RUNNER_IP/32"
+
+      # Zip deployment with the deployer's Entra token (no publishing password); App Service restarts the app on the new
+      # code.
+      - name: Deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.WEB_APP }}
+          package: publish
 
       # Done when /version answers with this commit: the new server has loaded its tenants and is the one serving.
       # A server that cannot load its tenants never answers, and the check fails after ten minutes.

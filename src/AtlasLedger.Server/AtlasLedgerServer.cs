@@ -6,6 +6,7 @@ namespace AtlasLedger.Server
 {
     using System;
     using System.Linq;
+    using System.Reflection;
     using System.Text.Json.Serialization;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
@@ -36,9 +37,30 @@ namespace AtlasLedger.Server
     public static class AtlasLedgerServer
     {
         /// <summary>
-        /// The environment variable holding the commit the server's image was built from.
+        /// The environment variable that, when set, overrides the commit the server reports (a container image built by the
+        /// Dockerfile sets it).
         /// </summary>
         public const string CommitVariable = "LEDGER_COMMIT";
+
+        /// <summary>
+        /// Gets the commit the running server was built from: <c>LEDGER_COMMIT</c> if set, otherwise the commit the .NET SDK
+        /// stamps into the assembly's informational version (<c>1.0.0+&lt;commit&gt;</c>) when it builds from a Git
+        /// checkout, otherwise "development".
+        /// </summary>
+        public static string BuildCommit
+        {
+            get
+            {
+                if (Environment.GetEnvironmentVariable(CommitVariable) is { Length: > 0 } fromEnvironment)
+                {
+                    return fromEnvironment;
+                }
+
+                var informational = typeof(AtlasLedgerServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                var plus = informational?.IndexOf('+', StringComparison.Ordinal) ?? -1;
+                return plus >= 0 && plus < informational!.Length - 1 ? informational[(plus + 1)..] : "development";
+            }
+        }
 
         /// <summary>
         /// Builds the server, ready to run.
@@ -127,9 +149,9 @@ namespace AtlasLedger.Server
 
             application.MapHealthChecks("/health");
 
-            // The commit the running image was built from (LEDGER_COMMIT, set by the Dockerfile), so a deployment can confirm
-            // the new build is the one answering.  Anonymous like /health: a commit ID reveals nothing about any tenant.
-            var commit = Environment.GetEnvironmentVariable(CommitVariable) is { Length: > 0 } built ? built : "development";
+            // The commit the running server was built from, so a deployment can confirm the new build is the one answering.
+            // Anonymous like /health: a commit ID reveals nothing about any tenant.
+            var commit = BuildCommit;
             application.MapGet("/version", () => commit).AllowAnonymous();
             application.UseLedgerContract();
             application.UseAuthentication();

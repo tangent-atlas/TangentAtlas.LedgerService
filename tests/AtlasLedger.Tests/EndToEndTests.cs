@@ -50,7 +50,7 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
-        /// The server says which build it is, without signing in: "development" when not built by the pipeline.
+        /// The server says which build it is, without signing in: the commit it was built from.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
         [Fact]
@@ -58,7 +58,9 @@ namespace AtlasLedger.Tests
         {
             using var response = await this.server.HttpClient.GetAsync("version", TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("development", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            var reported = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(AtlasLedgerServer.BuildCommit, reported);
+            Assert.True(reported == "development" || System.Text.RegularExpressions.Regex.IsMatch(reported, "^[0-9a-f]{40}$"), reported);
         }
 
         /// <summary>

@@ -11,7 +11,7 @@ Architecture, roadmap, decisions, and the deployment runbook are in `TangentAtla
 
 | Path | Purpose |
 |---|---|
-| `src/AtlasLedger.Server` | The server (Bellerophon's Primary role) and owner of the model, `bellerophon.json`. The generated API over the in-memory ledger, write-behind persistence to SQL Server, recovery at startup, the NRules compliance engine, a simulated market feed. Its `Dockerfile` builds the container image. |
+| `src/AtlasLedger.Server` | The server (Bellerophon's Primary role) and owner of the model, `bellerophon.json`. The generated API over the in-memory ledger, write-behind persistence to SQL Server, recovery at startup, the NRules compliance engine, a simulated market feed. Production deploys it as code to App Service (`.github/workflows/deploy-production.yml`); its `Dockerfile` builds a container image for anywhere else. |
 | `src/AtlasLedger.Client` | The client (Replica role), generated from the server's model: tenants, JSON script load and export, alerts, a local copy of a tenant, and an end-to-end walkthrough that doubles as a smoke test. `Data/firm-a.json` is the test organization. |
 | `src/AtlasLedger.Schema` | The Entity Framework model of the database (Schema role) and its migrations. Used to create and evolve the database only; the server reads and writes with Bellerophon's generated SQL. |
 | `src/TangentAtlas` | The enums the model's datatypes name. |

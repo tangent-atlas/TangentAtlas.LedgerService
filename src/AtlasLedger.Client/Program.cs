@@ -35,8 +35,13 @@ namespace AtlasLedger.Client
               services off [name...]        Turn services off (all, if none named).
 
             Options:
-              --server <url>                The server (default: ATLAS_LEDGER_SERVER, else http://127.0.0.1:5180).
+              --server <url>                The server (default: ATLAS_LEDGER_SERVER, else the settings file's, else
+                                            http://127.0.0.1:5180).
               --as <tool|advisor>           Who to sign in as on a development server (default: tool).
+
+            Sign-in: with the settings file (%APPDATA%\TangentAtlas\ledger-client.json, or ATLAS_LEDGER_CLIENT_SETTINGS),
+            written by TangentAtlas.Platform's Deploy-EntraApplications.ps1, the client signs in to the file's server
+            as the Ledger tool, with its certificate. Any other server gets development sign-in.
               --market-wait <seconds>       How long the walkthrough watches for a bad print (default: 30; 0 skips).
               --for <hours>                 How long 'services on' lasts: hours (4, 0.5) or h:mm (1:30); default 4 hours.
             """;
@@ -49,8 +54,10 @@ namespace AtlasLedger.Client
         private static async Task<int> Main(string[] args)
         {
             var positional = new List<string>();
-            var server = Environment.GetEnvironmentVariable("ATLAS_LEDGER_SERVER") ?? DefaultServer;
+            var settings = ClientSettings.Read(ClientSettings.DefaultPath);
+            var server = Environment.GetEnvironmentVariable("ATLAS_LEDGER_SERVER") is { Length: > 0 } fromEnvironment ? fromEnvironment : settings.Server ?? DefaultServer;
             var caller = DevelopmentCallers.Tool;
+            var callerNamed = false;
             var watch = false;
             var marketWait = TimeSpan.FromSeconds(30);
             string? durationText = null;
@@ -59,7 +66,7 @@ namespace AtlasLedger.Client
                 switch (args[index])
                 {
                     case "--server" when index + 1 < args.Length: server = args[++index]; break;
-                    case "--as" when index + 1 < args.Length: caller = args[++index]; break;
+                    case "--as" when index + 1 < args.Length: caller = args[++index]; callerNamed = true; break;
                     case "--market-wait" when index + 1 < args.Length: marketWait = TimeSpan.FromSeconds(double.Parse(args[++index], CultureInfo.InvariantCulture)); break;
                     case "--for" when index + 1 < args.Length: durationText = args[++index]; break;
                     case "--watch": watch = true; break;
@@ -76,7 +83,18 @@ namespace AtlasLedger.Client
             };
 
             using var httpClient = new HttpClient { BaseAddress = new Uri(server.EndsWith('/') ? server : server + "/") };
-            var api = new LedgerApiClient(httpClient, caller);
+
+            // Real sign-in for the settings file's server (as the tool: the only caller that can sign in unattended);
+            // development sign-in for any other, such as a server on this computer.
+            var signIn = settings.SignIn is not null && SameServer(server, settings.Server) ? new ToolSignIn(settings.SignIn) : null;
+            if (signIn is not null && callerNamed && caller != DevelopmentCallers.Tool)
+            {
+                Console.Error.WriteLine($"{server} uses real sign-in, where this client signs in only as the tool; '--as {caller}' works only on a development server.");
+                return 2;
+            }
+
+            LedgerApiClient Caller(string who) => signIn is null ? new LedgerApiClient(httpClient, who) : new LedgerApiClient(httpClient, null, signIn.GetAccessTokenAsync);
+            var api = Caller(caller);
             var output = Console.Out;
             var command = positional.Count == 0 ? "walkthrough" : positional[0];
             try
@@ -84,7 +102,8 @@ namespace AtlasLedger.Client
                 switch (command)
                 {
                     case "walkthrough":
-                        return await new Walkthrough(httpClient, output, marketWait).RunAsync(cancellation.Token).ConfigureAwait(false) == 0 ? 0 : 1;
+                        var walkthrough = new Walkthrough(Caller(DevelopmentCallers.Tool), signIn is null ? Caller(DevelopmentCallers.Advisor) : null, new LedgerApiClient(httpClient, null), output, marketWait);
+                        return await walkthrough.RunAsync(cancellation.Token).ConfigureAwait(false) == 0 ? 0 : 1;
                     case "tenants":
                         await Commands.TenantsAsync(api, output, cancellation.Token).ConfigureAwait(false);
                         return 0;
@@ -141,5 +160,14 @@ namespace AtlasLedger.Client
                 return 0;
             }
         }
+
+        /// <summary>
+        /// Gets a value indicating whether two server addresses name the same server (scheme, host, and port).
+        /// </summary>
+        private static bool SameServer(string server, string? configured) =>
+            configured is not null
+            && Uri.TryCreate(server, UriKind.Absolute, out var a)
+            && Uri.TryCreate(configured, UriKind.Absolute, out var b)
+            && Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
     }
 }

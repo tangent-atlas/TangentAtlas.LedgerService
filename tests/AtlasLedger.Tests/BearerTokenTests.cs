@@ -17,6 +17,7 @@ namespace AtlasLedger.Tests
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
+    using client::AtlasLedger.Client;
     using client::AtlasLedger.Client.Api;
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Model;
@@ -124,6 +125,23 @@ namespace AtlasLedger.Tests
 
             var outsider = this.Client(this.server.PersonToken("00000000-0000-0000-0000-0000000000dd", "Ledger.Read Ledger.Write"));
             Assert.Equal(HttpStatusCode.NotFound, await StatusOf(() => outsider.ListAsync<AccountDto>(this.server.FirmA, "Account", cancellationToken)));
+        }
+
+        /// <summary>
+        /// The walkthrough, run as the tool alone (as from a command line or script against Azure), gets what every step
+        /// expects, and lists as skipped the steps only a person can test.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task TheWalkthroughPassesAsTheToolAlone()
+        {
+            var httpClient = new HttpClient { BaseAddress = this.server.BaseAddress };
+            var tool = new LedgerApiClient(httpClient, null, _ => Task.FromResult(this.server.ToolToken(ToolClientId)));
+            var output = new System.IO.StringWriter();
+            var failures = await new Walkthrough(tool, null, new LedgerApiClient(httpClient, null), output, TimeSpan.FromSeconds(10)).RunAsync(TestContext.Current.CancellationToken);
+            Assert.True(failures == 0, output.ToString());
+            Assert.Contains("skipped", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("401 Unauthorized", output.ToString(), StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -256,6 +274,8 @@ namespace AtlasLedger.Tests
                     $"--IdentityProvider:Authority={Authority}",
                     $"--IdentityProvider:Audiences:0={ApiClientId}",
                     $"--Tools:ClientIds:0={ToolClientId}",
+                    "--MarketFeed:TickInterval=00:00:00.300",
+                    "--MarketFeed:BadPrintInterval=00:00:01",
                 };
 
                 // The issuer's metadata and keys, as the server would fetch them from Entra.

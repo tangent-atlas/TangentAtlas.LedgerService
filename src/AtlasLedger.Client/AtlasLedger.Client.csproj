@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Bellerophon" />
+    <PackageReference Include="Microsoft.Identity.Client" />
   </ItemGroup>
 
   <ItemGroup>

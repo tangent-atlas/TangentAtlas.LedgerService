@@ -33,7 +33,10 @@ namespace AtlasLedger.Client
 
         private readonly LedgerApiClient tool;
 
-        private readonly LedgerApiClient advisor;
+        /// <summary>
+        /// The advisor, a person signed in to firm A; null with real sign-in, where the walkthrough runs as the tool alone.
+        /// </summary>
+        private readonly LedgerApiClient? advisor;
 
         private readonly LedgerApiClient anonymous;
 
@@ -62,13 +65,39 @@ namespace AtlasLedger.Client
         /// <param name="output">Where to report each step.</param>
         /// <param name="marketWait">How long to watch the market for a bad print; zero skips that step.</param>
         public Walkthrough(HttpClient httpClient, TextWriter output, TimeSpan marketWait)
+            : this(new LedgerApiClient(httpClient, DevelopmentCallers.Tool), new LedgerApiClient(httpClient, DevelopmentCallers.Advisor), new LedgerApiClient(httpClient, null), output, marketWait)
         {
-            this.tool = new LedgerApiClient(httpClient, DevelopmentCallers.Tool);
-            this.advisor = new LedgerApiClient(httpClient, DevelopmentCallers.Advisor);
-            this.anonymous = new LedgerApiClient(httpClient, null);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Walkthrough"/> class, for any sign-in.
+        /// </summary>
+        /// <param name="tool">The tool, acting as itself.</param>
+        /// <param name="advisor">The advisor, a person who is a user of firm A; null when only the tool can sign in (a server
+        /// with real sign-in, from a command line or script).  Then the tool does the advisor's data work, and the steps only
+        /// a person can test (the tenant picker, 404 for a firm they do not belong to, the services hidden from them) are
+        /// listed as skipped: the server's tests cover them with person tokens.</param>
+        /// <param name="anonymous">A caller with no sign-in.</param>
+        /// <param name="output">Where to report each step.</param>
+        /// <param name="marketWait">How long to watch the market for a bad print; zero skips that step.</param>
+        public Walkthrough(LedgerApiClient tool, LedgerApiClient? advisor, LedgerApiClient anonymous, TextWriter output, TimeSpan marketWait)
+        {
+            this.tool = tool ?? throw new ArgumentNullException(nameof(tool));
+            this.advisor = advisor;
+            this.anonymous = anonymous ?? throw new ArgumentNullException(nameof(anonymous));
             this.output = output;
             this.marketWait = marketWait;
         }
+
+        /// <summary>
+        /// Gets who does the data work: the advisor, or the tool when no person can sign in.
+        /// </summary>
+        private LedgerApiClient Worker => this.advisor ?? this.tool;
+
+        /// <summary>
+        /// Gets how the worker is named in the steps.
+        /// </summary>
+        private string WorkerName => this.advisor is null ? "Tool" : "Advisor";
 
         /// <summary>
         /// Gets the path of the script that loads firm A.
@@ -113,7 +142,7 @@ namespace AtlasLedger.Client
         private async Task<IReadOnlyList<string>> ServicesOnAsync(CancellationToken cancellationToken)
         {
             this.Section("Services: the tool turns on the market feed and compliance for the walkthrough:");
-            await this.StepAsync("Advisor asks for the services (only tools may: hidden)", HttpStatusCode.NotFound, () => this.advisor.GetServicesAsync(cancellationToken)).ConfigureAwait(false);
+            await this.PersonStepAsync("Advisor asks for the services (only tools may: hidden)", HttpStatusCode.NotFound, advisor => advisor.GetServicesAsync(cancellationToken)).ConfigureAwait(false);
             var services = await this.StepAsync("Tool lists the services", HttpStatusCode.OK, () => this.tool.GetServicesAsync(cancellationToken)).ConfigureAwait(false);
             var switchedOn = new List<string>();
             foreach (var service in services ?? Array.Empty<ServiceState>())
@@ -159,45 +188,45 @@ namespace AtlasLedger.Client
 
         private async Task AdvisorAsync(CancellationToken cancellationToken)
         {
-            this.Section("The advisor, a user of firm A, works in it:");
-            var tenants = await this.StepAsync("Opens the tenant picker", HttpStatusCode.OK, () => this.advisor.GetTenantsAsync(cancellationToken)).ConfigureAwait(false);
-            this.Expect(tenants?.Contains(this.firmA) == true, "the picker offers firm A");
-            var accounts = await this.StepAsync("Lists accounts in firm A", HttpStatusCode.OK, () => this.advisor.ListAsync<AccountDto>(this.firmA, "Account", cancellationToken)).ConfigureAwait(false);
+            this.Section(this.advisor is null ? "The tool works in firm A (no person can sign in from here):" : "The advisor, a user of firm A, works in it:");
+            var tenants = await this.PersonStepAsync("Opens the tenant picker", HttpStatusCode.OK, advisor => advisor.GetTenantsAsync(cancellationToken)).ConfigureAwait(false);
+            this.Expect(this.advisor is null || tenants?.Contains(this.firmA) == true, "the picker offers firm A");
+            var accounts = await this.StepAsync("Lists accounts in firm A", HttpStatusCode.OK, () => this.Worker.ListAsync<AccountDto>(this.firmA, "Account", cancellationToken)).ConfigureAwait(false);
             this.Expect(accounts?.Count == 2, "firm A has the two accounts the script loaded");
-            await this.StepAsync("Lists accounts in firm B, where they are not a user", HttpStatusCode.NotFound, () => this.advisor.ListAsync<AccountDto>(this.firmB, "Account", cancellationToken)).ConfigureAwait(false);
-            await this.StepAsync("Adds an account for a node that does not exist", HttpStatusCode.UnprocessableEntity, () => this.advisor.InsertAsync(this.firmA, "Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount }, cancellationToken)).ConfigureAwait(false);
+            await this.PersonStepAsync("Lists accounts in firm B, where they are not a user", HttpStatusCode.NotFound, advisor => advisor.ListAsync<AccountDto>(this.firmB, "Account", cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Adds an account for a node that does not exist", HttpStatusCode.UnprocessableEntity, () => this.Worker.InsertAsync(this.firmA, "Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount }, cancellationToken)).ConfigureAwait(false);
 
-            var node = (await this.advisor.ListAsync<NodeDto>(this.firmA, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
-            await this.StepAsync("Deletes the Smith Trust at a stale version", HttpStatusCode.PreconditionFailed, () => this.advisor.DeleteAsync(this.firmA, "Node", new object[] { node.NodeId }, node.RowVersion - 1, cancellationToken)).ConfigureAwait(false);
-            await this.StepAsync("Deletes the Smith Trust while its account exists", HttpStatusCode.UnprocessableEntity, () => this.advisor.DeleteAsync(this.firmA, "Node", new object[] { node.NodeId }, node.RowVersion, cancellationToken)).ConfigureAwait(false);
+            var node = (await this.Worker.ListAsync<NodeDto>(this.firmA, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
+            await this.StepAsync("Deletes the Smith Trust at a stale version", HttpStatusCode.PreconditionFailed, () => this.Worker.DeleteAsync(this.firmA, "Node", new object[] { node.NodeId }, node.RowVersion - 1, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Deletes the Smith Trust while its account exists", HttpStatusCode.UnprocessableEntity, () => this.Worker.DeleteAsync(this.firmA, "Node", new object[] { node.NodeId }, node.RowVersion, cancellationToken)).ConfigureAwait(false);
 
             var account = accounts!.Single(each => each.AccountId == node.NodeId);
-            await this.StepAsync("Changes the account at a stale version", HttpStatusCode.PreconditionFailed, () => this.advisor.UpdateAsync(this.firmA, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, RowVersion = account.RowVersion - 1 }, cancellationToken)).ConfigureAwait(false);
-            await this.StepAsync("Changes the account at the current version", HttpStatusCode.OK, () => this.advisor.UpdateAsync(this.firmA, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, RowVersion = account.RowVersion }, cancellationToken)).ConfigureAwait(false);
-            await this.StepAsync("Reads dossiers without Dossier.Read", HttpStatusCode.Forbidden, () => this.advisor.ListAsync<DossierPlaceholder>(this.firmA, "Dossier", cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Changes the account at a stale version", HttpStatusCode.PreconditionFailed, () => this.Worker.UpdateAsync(this.firmA, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, RowVersion = account.RowVersion - 1 }, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Changes the account at the current version", HttpStatusCode.OK, () => this.Worker.UpdateAsync(this.firmA, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, RowVersion = account.RowVersion }, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Reads dossiers without Dossier.Read", HttpStatusCode.Forbidden, () => this.Worker.ListAsync<DossierPlaceholder>(this.firmA, "Dossier", cancellationToken)).ConfigureAwait(false);
             await this.StepAsync("An anonymous caller lists accounts", HttpStatusCode.Unauthorized, () => this.anonymous.ListAsync<AccountDto>(this.firmA, "Account", cancellationToken)).ConfigureAwait(false);
         }
 
         private async Task BatchesAsync(CancellationToken cancellationToken)
         {
             this.Section("Batches commit or roll back as a unit:");
-            var node = (await this.advisor.ListAsync<NodeDto>(this.firmA, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
-            var account = (await this.advisor.ListAsync<AccountDto>(this.firmA, "Account", cancellationToken).ConfigureAwait(false)).Single(each => each.AccountId == node.NodeId);
+            var node = (await this.Worker.ListAsync<NodeDto>(this.firmA, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
+            var account = (await this.Worker.ListAsync<AccountDto>(this.firmA, "Account", cancellationToken).ConfigureAwait(false)).Single(each => each.AccountId == node.NodeId);
             var good = new LedgerScript()
                 .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "2222", NodeId = node.NodeId })
                 .Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.GroupAccount, RowVersion = account.RowVersion });
-            await this.StepAsync("Adds a symbol and changes the account in one batch", HttpStatusCode.OK, () => this.advisor.ApplyAsync(this.firmA, good, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Adds a symbol and changes the account in one batch", HttpStatusCode.OK, () => this.Worker.ApplyAsync(this.firmA, good, cancellationToken)).ConfigureAwait(false);
 
             var bad = new LedgerScript()
                 .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "3333", NodeId = node.NodeId })
                 .Insert("Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount });
-            await this.StepAsync("Adds a symbol and an account for a missing node in one batch", HttpStatusCode.UnprocessableEntity, () => this.advisor.ApplyAsync(this.firmA, bad, cancellationToken)).ConfigureAwait(false);
-            await this.StepAsync("Sends a batch to firm B, where they are not a user", HttpStatusCode.NotFound, () => this.advisor.ApplyAsync(this.firmB, good, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Adds a symbol and an account for a missing node in one batch", HttpStatusCode.UnprocessableEntity, () => this.Worker.ApplyAsync(this.firmA, bad, cancellationToken)).ConfigureAwait(false);
+            await this.PersonStepAsync("Sends a batch to firm B, where they are not a user", HttpStatusCode.NotFound, advisor => advisor.ApplyAsync(this.firmB, good, cancellationToken)).ConfigureAwait(false);
             var nonsense = new LedgerScript();
             nonsense.Operations.Add(new ScriptOperation { Action = ScriptAction.Insert, Table = "Nonsense" });
-            await this.StepAsync("Sends a batch naming a table that does not exist", HttpStatusCode.BadRequest, () => this.advisor.ApplyAsync(this.firmA, nonsense, cancellationToken)).ConfigureAwait(false);
+            await this.StepAsync("Sends a batch naming a table that does not exist", HttpStatusCode.BadRequest, () => this.Worker.ApplyAsync(this.firmA, nonsense, cancellationToken)).ConfigureAwait(false);
 
-            var symbols = await this.advisor.ListAsync<SymbolDto>(this.firmA, "Symbol", cancellationToken).ConfigureAwait(false);
+            var symbols = await this.Worker.ListAsync<SymbolDto>(this.firmA, "Symbol", cancellationToken).ConfigureAwait(false);
             var codes = symbols.Select(symbol => symbol.Code).OrderBy(code => code, StringComparer.Ordinal).ToList();
             this.output.WriteLine($"  Symbols now: {string.Join(", ", codes)}");
             this.Expect(codes.Contains("2222") && !codes.Contains("3333"), "the good batch committed and the failed one left nothing behind");
@@ -209,9 +238,9 @@ namespace AtlasLedger.Client
             var script = await Commands.ExportAsync(this.tool, this.firmA, cancellationToken).ConfigureAwait(false);
             this.output.WriteLine($"  Exported {script.Operations.Count} rows, parents first.");
             await this.StepAsync("Tool loads the export into firm C as one batch", HttpStatusCode.OK, () => this.tool.ApplyAsync(this.firmC, script, cancellationToken)).ConfigureAwait(false);
-            var tenants = await this.StepAsync("The advisor's tenant picker", HttpStatusCode.OK, () => this.advisor.GetTenantsAsync(cancellationToken)).ConfigureAwait(false);
-            this.Expect(tenants?.Contains(this.firmA) == true && tenants.Contains(this.firmC), "the advisor can now open firms A and C");
-            var accounts = await this.StepAsync("Lists accounts in firm C", HttpStatusCode.OK, () => this.advisor.ListAsync<AccountDto>(this.firmC, "Account", cancellationToken)).ConfigureAwait(false);
+            var tenants = await this.PersonStepAsync("The advisor's tenant picker", HttpStatusCode.OK, advisor => advisor.GetTenantsAsync(cancellationToken)).ConfigureAwait(false);
+            this.Expect(this.advisor is null || (tenants?.Contains(this.firmA) == true && tenants.Contains(this.firmC)), "the advisor can now open firms A and C");
+            var accounts = await this.StepAsync("Lists accounts in firm C", HttpStatusCode.OK, () => this.Worker.ListAsync<AccountDto>(this.firmC, "Account", cancellationToken)).ConfigureAwait(false);
             this.Expect(accounts?.Count == 2, "firm C has firm A's accounts");
         }
 
@@ -246,10 +275,10 @@ namespace AtlasLedger.Client
 
         private async Task MirrorAsync(CancellationToken cancellationToken)
         {
-            this.Section("The advisor's local copy of firm A (the Replica role):");
+            this.Section($"The {this.WorkerName.ToLowerInvariant()}'s local copy of firm A (the Replica role):");
             var ledger = new Ledger();
-            var forbidden = await LedgerMirror.RefreshAsync(this.advisor, ledger, this.firmA, cancellationToken).ConfigureAwait(false);
-            this.output.WriteLine(forbidden.Count == 0 ? "  Copied every table." : $"  Copied every table the advisor may read (not {string.Join(", ", forbidden)}).");
+            var forbidden = await LedgerMirror.RefreshAsync(this.Worker, ledger, this.firmA, cancellationToken).ConfigureAwait(false);
+            this.output.WriteLine(forbidden.Count == 0 ? "  Copied every table." : $"  Copied every table the {this.WorkerName.ToLowerInvariant()} may read (not {string.Join(", ", forbidden)}).");
             var partition = ledger.GetPartition(this.firmA);
             lock (partition.SyncRoot)
             {
@@ -297,6 +326,28 @@ namespace AtlasLedger.Client
                 return true;
             }).ConfigureAwait(false);
 
+        /// <summary>
+        /// Runs a step that only a person can test, as the advisor; lists it as skipped when only the tool can sign in.
+        /// </summary>
+        private async Task<T?> PersonStepAsync<T>(string description, HttpStatusCode expected, Func<LedgerApiClient, Task<T>> request)
+        {
+            if (this.advisor is null)
+            {
+                this.output.WriteLine($"  --- {"skipped",-20} {description} (needs a person's sign-in; the server's tests cover it)");
+                return default;
+            }
+
+            var advisor = this.advisor;
+            return await this.StepAsync(description, expected, () => request(advisor)).ConfigureAwait(false);
+        }
+
+        private async Task PersonStepAsync(string description, HttpStatusCode expected, Func<LedgerApiClient, Task> request) =>
+            await this.PersonStepAsync<bool>(description, expected, async advisor =>
+            {
+                await request(advisor).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+
         private void Report(HttpStatusCode status, HttpStatusCode expected, string description)
         {
             this.output.WriteLine($"  {(int)status} {status,-20} {description}");
@@ -326,7 +377,7 @@ namespace AtlasLedger.Client
             IReadOnlyList<AlertDto> alerts;
             do
             {
-                alerts = await this.advisor.ListAsync<AlertDto>(this.firmA, "Alert", cancellationToken).ConfigureAwait(false);
+                alerts = await this.Worker.ListAsync<AlertDto>(this.firmA, "Alert", cancellationToken).ConfigureAwait(false);
                 if (condition(alerts))
                 {
                     var shown = alerts.Count == 0 ? "no alerts" : string.Join("; ", alerts.Select(alert => $"{alert.Rule}: {alert.Message}"));

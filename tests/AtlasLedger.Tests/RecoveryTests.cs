@@ -36,6 +36,8 @@ namespace AtlasLedger.Tests
             "--environment", "Development",
             "--urls", "http://127.0.0.1:0",
             "--Logging:LogLevel:Default=None",
+            "--Persistence:RetryAttempts=3",
+            "--Persistence:RetryDelay=00:00:00.010",
         };
 
         /// <summary>
@@ -74,6 +76,53 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
+        /// A database that fails partway through loading (a connection reset, a database resuming from a pause) does not stop
+        /// the server: recovery discards what it loaded and starts over, and the server comes up with every tenant whole.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task RecoveryStartsOverWhenTheDatabaseFailsPartway()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var database = new InMemoryLedgerDatabase();
+            var (firmA, firmB) = (Guid.NewGuid(), Guid.NewGuid());
+            string[] beforeA, beforeB;
+            await using (var first = await StartAsync(database, cancellationToken))
+            {
+                var tool = Tool(first);
+                var script = await LedgerScript.ReadAsync(Walkthrough.FirmAScript, cancellationToken);
+                await tool.ApplyAsync(firmA, script, cancellationToken);
+                await tool.ApplyAsync(firmB, script, cancellationToken);
+                beforeA = Rows(await Commands.ExportAsync(tool, firmA, cancellationToken));
+                beforeB = Rows(await Commands.ExportAsync(tool, firmB, cancellationToken));
+                await first.StopAsync(cancellationToken);
+            }
+
+            // The first attempt loads one tenant whole, then the connection drops halfway through the next.
+            var flaky = new FlakyDatabase(database, failuresBeforeSuccess: 1);
+            await using var second = AtlasLedgerServer.Build(Settings, services => services.AddSingleton<ILedgerDatabase>(flaky));
+            await second.StartAsync(cancellationToken);
+            var restarted = Tool(second);
+            Assert.Equal(1, flaky.Failures);
+            Assert.Equal(beforeA, Rows(await Commands.ExportAsync(restarted, firmA, cancellationToken)));
+            Assert.Equal(beforeB, Rows(await Commands.ExportAsync(restarted, firmB, cancellationToken)));
+        }
+
+        /// <summary>
+        /// A database that keeps failing still stops the server from starting, once the retries run out.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task ADatabaseThatKeepsFailingStopsTheServer()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var flaky = new FlakyDatabase(new InMemoryLedgerDatabase(), failuresBeforeSuccess: int.MaxValue);
+            await using var application = AtlasLedgerServer.Build(Settings, services => services.AddSingleton<ILedgerDatabase>(flaky));
+            await Assert.ThrowsAsync<System.IO.IOException>(() => application.StartAsync(cancellationToken));
+            Assert.Equal(4, flaky.Failures);   // the first attempt and three retries
+        }
+
+        /// <summary>
         /// A tenant that cannot be loaded stops the server from starting, rather than serving without it.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
@@ -101,6 +150,61 @@ namespace AtlasLedger.Tests
             .Select(operation => $"{operation.Table} {string.Join(",", operation.Row!.Value.EnumerateObject().Select(property => $"{property.Name}={property.Value}"))}")
             .OrderBy(row => row, StringComparer.Ordinal)
             .ToArray();
+
+        /// <summary>
+        /// Fails the first few attempts: <see cref="PrepareAsync"/> when there is nothing to load, otherwise partway through
+        /// loading the second tenant, after its partition has received rows.
+        /// </summary>
+        private sealed class FlakyDatabase : ILedgerDatabase
+        {
+            private readonly InMemoryLedgerDatabase inner;
+
+            private readonly int failuresBeforeSuccess;
+
+            private int loadsThisAttempt;
+
+            public FlakyDatabase(InMemoryLedgerDatabase inner, int failuresBeforeSuccess)
+            {
+                this.inner = inner;
+                this.failuresBeforeSuccess = failuresBeforeSuccess;
+            }
+
+            public int Failures { get; private set; }
+
+            public async Task PrepareAsync(CancellationToken cancellationToken)
+            {
+                this.loadsThisAttempt = 0;
+                await this.inner.PrepareAsync(cancellationToken);
+                if ((await this.inner.ReadTenantsAsync(cancellationToken)).Count < 2)
+                {
+                    this.FailIfDue();
+                }
+            }
+
+            public Task<IReadOnlyList<Guid>> ReadTenantsAsync(CancellationToken cancellationToken) => this.inner.ReadTenantsAsync(cancellationToken);
+
+            public async Task<long> LoadAsync(server::AtlasLedger.Model.Primary.LedgerPartition partition, CancellationToken cancellationToken)
+            {
+                var watermark = await this.inner.LoadAsync(partition, cancellationToken);
+                if (++this.loadsThisAttempt == 2)
+                {
+                    this.FailIfDue();   // after the rows went in: the partition is half-loaded from recovery's point of view
+                }
+
+                return watermark;
+            }
+
+            public Task WriteAsync(server::AtlasLedger.Model.Primary.LedgerCut cut, CancellationToken cancellationToken) => this.inner.WriteAsync(cut, cancellationToken);
+
+            private void FailIfDue()
+            {
+                if (this.Failures < this.failuresBeforeSuccess)
+                {
+                    this.Failures++;
+                    throw new System.IO.IOException("Connection reset by peer.");
+                }
+            }
+        }
 
         private sealed class BrokenDatabase : ILedgerDatabase
         {

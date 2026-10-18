@@ -20,6 +20,7 @@
     <!-- Referencing these makes the generator emit the rules adapters and the SQL Server writer and loader. -->
     <PackageReference Include="Bellerophon.Rules.NRules" />
     <PackageReference Include="Bellerophon.SqlServer" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
 
   <ItemGroup>

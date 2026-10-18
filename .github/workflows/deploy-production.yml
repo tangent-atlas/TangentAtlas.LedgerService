@@ -159,11 +159,12 @@ jobs:
           package: publish
 
       # Done when /version answers with this commit: the new server has loaded its tenants and is the one serving.
-      # A server that cannot load its tenants never answers, and the check fails after ten minutes.
+      # A server that cannot load its tenants never answers, and the check fails after fifteen minutes.  A routine
+      # deployment answers within a few minutes; the margin is for a first start on a newly built app.
       - name: Wait for the new server
         run: |
           HOST=$(az webapp show --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" --query defaultHostName --output tsv)
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 90); do
             RUNNING=$(curl --silent --max-time 10 "https://$HOST/version" || true)
             if [ "$RUNNING" = "${{ github.sha }}" ]; then
               echo "https://$HOST is running ${{ github.sha }}."
@@ -172,7 +173,7 @@ jobs:
             echo "Waiting: https://$HOST answers '${RUNNING:-nothing}'..."
             sleep 10
           done
-          echo "::error::The new build did not start within ten minutes. Its logs: portal, $WEB_APP, Log stream; or az webapp log tail --name $WEB_APP --resource-group $RESOURCE_GROUP"
+          echo "::error::The new build did not start within fifteen minutes. Its logs: portal, $WEB_APP, Log stream; or az webapp log tail --name $WEB_APP --resource-group $RESOURCE_GROUP"
           exit 1
 
       - name: Remove this runner's access

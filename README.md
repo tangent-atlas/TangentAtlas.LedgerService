@@ -57,12 +57,13 @@ compliance, run only while switched on, and every switch starts off, so an idle 
 can pause.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
 
 ```
-dotnet run --project src/AtlasLedger.Client -- services                  # which are on, and until when
-dotnet run --project src/AtlasLedger.Client -- services on               # all, for four hours
-dotnet run --project src/AtlasLedger.Client -- services on compliance --for 1.5
-dotnet run --project src/AtlasLedger.Client -- services off              # all
+dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when
+dotnet run --project src/AtlasLedger.Operator -- services on               # all, for four hours
+dotnet run --project src/AtlasLedger.Operator -- services on compliance --for 1.5
+dotnet run --project src/AtlasLedger.Operator -- services off              # all
 ```
 
-Set `ATLAS_LEDGER_SERVER` (or pass `--server`) to reach the server in Azure.  The walkthrough turns on what it needs and
-turns it off again when it finishes.  The API is `v1/system/services`, the one route outside a tenant: only an allowed
-tool acting as itself may use it, and anyone else signed in gets 404.
+With `ledger-client.json` in place the operator reaches the server in Azure; `--server` (or `ATLAS_LEDGER_SERVER`) names
+another.  The walkthrough turns the services on and off again when it finishes.  The API is `v1/system/services`, the
+one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage` application permission (the
+operator console, not the script loader) may use it, and anyone else signed in gets 404.

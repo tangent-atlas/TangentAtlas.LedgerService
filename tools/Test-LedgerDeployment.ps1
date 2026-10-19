@@ -31,6 +31,10 @@
 .PARAMETER NoBuild
     Use the programs as last built.
 
+.PARAMETER SignOut
+    Forget access-test's remembered sign-in first (access-test sign-out), so the browser opens and you can sign in
+    again, for example as another person.
+
 .EXAMPLE
     .\tools\Test-LedgerDeployment.ps1
 
@@ -41,7 +45,8 @@
 param(
     [string]$Server,
     [ValidateRange(0, 600)][int]$MarketWaitSeconds = 30,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$SignOut
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,6 +96,10 @@ if (-not $NoBuild) {
         dotnet build (Join-Path $repository "src/$($program.Project)") --configuration Release --nologo --verbosity quiet
         if ($LASTEXITCODE -ne 0) { throw "Building $($program.Project) failed." }
     }
+}
+
+if ($SignOut) {
+    Invoke-Program $programs.AccessTest @('sign-out')
 }
 
 New-Item -ItemType Directory -Path $work | Out-Null

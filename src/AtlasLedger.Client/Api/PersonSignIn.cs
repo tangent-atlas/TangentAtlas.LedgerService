@@ -90,16 +90,31 @@ namespace AtlasLedger.Client.Api
         }
 
         /// <summary>
-        /// Forgets the remembered sign-in, so the next run opens the browser.
+        /// Gets the file that remembers the sign-in between runs.
         /// </summary>
-        /// <returns>A task that completes when the sign-in is forgotten.</returns>
-        public async Task SignOutAsync()
+        public string CachePath => Path.Combine(this.cacheDirectory, this.cacheName);
+
+        /// <summary>
+        /// Forgets the remembered sign-in completely: every account and its tokens, and then the cache file itself, so the
+        /// next run opens the browser.
+        /// </summary>
+        /// <returns>The number of accounts forgotten.</returns>
+        public async Task<int> SignOutAsync()
         {
+            var forgotten = 0;
             await this.RegisterCacheAsync().ConfigureAwait(false);
             foreach (var account in await this.application.GetAccountsAsync().ConfigureAwait(false))
             {
                 await this.application.RemoveAsync(account).ConfigureAwait(false);
+                forgotten++;
             }
+
+            if (File.Exists(this.CachePath))
+            {
+                File.Delete(this.CachePath);
+            }
+
+            return forgotten;
         }
 
         /// <summary>

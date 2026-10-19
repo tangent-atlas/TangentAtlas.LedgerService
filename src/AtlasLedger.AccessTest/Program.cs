@@ -30,7 +30,10 @@ namespace AtlasLedger.AccessTest
                                               firm-a.json, with you as a user), a firm you do not belong to (--other),
                                               401 without signing in, 403 outside your permissions, the services hidden
                                               from you, and the data rules you meet.
-              sign-out                        Forget the remembered sign-in.
+              sign-out                        Forget the remembered sign-in: the accounts, their tokens, and the
+                                              cache file (%LOCALAPPDATA%\TangentAtlas\access-test.cache). The next
+                                              run opens the browser. The browser itself may still remember you;
+                                              the next sign-in shows the account picker, so you can choose another.
 
             Options:
               --server <url>                  The server (default: ATLAS_LEDGER_SERVER, else the settings file's, else
@@ -91,12 +94,14 @@ namespace AtlasLedger.AccessTest
                         var checks = new AccessChecks(connection.Api, connection.Anonymous, Console.Out);
                         return await checks.RunAsync(memberFirm, otherFirm, cancellation.Token).ConfigureAwait(false) == 0 ? 0 : 1;
                     case "sign-out":
-                        if (connection.Person is not null)
+                        if (connection.Person is null)
                         {
-                            await connection.Person.SignOutAsync().ConfigureAwait(false);
+                            Console.WriteLine("Nothing to forget: development sign-in remembers nothing.");
+                            return 0;
                         }
 
-                        Console.WriteLine("Signed out.");
+                        var forgotten = await connection.Person.SignOutAsync().ConfigureAwait(false);
+                        Console.WriteLine($"Signed out: forgot {forgotten} account(s) and deleted {connection.Person.CachePath}. The next run opens the browser.");
                         return 0;
                     default:
                         Console.Error.WriteLine(Usage);

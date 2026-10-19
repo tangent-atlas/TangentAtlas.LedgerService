@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ledger-operator: the operator's console for a running ledger server.  It lists tenants, exports a tenant as a script,
+    shows or waits for compliance alerts, copies a tenant locally, and switches the server's optional services.  It signs
+    in as itself (the Operator registration: read permissions and the services switch, no writes) with the tools'
+    certificate.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ledger-operator</AssemblyName>
+    <RootNamespace>AtlasLedger.Operator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AtlasLedger.Client\AtlasLedger.Client.csproj" />
+  </ItemGroup>
+
+</Project>

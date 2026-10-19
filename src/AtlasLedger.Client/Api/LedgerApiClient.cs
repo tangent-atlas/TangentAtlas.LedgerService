@@ -10,6 +10,7 @@ namespace AtlasLedger.Client.Api
     using System.Linq;
     using System.Net;
     using System.Net.Http;
+    using System.Net.Http.Headers;
     using System.Net.Http.Json;
     using System.Text;
     using System.Text.Json;
@@ -40,15 +41,20 @@ namespace AtlasLedger.Client.Api
 
         private readonly string? caller;
 
+        private readonly Func<CancellationToken, Task<string>>? accessToken;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="LedgerApiClient"/> class.
         /// </summary>
         /// <param name="httpClient">The HTTP client, with the server's address as its base address.</param>
-        /// <param name="caller">The development caller to sign in as (see <see cref="DevelopmentCallers"/>), or null to call anonymously.</param>
-        public LedgerApiClient(HttpClient httpClient, string? caller)
+        /// <param name="caller">The development caller to sign in as (see <see cref="DevelopmentCallers"/>), or null.</param>
+        /// <param name="accessToken">Gets a bearer token for each request (see <see cref="ToolSignIn"/> and <see cref="PersonSignIn"/>), or null.  With neither
+        /// a caller nor a token source, the client calls anonymously.</param>
+        public LedgerApiClient(HttpClient httpClient, string? caller, Func<CancellationToken, Task<string>>? accessToken = null)
         {
             this.httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             this.caller = caller;
+            this.accessToken = accessToken;
         }
 
         /// <summary>
@@ -251,6 +257,11 @@ namespace AtlasLedger.Client.Api
             if (this.caller != null)
             {
                 request.Headers.Add(DevelopmentCallers.Header, this.caller);
+            }
+
+            if (this.accessToken != null)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await this.accessToken(cancellationToken).ConfigureAwait(false));
             }
 
             if (body != null)

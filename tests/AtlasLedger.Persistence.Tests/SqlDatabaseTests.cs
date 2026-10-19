@@ -261,7 +261,7 @@ namespace AtlasLedger.Persistence.Tests
             {
                 await first.StartAsync(Token);
                 var tool = Tool(first);
-                await tool.ApplyAsync(tenant, await LedgerScript.ReadAsync(Walkthrough.FirmAScript, Token), Token);
+                await tool.ApplyAsync(tenant, await LedgerScript.ReadAsync(SampleData.FirmA, Token), Token);
                 await tool.ApplyAsync(tenant, new LedgerScript().Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "9999", NodeId = Guid.Parse("5a000000-0000-0000-0000-000000000001") }), Token);
                 before = Rows(await Commands.ExportAsync(tool, tenant, Token));
                 await first.StopAsync(Token);

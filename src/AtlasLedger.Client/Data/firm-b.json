@@ -1,0 +1,7 @@
+{
+  "operations": [
+    { "action": "Insert", "table": "Node", "row": { "nodeId": "5b000000-0000-0000-0000-000000000001", "displayName": "Garcia Trust", "fullName": "Garcia Family Trust", "nodeStatus": "Active", "nodeType": "Account" } },
+    { "action": "Insert", "table": "Account", "row": { "accountId": "5b000000-0000-0000-0000-000000000001", "accountType": "ManagedAccount" } },
+    { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "7777-0001", "nodeId": "5b000000-0000-0000-0000-000000000001" } }
+  ]
+}

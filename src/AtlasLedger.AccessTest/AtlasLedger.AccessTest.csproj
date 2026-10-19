@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    access-test: signs a person in through the browser (the Access Test registration: delegated read and write on the
+    ledger, nothing else) and checks what a person may and may not do against a running ledger server: their own firm,
+    404 for a firm they do not belong to, 403 outside their permissions, 401 without signing in, the services hidden from
+    them, and the data rules a person meets.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>access-test</AssemblyName>
+    <RootNamespace>AtlasLedger.AccessTest</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AtlasLedger.Client\AtlasLedger.Client.csproj" />
+  </ItemGroup>
+
+</Project>

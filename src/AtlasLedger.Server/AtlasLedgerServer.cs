@@ -19,6 +19,7 @@ namespace AtlasLedger.Server
     using Bellerophon.Runtime;
     using Bellerophon.Rules.NRules;
     using Microsoft.AspNetCore.Authentication;
+    using Microsoft.AspNetCore.Authentication.JwtBearer;
     using Microsoft.AspNetCore.Builder;
     using Microsoft.Extensions.Configuration;
     using Microsoft.Extensions.DependencyInjection;
@@ -125,20 +126,44 @@ namespace AtlasLedger.Server
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));
             builder.Services.AddHostedService<SimulatedMarketFeed>();
 
-            // Callers: development sign-in only, until bearer tokens from the identity provider are wired in.
-            if (!builder.Environment.IsDevelopment())
+            // Callers: bearer tokens from the identity provider (Microsoft Entra External ID) when one is configured;
+            // otherwise development sign-in, in the Development environment only.  With neither, the server does not start:
+            // it never runs open.
+            builder.Services.Configure<ToolAccessOptions>(configuration.GetSection(ToolAccessOptions.SectionName));
+            var identityProvider = configuration.GetSection(IdentityProviderOptions.SectionName).Get<IdentityProviderOptions>() ?? new IdentityProviderOptions();
+            if (identityProvider.IsConfigured)
+            {
+                if (identityProvider.Audiences.Length == 0)
+                {
+                    throw new InvalidOperationException($"{IdentityProviderOptions.SectionName}:Authority is set but {IdentityProviderOptions.SectionName}:Audiences is empty: name the Ledger API registration's client ID.");
+                }
+
+                builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                    .AddJwtBearer(options =>
+                    {
+                        options.Authority = identityProvider.Authority;
+
+                        // Keep the claims as Entra writes them (oid, scp, idtyp, azp, roles): the access policies and tenant
+                        // membership read those names, exactly as development sign-in supplies them.
+                        options.MapInboundClaims = false;
+                        options.TokenValidationParameters.ValidIssuer = identityProvider.Authority;
+                        options.TokenValidationParameters.ValidAudiences = identityProvider.Audiences;
+                        options.TokenValidationParameters.NameClaimType = IdentityClaims.ObjectIdentifierClaim;
+                    });
+            }
+            else if (builder.Environment.IsDevelopment())
+            {
+                builder.Services.AddAuthentication(DevelopmentAuthentication.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthentication>(DevelopmentAuthentication.SchemeName, null);
+
+                // The development tool is allowed only alongside development sign-in, never with real tokens.
+                builder.Services.PostConfigure<ToolAccessOptions>(tools => tools.ClientIds = tools.ClientIds.Append(DevelopmentAuthentication.ToolClientId).ToArray());
+            }
+            else
             {
                 throw new InvalidOperationException(
-                    $"No authentication is configured for the '{builder.Environment.EnvironmentName}' environment. Production signs callers in with bearer tokens from the identity provider, which is not wired in yet; run in Development.");
+                    $"No identity provider is configured for the '{builder.Environment.EnvironmentName}' environment: set {IdentityProviderOptions.SectionName}:Authority and {IdentityProviderOptions.SectionName}:Audiences (TangentAtlas.Platform's Deploy-EntraApplications.ps1 does), or run in Development.");
             }
-
-            builder.Services.AddAuthentication(DevelopmentAuthentication.SchemeName)
-                .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthentication>(DevelopmentAuthentication.SchemeName, null);
-
-            // Tools: the app registrations allowed to act as themselves in any tenant, from configuration (placeholders until
-            // the registrations exist).  The development tool is allowed only alongside development sign-in.
-            builder.Services.Configure<ToolAccessOptions>(configuration.GetSection(ToolAccessOptions.SectionName));
-            builder.Services.PostConfigure<ToolAccessOptions>(tools => tools.ClientIds = tools.ClientIds.Append(DevelopmentAuthentication.ToolClientId).ToArray());
 
             configureServices?.Invoke(builder.Services);
             var application = builder.Build();

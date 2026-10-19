@@ -12,10 +12,14 @@ Architecture, roadmap, decisions, and the deployment runbook are in `TangentAtla
 | Path | Purpose |
 |---|---|
 | `src/AtlasLedger.Server` | The server (Bellerophon's Primary role) and owner of the model, `bellerophon.json`. The generated API over the in-memory ledger, write-behind persistence to SQL Server, recovery at startup, the NRules compliance engine, a simulated market feed. Production deploys it as code to App Service (`.github/workflows/deploy-production.yml`); its `Dockerfile` builds a container image for anywhere else. |
-| `src/AtlasLedger.Client` | The client (Replica role), generated from the server's model: tenants, JSON script load and export, alerts, a local copy of a tenant, and an end-to-end walkthrough that doubles as a smoke test. `Data/firm-a.json` is the test organization. |
+| `src/AtlasLedger.Client` | The client library (Replica role), generated from the server's model and shared by the three programs below: the API client, JSON scripts, a local copy of a tenant, and sign-in (tools with a certificate, people through the browser) from `%APPDATA%\TangentAtlas\ledger-client.json`. `Data/` holds the sample scripts (`firm-a.json` is the test organization). |
+| `src/AtlasLedger.ScriptLoader` | **`script-loader <tenant> <script.json>`**: loads a script into a tenant. Nothing else. Signs in as itself (write permissions only), so it runs from command lines and other scripts. |
+| `src/AtlasLedger.Operator` | **`ledger-operator`**: tenants, export, alerts (and waiting for one), a local copy, and the services switch. Signs in as itself (read permissions and the services switch; no writes). |
+| `src/AtlasLedger.AccessTest` | **`access-test`**: signs a person in through the browser and checks what a person may and may not do (`whoami`, `run --member <tenant> --other <tenant>`). |
+| `tools/Test-LedgerDeployment.ps1` | The walkthrough: the three programs end to end against a server, every step reported; the smoke test of a deployment. |
 | `src/AtlasLedger.Schema` | The Entity Framework model of the database (Schema role) and its migrations. Used to create and evolve the database only; the server reads and writes with Bellerophon's generated SQL. |
 | `src/TangentAtlas` | The enums the model's datatypes name. |
-| `tests/AtlasLedger.Tests` | End to end: the server and client in one process over HTTP, including recovery. |
+| `tests/AtlasLedger.Tests` | End to end: the server and client in one process over HTTP, including recovery, the walkthrough's steps, and the server with real bearer tokens from a test issuer. |
 | `tests/AtlasLedger.Persistence.Tests` | The generated SQL writer and loader against SQL Server: LocalDB on Windows, or the server named by `BELLEROPHON_SQL_SERVER`; skipped without one. |
 
 ## Bellerophon
@@ -30,7 +34,7 @@ to `obj/<configuration>/net10.0/generated/` in each project.
 dotnet build
 dotnet test
 dotnet run --project src/AtlasLedger.Server          # Development environment; runs until Ctrl+C
-dotnet run --project src/AtlasLedger.Client          # in a second terminal: the walkthrough
+./tools/Test-LedgerDeployment.ps1                    # in a second terminal: the walkthrough (PowerShell 7)
 ```
 
 The server keeps its database in memory unless `ConnectionStrings:Ledger` is set. To use a SQL Server database, apply the
@@ -41,7 +45,10 @@ dotnet tool restore
 dotnet ef database update --project src/AtlasLedger.Schema
 ```
 
-The server refuses to start outside the Development environment until bearer-token authentication is wired in.
+Sign-in: with `IdentityProvider:Authority` and `IdentityProvider:Audiences` set (TangentAtlas.Platform's
+`Deploy-EntraApplications.ps1` sets them in Azure), the server accepts bearer tokens from Entra External ID; otherwise it
+runs only in the Development environment, with development sign-in. The programs use real sign-in for the server in
+`ledger-client.json` (written by the same script) and development sign-in for any other.
 
 ## Services: on while you work, off otherwise
 

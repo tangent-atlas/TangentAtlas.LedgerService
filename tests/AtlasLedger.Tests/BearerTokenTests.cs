@@ -17,7 +17,6 @@ namespace AtlasLedger.Tests
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
-    using client::AtlasLedger.Client;
     using client::AtlasLedger.Client.Api;
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Model;
@@ -43,6 +42,14 @@ namespace AtlasLedger.Tests
         private const string ApiClientId = "00000000-0000-0000-0000-0000000000a1";
 
         private const string ToolClientId = "00000000-0000-0000-0000-0000000000b2";
+
+        private const string LoaderClientId = "00000000-0000-0000-0000-0000000000b3";
+
+        private const string OperatorClientId = "00000000-0000-0000-0000-0000000000b4";
+
+        private static readonly string[] LoaderPermissions = { "Ledger.Write", "Users.Write", "Dossier.Write" };
+
+        private static readonly string[] OperatorPermissions = { "Ledger.Read", "Users.Read", "Services.Manage" };
 
         private const string DevelopmentCallerToolClientId = "22222222-2222-2222-2222-222222222222";
 
@@ -128,20 +135,45 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
-        /// The walkthrough, run as the tool alone (as from a command line or script against Azure), gets what every step
-        /// expects, and lists as skipped the steps only a person can test.
+        /// The walkthrough, with real tokens: the script loader and the operator console each with only their own
+        /// permissions, and a person signed in for access-test's checks.  Every step gets what it expects.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
         [Fact]
-        public async Task TheWalkthroughPassesAsTheToolAlone()
+        public async Task TheWalkthroughPassesWithEachProgramsOwnToken()
         {
-            var httpClient = new HttpClient { BaseAddress = this.server.BaseAddress };
-            var tool = new LedgerApiClient(httpClient, null, _ => Task.FromResult(this.server.ToolToken(ToolClientId)));
-            var output = new System.IO.StringWriter();
-            var failures = await new Walkthrough(tool, null, new LedgerApiClient(httpClient, null), output, TimeSpan.FromSeconds(10)).RunAsync(TestContext.Current.CancellationToken);
-            Assert.True(failures == 0, output.ToString());
-            Assert.Contains("skipped", output.ToString(), StringComparison.Ordinal);
-            Assert.Contains("401 Unauthorized", output.ToString(), StringComparison.Ordinal);
+            const string Person = "00000000-0000-0000-0000-0000000000c9";
+            var (passed, report) = await WalkthroughSteps.RunAsync(
+                this.Client(this.server.ToolToken(LoaderClientId, roles: LoaderPermissions)),
+                this.Client(this.server.ToolToken(OperatorClientId, roles: OperatorPermissions)),
+                this.Client(this.server.PersonToken(Person, "Ledger.Read Ledger.Write")),
+                this.Client(null),
+                (Authority, Person),
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+            Assert.True(passed, report);
+        }
+
+        /// <summary>
+        /// Each program can do its job and nothing else: the script loader writes but cannot read or switch services; the
+        /// operator console reads and switches services but cannot write.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task EachProgramHasOnlyItsOwnPermissions()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var loader = this.Client(this.server.ToolToken(LoaderClientId, roles: LoaderPermissions));
+            var operatorConsole = this.Client(this.server.ToolToken(OperatorClientId, roles: OperatorPermissions));
+            var tenant = Guid.NewGuid();
+
+            await loader.ApplyAsync(tenant, Firm(), cancellationToken);
+            Assert.Equal(HttpStatusCode.Forbidden, await StatusOf(() => loader.ListAsync<AccountDto>(tenant, "Account", cancellationToken)));
+            Assert.Equal(HttpStatusCode.NotFound, await StatusOf(() => loader.GetServicesAsync(cancellationToken)));
+
+            Assert.Equal(2, (await operatorConsole.ListAsync<AccountDto>(tenant, "Account", cancellationToken)).Count);
+            Assert.NotEmpty(await operatorConsole.GetServicesAsync(cancellationToken));
+            Assert.Equal(HttpStatusCode.Forbidden, await StatusOf(() => operatorConsole.ApplyAsync(Guid.NewGuid(), Firm(), cancellationToken)));
         }
 
         /// <summary>
@@ -246,9 +278,10 @@ namespace AtlasLedger.Tests
             /// <param name="expires">When it expires, if not in an hour.</param>
             /// <param name="key">The signing key, if not the issuer's.</param>
             /// <returns>The token.</returns>
-            public string ToolToken(string clientId, string? issuer = null, string? audience = null, DateTime? expires = null, SecurityKey? key = null) =>
+            /// <param name="roles">The application permissions, if not every ledger permission and the services switch.</param>
+            public string ToolToken(string clientId, string? issuer = null, string? audience = null, DateTime? expires = null, SecurityKey? key = null, string[]? roles = null) =>
                 this.Issue(
-                    new Dictionary<string, object> { ["idtyp"] = "app", ["azp"] = clientId, ["oid"] = Guid.NewGuid().ToString(), ["roles"] = new[] { "Ledger.Read", "Ledger.Write", "Users.Read", "Users.Write" } },
+                    new Dictionary<string, object> { ["idtyp"] = "app", ["azp"] = clientId, ["oid"] = Guid.NewGuid().ToString(), ["roles"] = roles ?? new[] { "Ledger.Read", "Ledger.Write", "Users.Read", "Users.Write", "Services.Manage" } },
                     issuer,
                     audience,
                     expires,
@@ -274,6 +307,8 @@ namespace AtlasLedger.Tests
                     $"--IdentityProvider:Authority={Authority}",
                     $"--IdentityProvider:Audiences:0={ApiClientId}",
                     $"--Tools:ClientIds:0={ToolClientId}",
+                    $"--Tools:ClientIds:1={LoaderClientId}",
+                    $"--Tools:ClientIds:2={OperatorClientId}",
                     "--MarketFeed:TickInterval=00:00:00.300",
                     "--MarketFeed:BadPrintInterval=00:00:01",
                 };

@@ -21,7 +21,8 @@ namespace AtlasLedger.Server.Switches
     /// <para>
     /// This is the one route outside a tenant, because the services serve every tenant at once.  It reads and changes no
     /// tenant's data, and only an allowed tool acting as itself (an application's token whose client ID is in
-    /// <c>Tools:ClientIds</c>) may use it.  Anyone else signed in gets 404, as for a tenant they do not belong to, so the
+    /// <c>Tools:ClientIds</c>) that also holds the <c>Services.Manage</c> application permission may use it: the operator
+    /// console, not the script loader.  Anyone else signed in gets 404, as for a tenant they do not belong to, so the
     /// route is not even confirmed to exist; anyone not signed in gets 401.
     /// </para>
     /// <para>
@@ -34,6 +35,11 @@ namespace AtlasLedger.Server.Switches
     [Route("v1/system/services")]
     public sealed partial class ServiceSwitchController : ControllerBase
     {
+        /// <summary>
+        /// The application permission (an app role, in the token's <c>roles</c> claim) that the services switch requires.
+        /// </summary>
+        public const string ManagePermission = "Services.Manage";
+
         private readonly ServiceSwitchboard switchboard;
 
         private readonly ServiceSwitchOptions options;
@@ -128,7 +134,7 @@ namespace AtlasLedger.Server.Switches
 
         private bool IsAllowedTool(out string clientId)
         {
-            if (IdentityClaims.TryGetApplication(this.User, out var application) && this.tools.Allows(application))
+            if (IdentityClaims.TryGetApplication(this.User, out var application) && this.tools.Allows(application) && this.User.HasClaim("roles", ManagePermission))
             {
                 clientId = application;
                 return true;
@@ -145,7 +151,7 @@ namespace AtlasLedger.Server.Switches
         [LoggerMessage(Level = LogLevel.Information, Message = "Service {Name} turned off by tool {ClientId}.")]
         private partial void LogTurnedOff(string name, string clientId);
 
-        [LoggerMessage(Level = LogLevel.Warning, Message = "Refused {Method} {Path}: the caller is not an allowed tool acting as itself.")]
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Refused {Method} {Path}: the caller is not an allowed tool acting as itself with Services.Manage.")]
         private partial void LogRefused(string method, string path);
     }
 }

@@ -55,7 +55,7 @@ namespace AtlasLedger.Tests
             await using (var first = await StartAsync(database, cancellationToken))
             {
                 var tool = Tool(first);
-                var script = await LedgerScript.ReadAsync(Walkthrough.FirmAScript, cancellationToken);
+                var script = await LedgerScript.ReadAsync(SampleData.FirmA, cancellationToken);
                 await tool.ApplyAsync(firmA, script, cancellationToken);
                 await tool.ApplyAsync(firmB, script, cancellationToken);
                 var symbol = new LedgerScript().Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "9999", NodeId = Guid.Parse("5a000000-0000-0000-0000-000000000001") });
@@ -90,7 +90,7 @@ namespace AtlasLedger.Tests
             await using (var first = await StartAsync(database, cancellationToken))
             {
                 var tool = Tool(first);
-                var script = await LedgerScript.ReadAsync(Walkthrough.FirmAScript, cancellationToken);
+                var script = await LedgerScript.ReadAsync(SampleData.FirmA, cancellationToken);
                 await tool.ApplyAsync(firmA, script, cancellationToken);
                 await tool.ApplyAsync(firmB, script, cancellationToken);
                 beforeA = Rows(await Commands.ExportAsync(tool, firmA, cancellationToken));

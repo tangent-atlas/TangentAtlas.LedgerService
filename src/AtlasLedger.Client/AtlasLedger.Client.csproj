@@ -1,12 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The Atlas Ledger client (the Replica role): commands that work with a running server through its API, using the
-    generated DTOs and contract headers, and a local copy of a tenant to navigate.  No ASP.NET Core.
+    The Atlas Ledger client library (the Replica role), shared by the programs that talk to a running server (the script
+    loader, the operator console, and access-test): the API client with the generated DTOs and contract headers, JSON
+    scripts, a local copy of a tenant, and sign-in for tools (certificate) and people (browser).  No ASP.NET Core.
     It generates from the server's model file, so server and client always share one model.
   -->
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <RootNamespace>AtlasLedger.Client</RootNamespace>
     <BellerophonRole>Replica</BellerophonRole>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
@@ -18,13 +18,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Scripts that load a tenant's data. -->
+    <!-- Scripts that load a tenant's data, copied beside each program that references this library. -->
     <None Include="Data\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Bellerophon" />
     <PackageReference Include="Microsoft.Identity.Client" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
   </ItemGroup>
 
   <ItemGroup>

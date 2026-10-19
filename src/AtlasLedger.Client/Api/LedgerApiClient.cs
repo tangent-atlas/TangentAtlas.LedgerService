@@ -48,7 +48,7 @@ namespace AtlasLedger.Client.Api
         /// </summary>
         /// <param name="httpClient">The HTTP client, with the server's address as its base address.</param>
         /// <param name="caller">The development caller to sign in as (see <see cref="DevelopmentCallers"/>), or null.</param>
-        /// <param name="accessToken">Gets a bearer token for each request (see <see cref="ToolSignIn"/>), or null.  With neither
+        /// <param name="accessToken">Gets a bearer token for each request (see <see cref="ToolSignIn"/> and <see cref="PersonSignIn"/>), or null.  With neither
         /// a caller nor a token source, the client calls anonymously.</param>
         public LedgerApiClient(HttpClient httpClient, string? caller, Func<CancellationToken, Task<string>>? accessToken = null)
         {

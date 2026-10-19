@@ -37,16 +37,18 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
-        /// Every step of the client's walkthrough gets the status and result it expects, including the compliance alerts
-        /// raised and cleared by the server's rules and market feed.
+        /// Every step of the walkthrough gets the status and result it expects, with development sign-in: the script loader
+        /// loads, access-test's person checks pass, an export loads unchanged into another tenant, and the compliance
+        /// alerts are raised and cleared by the server's rules and market feed.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
         [Fact]
         public async Task TheWalkthroughSucceeds()
         {
-            using var output = new StringWriter();
-            var failures = await new Walkthrough(this.server.HttpClient, output, TimeSpan.FromSeconds(10)).RunAsync(TestContext.Current.CancellationToken);
-            Assert.True(failures == 0, output.ToString());
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var advisor = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Advisor);
+            var (passed, report) = await WalkthroughSteps.RunAsync(tool, tool, advisor, new LedgerApiClient(this.server.HttpClient, null), (DevelopmentCallers.Issuer, DevelopmentCallers.AdvisorSubject), TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.True(passed, report);
         }
 
         /// <summary>
@@ -73,12 +75,12 @@ namespace AtlasLedger.Tests
             var cancellationToken = TestContext.Current.CancellationToken;
             var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
             var (first, second) = (Guid.NewGuid(), Guid.NewGuid());
-            await tool.ApplyAsync(first, await LedgerScript.ReadAsync(Walkthrough.FirmAScript, cancellationToken), cancellationToken);
+            await tool.ApplyAsync(first, await LedgerScript.ReadAsync(SampleData.FirmA, cancellationToken), cancellationToken);
             var exported = await Commands.ExportAsync(tool, first, cancellationToken);
             await tool.ApplyAsync(second, exported, cancellationToken);
             var again = await Commands.ExportAsync(tool, second, cancellationToken);
             Assert.Equal(Rows(exported), Rows(again));
-            Assert.Equal(7, Rows(exported).Length);
+            Assert.Equal(6, Rows(exported).Length);   // firm-a.json: two nodes, two accounts, two symbols
         }
 
         /// <summary>
@@ -90,7 +92,7 @@ namespace AtlasLedger.Tests
         public async Task LargeBatchesAreRefusedAndScriptsLoadInParts()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
-            var script = await LedgerScript.ReadAsync(Walkthrough.FirmAScript, cancellationToken);
+            var script = await LedgerScript.ReadAsync(SampleData.FirmA, cancellationToken);
 
             // The reference: the same script loaded in one batch by the fixture's server, which has the default limit.
             var fixtureTool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);

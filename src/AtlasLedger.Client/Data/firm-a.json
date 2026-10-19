@@ -5,7 +5,6 @@
     { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000001", "accountType": "ManagedAccount" } },
     { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000002", "accountType": "GroupAccount" } },
     { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "1234-5678", "nodeId": "5a000000-0000-0000-0000-000000000001" } },
-    { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "5555-0101", "nodeId": "5a000000-0000-0000-0000-000000000002" } },
-    { "action": "Insert", "table": "User", "row": { "userId": "5a000000-0000-0000-0000-0000000000a1", "identityIssuer": "https://example.ciamlogin.com/example/v2.0", "identitySubject": "11111111-1111-1111-1111-111111111111" } }
+    { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "5555-0101", "nodeId": "5a000000-0000-0000-0000-000000000002" } }
   ]
 }

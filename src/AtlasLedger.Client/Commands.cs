@@ -148,6 +148,43 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Waits until a tenant has an alert from a rule, or until it has none from it: the compliance engine raises and
+        /// clears alerts as the data changes, a little after each commit.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="rule">The rule, or the start of its name (<c>InvalidPrice</c>).</param>
+        /// <param name="present">True to wait for such an alert; false to wait until there is none.</param>
+        /// <param name="timeout">How long to wait.</param>
+        /// <param name="output">Where to write the alerts when the wait ends.</param>
+        /// <param name="cancellationToken">Cancels the wait.</param>
+        /// <returns>True if the tenant got there in time.</returns>
+        public static async Task<bool> WaitForAlertAsync(LedgerApiClient api, Guid tenantId, string rule, bool present, TimeSpan timeout, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var deadline = DateTimeOffset.UtcNow + timeout;
+            IReadOnlyList<AlertDto> alerts;
+            bool reached;
+            do
+            {
+                alerts = await api.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken).ConfigureAwait(false);
+                reached = alerts.Any(alert => alert.Rule.StartsWith(rule, StringComparison.Ordinal)) == present;
+                if (!reached)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+                }
+            }
+            while (!reached && DateTimeOffset.UtcNow < deadline);
+
+            var shown = alerts.Count == 0 ? "no alerts" : string.Join("; ", alerts.Select(alert => $"{alert.Rule}: {alert.Message}"));
+            output.WriteLine(reached
+                ? $"{(present ? "Raised" : "Cleared")} {rule}: {shown}"
+                : $"TIMED OUT after {timeout.TotalSeconds:0} seconds waiting for {rule} to be {(present ? "raised" : "cleared")}: {shown}");
+            return reached;
+        }
+
+        /// <summary>
         /// Copies a tenant into a local Replica and shows its graph.
         /// </summary>
         /// <param name="api">The API.</param>

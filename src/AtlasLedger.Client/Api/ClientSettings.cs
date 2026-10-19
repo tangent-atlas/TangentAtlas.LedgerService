@@ -9,14 +9,14 @@ namespace AtlasLedger.Client.Api
     using System.Text.Json;
 
     /// <summary>
-    /// Where the client finds its server and how it signs in, from <c>ledger-client.json</c>: written on the operator's
-    /// computer by TangentAtlas.Platform's Deploy-EntraApplications.ps1, so command lines and scripts need no settings of
-    /// their own.  Nothing in it is secret: the tool proves who it is with a certificate in the operator's certificate
-    /// store, which the file names by thumbprint.
+    /// Where the client programs find their server and how they sign in, from <c>ledger-client.json</c>: written on the
+    /// operator's computer by TangentAtlas.Platform's Deploy-EntraApplications.ps1, so command lines and scripts need no
+    /// settings of their own.  Nothing in it is secret: the tools prove who they are with a certificate in the operator's
+    /// certificate store, which the file names by thumbprint, and access-test signs a person in through the browser.
     /// </summary>
     /// <remarks>
     /// The file is <c>%APPDATA%\TangentAtlas\ledger-client.json</c> (<c>~/.config/TangentAtlas/ledger-client.json</c>
-    /// elsewhere), or the path in <c>ATLAS_LEDGER_CLIENT_SETTINGS</c>.  Without it, the client talks to a development
+    /// elsewhere), or the path in <c>ATLAS_LEDGER_CLIENT_SETTINGS</c>.  Without it, the programs talk to a development
     /// server on this computer with development sign-in.
     /// </remarks>
     public sealed class ClientSettings
@@ -32,9 +32,38 @@ namespace AtlasLedger.Client.Api
         public string? Server { get; set; }
 
         /// <summary>
-        /// Gets or sets how the tool signs in to Entra External ID, or null for development sign-in.
+        /// Gets or sets the external tenant's sign-in address, <c>https://&lt;tenant ID&gt;.ciamlogin.com/&lt;tenant ID&gt;</c>;
+        /// null for development sign-in.
         /// </summary>
-        public ToolSignInSettings? SignIn { get; set; }
+        public string? Authority { get; set; }
+
+        /// <summary>
+        /// Gets or sets the Ledger API's application ID URI, <c>api://&lt;client ID&gt;</c>, from which the programs name
+        /// the permissions they ask for.
+        /// </summary>
+        public string? ApiUri { get; set; }
+
+        /// <summary>
+        /// Gets or sets the thumbprint of the tools' certificate, in the current user's personal certificate store.  Its
+        /// private key never leaves this computer; Entra holds only the public half, on the script loader and the operator
+        /// console.
+        /// </summary>
+        public string? CertificateThumbprint { get; set; }
+
+        /// <summary>
+        /// Gets or sets the script loader's client ID.
+        /// </summary>
+        public string? ScriptLoaderClientId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the operator console's client ID.
+        /// </summary>
+        public string? OperatorClientId { get; set; }
+
+        /// <summary>
+        /// Gets or sets access-test's client ID.
+        /// </summary>
+        public string? AccessTestClientId { get; set; }
 
         /// <summary>
         /// Gets the settings file's path.

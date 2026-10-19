@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    script-loader: reads a JSON script and sends it to the ledger server, into one tenant.  Nothing else.  It signs in
+    as itself (the Script Loader registration, write permissions only) with the tools' certificate, so command lines and
+    other scripts run it unattended.  See AtlasLedger.Client's ClientSettings for where it finds the server.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>script-loader</AssemblyName>
+    <RootNamespace>AtlasLedger.ScriptLoader</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AtlasLedger.Client\AtlasLedger.Client.csproj" />
+  </ItemGroup>
+
+</Project>

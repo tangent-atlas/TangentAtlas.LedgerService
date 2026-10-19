@@ -1,0 +1,5 @@
+{
+  "operations": [
+    { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "9999-0001", "nodeId": "5a000000-0000-0000-0000-000000000003" } }
+  ]
+}

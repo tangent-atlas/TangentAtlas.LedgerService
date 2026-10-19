@@ -1,0 +1,6 @@
+{
+  "operations": [
+    { "action": "Insert", "table": "Node", "row": { "nodeId": "5a000000-0000-0000-0000-000000000003", "displayName": "Jones IRA", "fullName": "Jones Individual Retirement Account", "nodeStatus": "Active", "nodeType": "Account" } },
+    { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000003", "accountType": "ManagedAccount" } }
+  ]
+}

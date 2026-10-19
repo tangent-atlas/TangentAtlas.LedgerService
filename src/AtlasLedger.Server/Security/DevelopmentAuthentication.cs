@@ -68,7 +68,7 @@ namespace AtlasLedger.Server.Security
 
                 // The operator tool acting as itself: an application's token (idtyp and azp, as Entra issues them) with
                 // application permissions only, no person.
-                "tool" => new[] { new Claim("idtyp", "app"), new Claim("azp", ToolClientId), new Claim("roles", "Ledger.Read"), new Claim("roles", "Ledger.Write"), new Claim("roles", "Users.Read"), new Claim("roles", "Users.Write") },
+                "tool" => new[] { new Claim("idtyp", "app"), new Claim("azp", ToolClientId), new Claim("roles", "Ledger.Read"), new Claim("roles", "Ledger.Write"), new Claim("roles", "Users.Read"), new Claim("roles", "Users.Write"), new Claim("roles", "Services.Manage") },
                 _ => null,
             };
 

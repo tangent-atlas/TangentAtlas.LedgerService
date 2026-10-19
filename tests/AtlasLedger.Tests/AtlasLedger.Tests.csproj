@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AtlasLedger.Server\AtlasLedger.Server.csproj" Aliases="server" />
     <ProjectReference Include="..\..\src\AtlasLedger.Client\AtlasLedger.Client.csproj" Aliases="client" />
+    <ProjectReference Include="..\..\src\AtlasLedger.AccessTest\AtlasLedger.AccessTest.csproj" Aliases="client" />
   </ItemGroup>
 
 </Project>

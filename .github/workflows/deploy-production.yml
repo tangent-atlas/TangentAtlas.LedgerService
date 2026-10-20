@@ -150,6 +150,26 @@ jobs:
             --rule-name "github-run-${{ github.run_id }}" --action Allow --priority 200 \
             --ip-address "$RUNNER_IP/32"
 
+      # A new access rule takes a while to reach the deployment site: October 20, the deploy started four seconds after
+      # the rule was added and was refused with "Ip Forbidden (403)"; a rerun minutes later passed.  So wait until the
+      # site admits this runner.  Unsigned, a blocked address gets 403 and an admitted one 401 (sign-in required), so
+      # anything but 403 means the rule has arrived.  Up to five minutes.
+      - name: Wait until the deployment site admits this runner
+        run: |
+          SCM_HOST=$(az webapp show --name "$WEB_APP" --resource-group "$RESOURCE_GROUP" \
+            --query "hostNameSslStates[?hostType=='Repository'].name | [0]" --output tsv)
+          for attempt in $(seq 1 30); do
+            STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "https://$SCM_HOST/api/settings" || echo 000)
+            if [ "$STATUS" != "403" ] && [ "$STATUS" != "000" ]; then
+              echo "https://$SCM_HOST admits this runner (HTTP $STATUS)."
+              exit 0
+            fi
+            echo "Waiting for the access rule to reach https://$SCM_HOST (HTTP $STATUS; attempt $attempt of 30)..."
+            sleep 10
+          done
+          echo "::error::The deployment site still refuses this runner after five minutes. Check the app's access restrictions (Networking) for the rule github-run-${{ github.run_id }}."
+          exit 1
+
       # Zip deployment with the deployer's Entra token (no publishing password); App Service restarts the app on the new
       # code.
       - name: Deploy

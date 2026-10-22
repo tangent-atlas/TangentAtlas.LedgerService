@@ -1,0 +1,14 @@
+# Dependabot: weekly pull requests for out-of-date NuGet packages and GitHub Actions.
+# Security updates for known vulnerabilities are separate and immediate (turned on in the repository's settings).
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

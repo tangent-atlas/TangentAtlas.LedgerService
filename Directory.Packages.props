@@ -19,7 +19,7 @@
     <PackageVersion Include="Bellerophon.Rules.NRules" Version="$(BellerophonVersion)" />
 
     <!-- The schema project's Entity Framework model and migrations. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.13" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
 
     <!-- Sign-in: bearer tokens from Microsoft Entra External ID. -->

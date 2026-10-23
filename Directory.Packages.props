@@ -24,8 +24,8 @@
 
     <!-- Sign-in: bearer tokens from Microsoft Entra External ID. -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Identity.Client" Version="4.90.1" />
-    <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.90.1" />
+    <PackageVersion Include="Microsoft.Identity.Client" Version="4.91.1" />
+    <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.91.1" />
 
     <!-- Tests: xunit.v3 on Microsoft Testing Platform v2, opted into by global.json. -->
     <PackageVersion Include="xunit.v3" Version="4.0.2" />

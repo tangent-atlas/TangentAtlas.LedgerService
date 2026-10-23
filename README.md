@@ -5,7 +5,7 @@ The AtlasLedger server behind Tangent Atlas, and its client, schema, and tests. 
 `src/AtlasLedger.Server/bellerophon.json`; Bellerophon comes from nuget.org as packages, so this repository holds only
 the product: the model, the hand-written server code, and its configuration.
 
-Architecture, roadmap, decisions, and the deployment runbook are in `TangentAtlas.Platform/Documents`.
+Architecture, roadmap, decisions, and the deployment runbook are kept in the private `TangentAtlas.Platform` repository, with the scripts that build the Azure environment.
 
 ## Layout
 
@@ -67,3 +67,7 @@ With `ledger-client.json` in place the operator reaches the server in Azure; `--
 another.  The walkthrough turns the services on and off again when it finishes.  The API is `v1/system/services`, the
 one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage` application permission (the
 operator console, not the script loader) may use it, and anyone else signed in gets 404.
+
+## License
+
+Apache License 2.0; see `LICENSE`. Security reports: see `SECURITY.md`.

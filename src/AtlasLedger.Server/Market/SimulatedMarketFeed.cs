@@ -1,4 +1,4 @@
-// <copyright file="SimulatedMarketFeed.cs" company="Tangent Atlas">
+﻿// <copyright file="SimulatedMarketFeed.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -11,13 +11,14 @@ namespace AtlasLedger.Server.Market
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Holdings;
     using AtlasLedger.Server.Switches;
     using Microsoft.Extensions.Hosting;
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.Options;
 
     /// <summary>
-    /// Stands in for the market data feed: prices every symbol any tenant holds with a random walk, and now and then sends
+    /// Stands in for the market data feed: prices every symbol any tenant holds with a random walk (a ticker starting from its last trade), and now and then sends
     /// a bad print.  It runs only while its switch (<see cref="ServiceSwitchboard.MarketFeed"/>) is on.
     /// </summary>
     /// <remarks>
@@ -104,14 +105,30 @@ namespace AtlasLedger.Server.Market
         /// <returns>True if a bad print was sent.</returns>
         private bool Tick(DateTimeOffset now, bool isBadPrint)
         {
-            // Who holds what, read under each tenant's lock and released before publishing.
+            // Who holds what, read under each tenant's lock and released before publishing.  A ticker the feed hasn't
+            // priced yet starts from its security's last trade, so a tenant loaded with history isn't valued at $100 a share.
             var holders = new Dictionary<(string Scheme, string Code), List<LedgerPartition>>();
+            var openingPrices = new Dictionary<(string Scheme, string Code), decimal>();
             foreach (var partition in this.ledger.Partitions)
             {
                 lock (partition.SyncRoot)
                 {
+                    var lastTrades = new Dictionary<Guid, Trade>();
+                    foreach (var trade in partition.Trades)
+                    {
+                        if (!lastTrades.TryGetValue(trade.SecurityId, out var latest) || trade.EffectiveTime > latest.EffectiveTime)
+                        {
+                            lastTrades[trade.SecurityId] = trade;
+                        }
+                    }
+
                     foreach (var symbol in partition.Symbols)
                     {
+                        if (symbol.Scheme == SymbolSchemes.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
+                        {
+                            openingPrices.TryAdd((symbol.Scheme, symbol.Code), lastTrade.Price);
+                        }
+
                         var key = (symbol.Scheme, symbol.Code);
                         if (!holders.TryGetValue(key, out var list))
                         {
@@ -131,7 +148,7 @@ namespace AtlasLedger.Server.Market
             var badSymbol = isBadPrint ? holders.Keys.ElementAt(Random.Shared.Next(holders.Count)) : default;
             foreach (var (key, partitions) in holders)
             {
-                var last = this.prices.TryGetValue(key, out var previous) ? previous : OpeningPrice;
+                var last = this.prices.TryGetValue(key, out var previous) ? previous : openingPrices.GetValueOrDefault(key, OpeningPrice);
                 last = Math.Max(0.01m, Math.Round(last * (1m + ((decimal)Random.Shared.NextDouble() - 0.5m) / 100m), 2));
                 this.prices[key] = last;
                 var isBad = isBadPrint && key == badSymbol;

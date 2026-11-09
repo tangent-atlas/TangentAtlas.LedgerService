@@ -1,4 +1,4 @@
-// <copyright file="LedgerApiClient.cs" company="Tangent Atlas">
+﻿// <copyright file="LedgerApiClient.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -107,6 +107,16 @@ namespace AtlasLedger.Client.Api
         /// <returns>The tenants' IDs.</returns>
         public async Task<IReadOnlyList<Guid>> GetTenantsAsync(CancellationToken cancellationToken = default) =>
             await this.SendAsync<List<Guid>>(HttpMethod.Get, "v1/me/tenants", null, cancellationToken).ConfigureAwait(false) ?? new List<Guid>();
+
+        /// <summary>
+        /// Gets what a tenant's events add up to: its holdings and cash, from the rules' latest snapshot.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The holdings.  The server answers 409 while the rules haven't run for the tenant.</returns>
+        public async Task<TenantHoldings> GetHoldingsAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantHoldings>(HttpMethod.Get, $"v1/tenants/{tenantId}/holdings", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no holdings.");
 
         /// <summary>
         /// Lists a table's rows in a tenant.

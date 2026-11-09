@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    test-data: writes test accounts as ledger scripts (what script-loader loads).  It talks to no server.  Today: the
+    Joe 10 account, from the forward test's state file.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>test-data</AssemblyName>
+    <RootNamespace>AtlasLedger.TestData</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AtlasLedger.Client\AtlasLedger.Client.csproj" />
+  </ItemGroup>
+
+</Project>

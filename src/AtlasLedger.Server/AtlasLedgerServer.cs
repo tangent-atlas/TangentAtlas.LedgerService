@@ -1,4 +1,4 @@
-// <copyright file="AtlasLedgerServer.cs" company="Tangent Atlas">
+﻿// <copyright file="AtlasLedgerServer.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -11,6 +11,7 @@ namespace AtlasLedger.Server
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Compliance;
+    using AtlasLedger.Server.Holdings;
     using AtlasLedger.Server.Market;
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
@@ -110,13 +111,18 @@ namespace AtlasLedger.Server
             builder.Services.AddSingleton<ServiceSwitchboard>();
             builder.Services.Configure<ServiceSwitchOptions>(configuration.GetSection(ServiceSwitchOptions.SectionName));
 
-            // Compliance: the rules are compiled once; each tenant gets its own engine and NRules session.
+            // The rules (compliance and holdings): compiled once; each tenant gets its own engine and one NRules session
+            // holding every rule.  After each cycle the holdings the rules derived are published for the API to read.
             builder.Services.Configure<ComplianceOptions>(configuration.GetSection(ComplianceOptions.SectionName));
+            builder.Services.AddSingleton<HoldingsStore>();
             builder.Services.AddSingleton(services =>
             {
                 var compliance = services.GetRequiredService<IOptions<ComplianceOptions>>().Value;
                 return new RulesEngineHost(
-                    new NRulesSessionFactory(ComplianceRules.Compile()),
+                    new HoldingsSessionFactory(
+                        new NRulesSessionFactory(ComplianceRules.Compile()),
+                        services.GetRequiredService<HoldingsStore>(),
+                        services.GetRequiredService<TimeProvider>()),
                     new RulesEngineOptions { MinimumInterval = compliance.MinimumInterval },
                     compliance.MaximumConcurrentCycles);
             });

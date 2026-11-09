@@ -1,4 +1,4 @@
-// <copyright file="Program.cs" company="Tangent Atlas">
+﻿// <copyright file="Program.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -34,6 +34,9 @@ namespace AtlasLedger.Operator
               alerts <tenant> --wait-cleared <rule> [--timeout <seconds>]
                                               Wait until there is no such alert.
               mirror <tenant>                 Copy a tenant locally and show its accounts, symbols, and alerts.
+              holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
+                                              valued at their prices, and its cash.  The rules derive them, so
+                                              compliance must be on.
               services                        Show the server's optional services (market feed, compliance).
               services on [name...] [--for <hours>]
                                               Turn services on (all, if none named) for a while (default 4 hours;
@@ -100,6 +103,9 @@ namespace AtlasLedger.Operator
                         return await Commands.WaitForAlertAsync(api, Guid.Parse(positional[1]), rule, waitFor is not null, timeout, output, token).ConfigureAwait(false) ? 0 : 1;
                     case "alerts" when positional.Count == 2:
                         await Commands.AlertsAsync(api, Guid.Parse(positional[1]), watch, output, token).ConfigureAwait(false);
+                        return 0;
+                    case "holdings" when positional.Count == 2:
+                        await Commands.HoldingsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
                         return 0;
                     case "mirror" when positional.Count == 2:
                         await Commands.MirrorAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

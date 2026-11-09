@@ -1,4 +1,4 @@
-// <copyright file="Commands.cs" company="Tangent Atlas">
+﻿// <copyright file="Commands.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -54,6 +54,57 @@ namespace AtlasLedger.Client
             // Large scripts load in several batches, since the server limits a batch's size.
             await api.ApplyInBatchesAsync(tenantId, script, cancellationToken: cancellationToken).ConfigureAwait(false);
             output.WriteLine($"Loaded {script.Operations.Count} operation(s) from {path} into {tenantId}.");
+        }
+
+        /// <summary>
+        /// Shows what a tenant's events add up to: each account's holdings, valued at their effective prices, and its cash.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the holdings are shown.</returns>
+        public static async Task HoldingsAsync(LedgerApiClient api, Guid tenantId, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var holdings = await api.GetHoldingsAsync(tenantId, cancellationToken).ConfigureAwait(false);
+            var nodes = (await api.ListAsync<NodeDto>(tenantId, "Node", cancellationToken).ConfigureAwait(false)).ToDictionary(node => node.NodeId);
+            var tickers = (await api.ListAsync<SymbolDto>(tenantId, "Symbol", cancellationToken).ConfigureAwait(false))
+                .Where(symbol => symbol.Scheme == "Ticker")
+                .GroupBy(symbol => symbol.NodeId)
+                .ToDictionary(group => group.Key, group => group.First().Code);
+            var english = CultureInfo.GetCultureInfo("en-US");
+            output.WriteLine($"Holdings of {tenantId}, as the rules derived them at {holdings.AsOf.ToString("u", CultureInfo.InvariantCulture)}");
+            var accounts = holdings.Holdings.Select(holding => holding.AccountId).Concat(holdings.Cash.Select(cash => cash.AccountId)).Distinct();
+            foreach (var accountId in accounts)
+            {
+                var name = nodes.TryGetValue(accountId, out var node) ? node.FullName : accountId.ToString();
+                var lines = holdings.Holdings.Where(holding => holding.AccountId == accountId).ToList();
+                var cash = holdings.Cash.FirstOrDefault(item => item.AccountId == accountId)?.Cash ?? 0m;
+                var total = lines.Sum(holding => holding.MarketValue ?? 0m) + cash;
+                output.WriteLine();
+                output.WriteLine(name);
+                output.WriteLine($"  {"Security",-10} {"Shares",14} {"Price",12} {"Value",16} {"Weight",7}  Price from");
+                foreach (var holding in lines.OrderByDescending(holding => holding.MarketValue ?? 0m))
+                {
+                    var security = tickers.GetValueOrDefault(holding.SecurityId, holding.SecurityId.ToString()[..8]);
+                    var flag = holding.IsOverridden ? "  (overridden)" : string.Empty;
+                    output.WriteLine(string.Format(
+                        english,
+                        "  {0,-10} {1,14:#,0.######} {2,12} {3,16} {4,7}  {5}{6}",
+                        security,
+                        holding.Quantity,
+                        holding.Price is { } price ? price.ToString("C2", english) : "-",
+                        holding.MarketValue is { } value ? value.ToString("C2", english) : "-",
+                        total == 0m || holding.MarketValue is null ? "-" : (holding.MarketValue.Value / total).ToString("P1", english),
+                        holding.PriceSource ?? "none",
+                        flag));
+                }
+
+                output.WriteLine(string.Format(english, "  {0,-10} {1,14} {2,12} {3,16:C2} {4,7}", "Cash", string.Empty, string.Empty, cash, total == 0m ? "-" : (cash / total).ToString("P1", english)));
+                output.WriteLine(string.Format(english, "  {0,-10} {1,14} {2,12} {3,16:C2}", "Total", string.Empty, string.Empty, total));
+            }
         }
 
         /// <summary>

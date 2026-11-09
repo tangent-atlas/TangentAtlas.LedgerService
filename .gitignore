@@ -19,3 +19,6 @@ secrets.json
 **/*.pfx
 **/*.p12
 **/*.key
+
+# Generated test data: built from licensed prices, never committed.
+artifacts/

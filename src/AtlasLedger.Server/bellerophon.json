@@ -2,13 +2,20 @@
   "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
   "datatypes": {
     "accountType": "AtlasLedger.Model.AccountType",
+    "cashEntryKind": "AtlasLedger.Model.CashEntryKind",
     "email": { "maxLength": 128, "type": "System.String" },
+    "eventSource": "AtlasLedger.Model.EventSource",
     "guid": "System.Guid",
+    "long": "System.Int64",
+    "money": { "precision": 19, "scale": 4, "type": "System.Decimal" },
     "nodeStatus": "AtlasLedger.Model.NodeStatus",
     "nodeType": "AtlasLedger.Model.NodeType",
     "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
+    "quantity": { "precision": 19, "scale": 6, "type": "System.Decimal" },
+    "securityType": "AtlasLedger.Model.SecurityType",
     "string": "System.String",
     "time": "System.DateTimeOffset",
+    "tradeSide": "AtlasLedger.Model.TradeSide",
     "userType": "AtlasLedger.Model.UserType"
   },
   "name": "Ledger",
@@ -22,6 +29,22 @@
       "key": ["AccountId"],
       "references": {
         "Node": { "columns": ["AccountId"] }
+      }
+    },
+    "AccountConnection": {
+      "description": "Links an account to the same account at its source: the broker's account number, or the aggregator's account ID.",
+      "key": ["AccountConnectionId"],
+      "references": {
+        "Account": { "columns": ["AccountId"] }
+      },
+      "unique": {
+        "External": { "columns": ["Source", "ExternalAccountId"] }
+      },
+      "columns": {
+        "AccountConnectionId": "guid",
+        "AccountId": "guid",
+        "ExternalAccountId": { "maxLength": 64, "type": "string" },
+        "Source": "eventSource"
       }
     },
     "Alert": {
@@ -38,6 +61,31 @@
       },
       "unique": {
         "Subject": { "columns": ["NodeId", "Rule"], "idempotent": true }
+      }
+    },
+    "CashEntry": {
+      "description": "An event: cash in or out of an account. Amount is the change in cash: negative for a withdrawal or a fee.",
+      "writeMode": "AppendOnly",
+      "key": ["CashEntryId"],
+      "references": {
+        "Account": { "columns": ["AccountId"] },
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "AccountId": "guid",
+        "Amount": "money",
+        "CashEntryId": "guid",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "Kind": "cashEntryKind",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid?",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?"
       }
     },
     "Dossier": {
@@ -86,6 +134,32 @@
       },
       "key": ["NodeId"]
     },
+    "OpeningBalance": {
+      "description": "An event: a holding as it stood where the source's history begins.",
+      "writeMode": "AppendOnly",
+      "key": ["OpeningBalanceId"],
+      "references": {
+        "Account": { "columns": ["AccountId"] },
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "AccountId": "guid",
+        "AcquiredTime": "time?",
+        "CostBasis": "money?",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "OpeningBalanceId": "guid",
+        "Quantity": "quantity",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?"
+      }
+    },
     "Person": {
       "columns": {
         "Email": "email",
@@ -94,6 +168,31 @@
       "key": ["PersonId"],
       "references": {
         "Node": { "columns": ["PersonId"] }
+      }
+    },
+    "PositionOverride": {
+      "description": "An event: the operator sets a holding's quantity from its effective time until it expires, because a source has it wrong.",
+      "writeMode": "AppendOnly",
+      "key": ["PositionOverrideId"],
+      "references": {
+        "Account": { "columns": ["AccountId"] },
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "AccountId": "guid",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "ExpiresTime": "time",
+        "PositionOverrideId": "guid",
+        "Quantity": "quantity",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?"
       }
     },
     "Price": {
@@ -108,6 +207,63 @@
       "key": ["Scheme", "Code"],
       "persistence": "Ephemeral"
     },
+    "PriceOverride": {
+      "description": "An event: the operator sets a security's price from its effective time until it expires, because a source has it wrong.",
+      "writeMode": "AppendOnly",
+      "key": ["PriceOverrideId"],
+      "references": {
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "ExpiresTime": "time",
+        "Price": "price",
+        "PriceOverrideId": "guid",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?"
+      }
+    },
+    "Security": {
+      "description": "A security: its identity is a node, and its Symbol rows are its names in each scheme (Ticker, Cusip), so a ticker change adds a symbol and history keeps its node.",
+      "key": ["SecurityId"],
+      "references": {
+        "Node": { "columns": ["SecurityId"] }
+      },
+      "columns": {
+        "SecurityId": "guid",
+        "SecurityType": "securityType"
+      }
+    },
+    "Split": {
+      "description": "An event: a split of a security. Numerator for Denominator: 2 for 1 is 2/1; a 1-for-10 reverse split is 1/10.",
+      "writeMode": "AppendOnly",
+      "key": ["SplitId"],
+      "references": {
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "Denominator": "quantity",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "Numerator": "quantity",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?",
+        "SplitId": "guid"
+      }
+    },
     "Symbol": {
       "columns": {
         "Code": { "maxLength": 32, "type": "string" },
@@ -117,6 +273,34 @@
       "key": ["Scheme", "Code"],
       "references": {
         "Node": { "columns": ["NodeId"] }
+      }
+    },
+    "Trade": {
+      "description": "An event: the source's record of a purchase or sale. NetAmount is the change in cash: negative for a purchase.",
+      "writeMode": "AppendOnly",
+      "key": ["TradeId"],
+      "references": {
+        "Account": { "columns": ["AccountId"] },
+        "Security": { "columns": ["SecurityId"] }
+      },
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "AccountId": "guid",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "Fees": "money",
+        "NetAmount": "money",
+        "Price": "price",
+        "Quantity": "quantity",
+        "Reason": { "maxLength": 256, "type": "string?" },
+        "SecurityId": "guid",
+        "Side": "tradeSide",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "SourceSequence": "long?",
+        "TradeId": "guid"
       }
     }
   },

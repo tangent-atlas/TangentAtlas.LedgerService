@@ -1,4 +1,4 @@
-// <copyright file="LedgerMirror.cs" company="Tangent Atlas">
+﻿// <copyright file="LedgerMirror.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -53,6 +53,14 @@ namespace AtlasLedger.Client.Mirror
                         "Symbol" => await api.ListAsync<SymbolDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "User" => await api.ListAsync<UserDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Member" => await api.ListAsync<MemberDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "AccountConnection" => await api.ListAsync<AccountConnectionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "CashEntry" => await api.ListAsync<CashEntryDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "OpeningBalance" => await api.ListAsync<OpeningBalanceDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "PositionOverride" => await api.ListAsync<PositionOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "PriceOverride" => await api.ListAsync<PriceOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Security" => await api.ListAsync<SecurityDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Split" => await api.ListAsync<SplitDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Trade" => await api.ListAsync<TradeDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         _ => throw new InvalidOperationException($"The mirror does not know the table {table}; update it with the model."),
                     };
                 }
@@ -77,6 +85,14 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<SymbolDto> symbols: foreach (var dto in symbols) { transaction.ApplySymbol(dto); } break;
                     case IReadOnlyList<UserDto> users: foreach (var dto in users) { transaction.ApplyUser(dto); } break;
                     case IReadOnlyList<MemberDto> members: foreach (var dto in members) { transaction.ApplyMember(dto); } break;
+                    case IReadOnlyList<AccountConnectionDto> accountConnections: foreach (var dto in accountConnections) { transaction.ApplyAccountConnection(dto); } break;
+                    case IReadOnlyList<CashEntryDto> cashEntries: foreach (var dto in cashEntries) { transaction.ApplyCashEntry(dto); } break;
+                    case IReadOnlyList<OpeningBalanceDto> openingBalances: foreach (var dto in openingBalances) { transaction.ApplyOpeningBalance(dto); } break;
+                    case IReadOnlyList<PositionOverrideDto> positionOverrides: foreach (var dto in positionOverrides) { transaction.ApplyPositionOverride(dto); } break;
+                    case IReadOnlyList<PriceOverrideDto> priceOverrides: foreach (var dto in priceOverrides) { transaction.ApplyPriceOverride(dto); } break;
+                    case IReadOnlyList<SecurityDto> securities: foreach (var dto in securities) { transaction.ApplySecurity(dto); } break;
+                    case IReadOnlyList<SplitDto> splits: foreach (var dto in splits) { transaction.ApplySplit(dto); } break;
+                    case IReadOnlyList<TradeDto> trades: foreach (var dto in trades) { transaction.ApplyTrade(dto); } break;
                 }
             }
 

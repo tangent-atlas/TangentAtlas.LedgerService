@@ -1,5 +1,4 @@
 <Project>
-
   <!--
     Every package version in the solution, in one place (central package management).  Projects name packages without
     versions.  To move to a new Bellerophon release, change BellerophonVersion: the generator and its libraries are
@@ -11,7 +10,6 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     <BellerophonVersion>0.4.0</BellerophonVersion>
   </PropertyGroup>
-
   <ItemGroup>
     <!-- Bellerophon, from nuget.org. -->
     <PackageVersion Include="Bellerophon" Version="$(BellerophonVersion)" />
@@ -19,16 +17,13 @@
     <PackageVersion Include="Bellerophon.SqlServer" Version="$(BellerophonVersion)" />
     <PackageVersion Include="Bellerophon.Rules" Version="$(BellerophonVersion)" />
     <PackageVersion Include="Bellerophon.Rules.NRules" Version="$(BellerophonVersion)" />
-
     <!-- The schema project's Entity Framework model and migrations. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
-
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" />
     <!-- Sign-in: bearer tokens from Microsoft Entra External ID. -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Identity.Client" Version="4.90.1" />
-    <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.90.1" />
-
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Identity.Client" Version="4.92.0" />
+    <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.92.0" />
     <!--
       Security pins for packages we don't reference directly.  Microsoft.Data.SqlClient (through Bellerophon.SqlServer
       and Entity Framework) brings System.Security.Cryptography.Pkcs 9.0.x, which has two denial-of-service advisories
@@ -36,9 +31,7 @@
       bring it in depend on a fixed version.
     -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
-
     <!-- Tests: xunit.v3 on Microsoft Testing Platform v2, opted into by global.json. -->
-    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
   </ItemGroup>
-
 </Project>

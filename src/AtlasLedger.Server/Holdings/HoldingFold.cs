@@ -92,12 +92,12 @@ namespace AtlasLedger.Server.Holdings
                 cost = held > 0m && quantity > 0m ? cost * (quantity / held) : 0m;
             }
 
-            return new PositionState(accountId, asset.AssetId, asset.AssetType, asset.QuantityFactor, asset.PriceFactor, quantity, isCostKnown ? cost : null, isOverridden, last, count);
+            return new PositionState(accountId, asset.AssetId, asset.AssetType, asset.QuoteCurrency, asset.QuantityFactor, asset.PriceFactor, quantity, isCostKnown ? cost : null, isOverridden, last, count);
         }
 
         /// <summary>
-        /// The price to use for an asset that is not the valuation currency: an override in force, else the market's latest
-        /// price, else the price of its last purchase or sale.
+        /// The price to use for an asset, in its quote currency: an override in force, else the market's latest price (for a
+        /// currency, its constant from the initial prices), else the price of its last purchase or sale.
         /// </summary>
         /// <param name="asset">The asset.</param>
         /// <param name="overrides">The asset's price overrides in force now.</param>
@@ -112,19 +112,19 @@ namespace AtlasLedger.Server.Holdings
                 .FirstOrDefault();
             if (priceOverride is not null)
             {
-                return new EffectivePrice(asset.AssetId, priceOverride.Price, priceOverride.EffectiveTime, PriceSource.Override);
+                return new EffectivePrice(asset.AssetId, priceOverride.Price, asset.QuoteCurrency, priceOverride.EffectiveTime, PriceSource.Override);
             }
 
             if (market is not null && market.Last > 0m)
             {
-                return new EffectivePrice(asset.AssetId, market.Last, market.AsOf, PriceSource.Market);
+                return new EffectivePrice(asset.AssetId, market.Last, asset.QuoteCurrency, market.AsOf, PriceSource.Market);
             }
 
             var last = exchanges
                 .Where(posted => posted.Line.Quantity != 0m && posted.Line.Amount is not null)
                 .OrderByDescending(ProcessingOrder)
                 .FirstOrDefault();
-            return last is null ? null : new EffectivePrice(asset.AssetId, QuotedPrice(asset, last.Line), last.Transaction.EffectiveTime, PriceSource.LastTrade);
+            return last is null ? null : new EffectivePrice(asset.AssetId, QuotedPrice(asset, last.Line), asset.QuoteCurrency, last.Transaction.EffectiveTime, PriceSource.LastTrade);
         }
 
         /// <summary>
@@ -142,15 +142,17 @@ namespace AtlasLedger.Server.Holdings
         }
 
         /// <summary>
-        /// The market value of a quantity at a quoted price: quantity × QuantityFactor × price × PriceFactor.
+        /// The market value of a quantity at a quoted price, in the valuation currency: quantity × QuantityFactor × price ×
+        /// PriceFactor × the price of the quote currency in the valuation currency.  The same formula for every asset.
         /// </summary>
         /// <param name="quantity">The quantity.</param>
         /// <param name="quantityFactor">The units one quantity stands for.</param>
-        /// <param name="price">The quoted price.</param>
+        /// <param name="price">The quoted price, in the quote currency.</param>
         /// <param name="priceFactor">The units a quoted price stands for.</param>
+        /// <param name="currencyRate">The price of one unit of the quote currency in the valuation currency.</param>
         /// <returns>The value, in the valuation currency.</returns>
-        public static decimal MarketValue(decimal quantity, decimal quantityFactor, decimal price, decimal priceFactor) =>
-            quantity * quantityFactor * price * priceFactor;
+        public static decimal MarketValue(decimal quantity, decimal quantityFactor, decimal price, decimal priceFactor, decimal currencyRate) =>
+            quantity * quantityFactor * price * priceFactor * currencyRate;
 
         /// <summary>
         /// Whether an exchange balances: at least two lines, every line valued, and the values summing to zero (to the cent).

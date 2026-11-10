@@ -27,4 +27,9 @@
     <ProjectReference Include="..\TangentAtlas\TangentAtlas.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Prices the feed doesn't supply (a currency's price in itself), published into every tenant at startup. -->
+    <EmbeddedResource Include="Market\initial-prices.json" LogicalName="AtlasLedger.Server.Market.initial-prices.json" />
+  </ItemGroup>
+
 </Project>

@@ -119,6 +119,11 @@ namespace AtlasLedger.Schema.Migrations
                         .HasPrecision(19, 6)
                         .HasColumnType("decimal(19,6)");
 
+                    b.Property<string>("QuoteCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 

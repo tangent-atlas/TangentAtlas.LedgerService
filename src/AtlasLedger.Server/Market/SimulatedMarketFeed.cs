@@ -40,7 +40,7 @@ namespace AtlasLedger.Server.Market
 
         private readonly ILogger<SimulatedMarketFeed> logger;
 
-        private readonly Dictionary<(string Scheme, string Code), decimal> prices = new Dictionary<(string Scheme, string Code), decimal>();
+        private readonly Dictionary<(string Scheme, string Code, string Currency), decimal> prices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SimulatedMarketFeed"/> class.
@@ -107,8 +107,8 @@ namespace AtlasLedger.Server.Market
         {
             // Who holds what, read under each tenant's lock and released before publishing.  A ticker the feed hasn't
             // priced yet starts from its asset's last purchase or sale, so a tenant loaded with history isn't valued at $100 a share.
-            var holders = new Dictionary<(string Scheme, string Code), List<LedgerPartition>>();
-            var openingPrices = new Dictionary<(string Scheme, string Code), decimal>();
+            var holders = new Dictionary<(string Scheme, string Code, string Currency), List<LedgerPartition>>();
+            var openingPrices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
             foreach (var partition in this.ledger.Partitions)
             {
                 lock (partition.SyncRoot)
@@ -130,20 +130,22 @@ namespace AtlasLedger.Server.Market
                         }
                     }
 
+                    var quoteCurrencies = partition.Assets.ToDictionary(asset => asset.AssetId, asset => asset.QuoteCurrency);
                     foreach (var symbol in partition.Symbols)
                     {
-                        // A currency isn't quoted: the valuation currency is worth one of itself.
-                        if (symbol.Scheme == SymbolScheme.Currency)
+                        // A currency's price comes from the initial prices, not the market; a symbol of anything but an
+                        // asset has no quote currency to be priced in.
+                        if (symbol.Scheme == SymbolScheme.Currency || !quoteCurrencies.TryGetValue(symbol.NodeId, out var currency))
                         {
                             continue;
                         }
 
+                        var key = (symbol.Scheme, symbol.Code, currency);
                         if (symbol.Scheme == SymbolScheme.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
                         {
-                            openingPrices.TryAdd((symbol.Scheme, symbol.Code), Math.Round(lastTrade.Price, 2));
+                            openingPrices.TryAdd(key, Math.Round(lastTrade.Price, 2));
                         }
 
-                        var key = (symbol.Scheme, symbol.Code);
                         if (!holders.TryGetValue(key, out var list))
                         {
                             holders[key] = list = new List<LedgerPartition>();
@@ -166,7 +168,7 @@ namespace AtlasLedger.Server.Market
                 last = Math.Max(0.01m, Math.Round(last * (1m + ((decimal)Random.Shared.NextDouble() - 0.5m) / 100m), 2));
                 this.prices[key] = last;
                 var isBad = isBadPrint && key == badSymbol;
-                var price = new Price { Scheme = key.Scheme, Code = key.Code, Last = isBad ? 0m : last, AsOf = now };
+                var price = new Price { Scheme = key.Scheme, Code = key.Code, Currency = key.Currency, Last = isBad ? 0m : last, AsOf = now };
                 foreach (var partition in partitions)
                 {
                     partition.PublishPrice(price);

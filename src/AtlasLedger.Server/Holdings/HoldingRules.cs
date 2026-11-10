@@ -104,28 +104,31 @@ namespace AtlasLedger.Server.Holdings
     }
 
     /// <summary>
-    /// The valuation currency is priced at one.
+    /// A currency's rate: the price of one unit of it in the valuation currency, which values everything quoted in it.  A
+    /// currency is quoted in the valuation currency, so its rate is its own effective price (USD in USD is 1, from the
+    /// initial prices).
     /// </summary>
-    [Name("Holdings.Price.Currency")]
-    public sealed class CurrencyPriceRule : Rule
+    [Name("Holdings.CurrencyRate")]
+    public sealed class CurrencyRateRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
-            AssetFact asset = default!;
             CashFact cash = default!;
+            EffectivePrice price = default!;
 
             this.When()
-                .Match(() => asset, candidate => candidate.AssetType == AssetType.Cash)
-                .Match(() => cash, candidate => candidate.AssetId == asset.AssetId, candidate => candidate.CurrencyCode == CurrencyCode.Valuation);
+                .Match(() => cash)
+                .Match(() => price, candidate => candidate.AssetId == cash.AssetId, candidate => candidate.Currency == CurrencyCode.Valuation);
             this.Then()
-                .Yield(_ => new EffectivePrice(asset.AssetId, 1m, System.DateTimeOffset.MinValue, PriceSource.Currency));
+                .Yield(_ => new CurrencyRate(cash.CurrencyCode, price.Price));
         }
     }
 
     /// <summary>
-    /// The price of any other asset: an override in force, else the market's latest price for its ticker, else the price of
-    /// its last purchase or sale in any of the tenant's accounts.
+    /// The price of an asset, cash included, in its quote currency: an override in force, else the latest price published
+    /// for any of its symbols in that currency (a ticker's from the market feed; a currency's from the initial prices), else
+    /// the price of its last purchase or sale in any of the tenant's accounts.
     /// </summary>
     [Name("Holdings.Price")]
     public sealed class PriceRule : Rule
@@ -134,18 +137,18 @@ namespace AtlasLedger.Server.Holdings
         public override void Define()
         {
             AssetFact asset = default!;
-            IEnumerable<SymbolFact> tickers = default!;
+            IEnumerable<SymbolFact> symbols = default!;
             IEnumerable<PriceFact> markets = default!;
             IEnumerable<PriceOverrideInForce> overrides = default!;
             IEnumerable<PostedLine> exchanges = default!;
 
             this.When()
-                .Match(() => asset, candidate => candidate.AssetType != AssetType.Cash)
-                .Query(() => tickers, query => query
-                    .Match<SymbolFact>(item => item.NodeId == asset.AssetId, item => item.Scheme == SymbolScheme.Ticker)
+                .Match(() => asset)
+                .Query(() => symbols, query => query
+                    .Match<SymbolFact>(item => item.NodeId == asset.AssetId)
                     .Collect())
                 .Query(() => markets, query => query
-                    .Match<PriceFact>(item => item.Scheme == SymbolScheme.Ticker, item => tickers.Any(ticker => ticker.Code == item.Code))
+                    .Match<PriceFact>(item => item.Currency == asset.QuoteCurrency, item => symbols.Any(symbol => symbol.Scheme == item.Scheme && symbol.Code == item.Code))
                     .Collect())
                 .Query(() => overrides, query => query
                     .Match<PriceOverrideInForce>(item => item.Override.AssetId == asset.AssetId)

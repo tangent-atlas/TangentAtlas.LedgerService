@@ -21,9 +21,6 @@ namespace AtlasLedger.Server.Holdings
 
         /// <summary>No market price yet: the price of the last purchase or sale.</summary>
         LastTrade,
-
-        /// <summary>The valuation currency itself, at a price of one.</summary>
-        Currency,
     }
 
     /// <summary>
@@ -40,6 +37,7 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="AccountId">The account.</param>
     /// <param name="AssetId">The asset.</param>
     /// <param name="AssetType">The asset's type.</param>
+    /// <param name="QuoteCurrency">The currency the asset's price is quoted in.</param>
     /// <param name="QuantityFactor">The units one quantity stands for.</param>
     /// <param name="PriceFactor">The units a quoted price stands for.</param>
     /// <param name="Quantity">The quantity held: shares, units of currency, face value, contracts.</param>
@@ -51,6 +49,7 @@ namespace AtlasLedger.Server.Holdings
         Guid AccountId,
         Guid AssetId,
         AssetType AssetType,
+        string QuoteCurrency,
         decimal QuantityFactor,
         decimal PriceFactor,
         decimal Quantity,
@@ -60,14 +59,23 @@ namespace AtlasLedger.Server.Holdings
         int LineCount);
 
     /// <summary>
-    /// The price the rules use for an asset, as quoted (per share, per 100 of face value, per option contract's share).
-    /// Derived state: never persisted.
+    /// The price the rules use for an asset, as quoted (per share, per 100 of face value, per option contract's share), in
+    /// the asset's quote currency.  Derived state: never persisted.
     /// </summary>
     /// <param name="AssetId">The asset.</param>
     /// <param name="Price">The price.</param>
+    /// <param name="Currency">The currency it is in: the asset's quote currency.</param>
     /// <param name="AsOf">When the price was set.</param>
     /// <param name="Source">Where it came from.</param>
-    public sealed record EffectivePrice(Guid AssetId, decimal Price, DateTimeOffset AsOf, PriceSource Source);
+    public sealed record EffectivePrice(Guid AssetId, decimal Price, string Currency, DateTimeOffset AsOf, PriceSource Source);
+
+    /// <summary>
+    /// The price of one unit of a currency in the valuation currency (USD in USD is 1, from the initial prices): what turns
+    /// a value in an asset's quote currency into the valuation currency.  Derived state: never persisted.
+    /// </summary>
+    /// <param name="CurrencyCode">The currency.</param>
+    /// <param name="Rate">Its price in the valuation currency.</param>
+    public sealed record CurrencyRate(string CurrencyCode, decimal Rate);
 
     /// <summary>
     /// A price override that is in force now.

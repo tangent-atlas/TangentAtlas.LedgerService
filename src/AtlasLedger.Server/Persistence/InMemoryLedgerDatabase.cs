@@ -87,6 +87,18 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Symbol"], cut.ChangedSymbols, cut.DeletedSymbols, dto => $"{dto.Scheme}/{dto.Code}");
                 Apply(tables["User"], cut.ChangedUsers, cut.DeletedUsers, dto => dto.UserId.ToString());
                 Apply(tables["Member"], cut.ChangedMembers, cut.DeletedMembers, dto => dto.UserId.ToString());
+                Apply(tables["AccountConnection"], cut.ChangedAccountConnections, cut.DeletedAccountConnections, dto => dto.AccountConnectionId.ToString());
+                Apply(tables["Asset"], cut.ChangedAssets, cut.DeletedAssets, dto => dto.AssetId.ToString());
+                Apply(tables["Cash"], cut.ChangedCashes, cut.DeletedCashes, dto => dto.AssetId.ToString());
+                Apply(tables["Crypto"], cut.ChangedCryptos, cut.DeletedCryptos, dto => dto.AssetId.ToString());
+                Apply(tables["Equity"], cut.ChangedEquities, cut.DeletedEquities, dto => dto.AssetId.ToString());
+                Apply(tables["FixedIncome"], cut.ChangedFixedIncomes, cut.DeletedFixedIncomes, dto => dto.AssetId.ToString());
+                Apply(tables["Fund"], cut.ChangedFunds, cut.DeletedFunds, dto => dto.AssetId.ToString());
+                Apply(tables["Future"], cut.ChangedFutures, cut.DeletedFutures, dto => dto.AssetId.ToString());
+                Apply(tables["Option"], cut.ChangedOptions, cut.DeletedOptions, dto => dto.AssetId.ToString());
+                Apply(tables["PriceOverride"], cut.ChangedPriceOverrides, cut.DeletedPriceOverrides, dto => dto.PriceOverrideId.ToString());
+                Apply(tables["Transaction"], cut.ChangedTransactions, cut.DeletedTransactions, dto => dto.TransactionId.ToString());
+                Apply(tables["TransactionLine"], cut.ChangedTransactionLines, cut.DeletedTransactionLines, dto => $"{dto.TransactionId}/{dto.LineNumber}");
                 this.watermarks[cut.TenantId] = Math.Max(cut.Sequence, this.watermarks.GetValueOrDefault(cut.TenantId));
                 this.CutCount++;
             }

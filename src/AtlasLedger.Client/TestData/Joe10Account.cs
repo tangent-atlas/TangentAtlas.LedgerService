@@ -110,7 +110,7 @@ namespace AtlasLedger.Client.TestData
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
                 .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber })
                 .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
-                .Insert("Asset", new AssetDto { AssetId = DollarId, AssetType = AssetType.Cash, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                .Insert("Asset", new AssetDto { AssetId = DollarId, AssetType = AssetType.Cash, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
                 .Insert("Cash", new CashDto { AssetId = DollarId, CashType = CashType.Currency, CurrencyCode = CurrencyCode.UnitedStatesDollar })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Currency, Code = CurrencyCode.UnitedStatesDollar, NodeId = DollarId });
             foreach (var holding in state.Holdings)
@@ -118,7 +118,7 @@ namespace AtlasLedger.Client.TestData
                 var assetId = AssetIdOf(holding.Ticker);
                 script
                     .Insert("Node", new NodeDto { NodeId = assetId, DisplayName = holding.Ticker, FullName = holding.Ticker, NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
-                    .Insert("Asset", new AssetDto { AssetId = assetId, AssetType = AssetType.Equity, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                    .Insert("Asset", new AssetDto { AssetId = assetId, AssetType = AssetType.Equity, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
                     .Insert("Equity", new EquityDto { AssetId = assetId, EquityType = EquityType.CommonStock })
                     .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Ticker, Code = holding.Ticker, NodeId = assetId });
             }

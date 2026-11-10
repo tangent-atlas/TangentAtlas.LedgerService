@@ -18,12 +18,14 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="TenantId">The tenant.</param>
     /// <param name="AsOf">When the cycle ran.</param>
     /// <param name="Positions">Every holding, by account and asset: cash, stocks, funds and the rest alike.</param>
-    /// <param name="Prices">Every priced asset's effective price.</param>
+    /// <param name="Prices">Every priced asset's effective price, in its quote currency.</param>
+    /// <param name="Rates">Every currency's price in the valuation currency.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,
         IReadOnlyList<PositionState> Positions,
-        IReadOnlyList<EffectivePrice> Prices);
+        IReadOnlyList<EffectivePrice> Prices,
+        IReadOnlyList<CurrencyRate> Rates);
 
     /// <summary>
     /// The latest snapshot of each tenant.  In memory only: derived state is never persisted, and it is rebuilt from the
@@ -126,7 +128,8 @@ namespace AtlasLedger.Server.Holdings
                     this.tenantId,
                     now,
                     session.Query<PositionState>().ToArray(),
-                    session.Query<EffectivePrice>().ToArray()));
+                    session.Query<EffectivePrice>().ToArray(),
+                    session.Query<CurrencyRate>().ToArray()));
                 return fired;
             }
         }

@@ -123,8 +123,8 @@ namespace AtlasLedger.Tests
         public void PricesComeFromAnOverrideThenTheMarketThenTheLastExchange()
         {
             var exchanges = Buy(1, 10m, Morning).Concat(Buy(1, 11m, Morning.AddHours(1))).Where(line => line.Line.AssetId == Stock.AssetId).ToArray();
-            var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Last = 12m, AsOf = Morning.AddHours(2) });
-            var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Last = 0m, AsOf = Morning.AddHours(2) });
+            var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.Valuation, Last = 12m, AsOf = Morning.AddHours(2) });
+            var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.Valuation, Last = 0m, AsOf = Morning.AddHours(2) });
             var priceOverride = new PriceOverrideFact(new PriceOverrideDto
             {
                 PriceOverrideId = Guid.NewGuid(), AssetId = Stock.AssetId, Price = 13m, ExpiresTime = Morning.AddDays(1),
@@ -141,8 +141,12 @@ namespace AtlasLedger.Tests
         public void MarketValueUsesBothFactors()
         {
             // Two option contracts on 100 shares each at $3.50; $10,000 of a bond at 98.50 per 100 of face value.
-            Assert.Equal(700m, HoldingFold.MarketValue(2m, ValueFactor.EquityOptionContract, 3.50m, ValueFactor.One));
-            Assert.Equal(9_850m, HoldingFold.MarketValue(10_000m, ValueFactor.One, 98.50m, ValueFactor.PerHundred));
+            Assert.Equal(700m, HoldingFold.MarketValue(2m, ValueFactor.EquityOptionContract, 3.50m, ValueFactor.One, 1m));
+            Assert.Equal(9_850m, HoldingFold.MarketValue(10_000m, ValueFactor.One, 98.50m, ValueFactor.PerHundred, 1m));
+
+            // 100 shares quoted at £10 when a pound costs $1.25; and a dollar, priced at one of itself.
+            Assert.Equal(1_250m, HoldingFold.MarketValue(100m, ValueFactor.One, 10m, ValueFactor.One, 1.25m));
+            Assert.Equal(500m, HoldingFold.MarketValue(500m, ValueFactor.One, 1m, ValueFactor.One, 1m));
 
             // And the quoted price is recovered from what an exchange cost.
             var bought = Lines(TransactionKind.Buy, Morning, null, null, (Bond, LineEffect.Change, 10_000m, 9_850m), (Dollar, LineEffect.Change, -9_850m, -9_850m));
@@ -166,7 +170,7 @@ namespace AtlasLedger.Tests
         private static long Next() => System.Threading.Interlocked.Increment(ref ledgerSequence);
 
         private static AssetFact AssetOf(Guid assetId, AssetType assetType, decimal quantityFactor, decimal priceFactor) =>
-            new AssetFact(new AssetDto { AssetId = assetId, AssetType = assetType, QuantityFactor = quantityFactor, PriceFactor = priceFactor });
+            new AssetFact(new AssetDto { AssetId = assetId, AssetType = assetType, QuoteCurrency = CurrencyCode.Valuation, QuantityFactor = quantityFactor, PriceFactor = priceFactor });
 
         private static PostedLine[] Deposit(decimal dollars, DateTimeOffset at) =>
             Lines(TransactionKind.Deposit, at, null, null, (Dollar, LineEffect.Change, dollars, dollars));

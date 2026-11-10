@@ -75,7 +75,7 @@
       }
     },
     "Asset": {
-      "description": "Anything that can be held: cash, a stock, a fund, a bond, an option, a future or a coin. Its identity is a node, its Symbol rows are its names in each scheme (Currency, Ticker, Cusip), and one extension table by asset type holds what is particular to it. Market value is quantity × QuantityFactor × price × PriceFactor: QuantityFactor is the units one quantity stands for (100 shares for an option, a futures contract's multiplier), PriceFactor the units a quoted price stands for (0.01 for a bond priced per 100 of face value, or a future quoted in cents).",
+      "description": "Anything that can be held: cash, a stock, a fund, a bond, an option, a future or a coin. Its identity is a node, its Symbol rows are its names in each scheme (Currency, Ticker, Cusip), and one extension table by asset type holds what is particular to it. Its price is quoted in QuoteCurrency (ISO 4217; a currency is quoted in the valuation currency). Market value in the valuation currency is quantity × QuantityFactor × price × PriceFactor × the price of QuoteCurrency in the valuation currency: QuantityFactor is the units one quantity stands for (100 shares for an option, a futures contract's multiplier), PriceFactor the units a quoted price stands for (0.01 for a bond priced per 100 of face value, or a future quoted in cents).",
       "key": ["AssetId"],
       "references": {
         "Node": { "columns": ["AssetId"] }
@@ -84,7 +84,8 @@
         "AssetId": "guid",
         "AssetType": "assetType",
         "PriceFactor": "quantity",
-        "QuantityFactor": "quantity"
+        "QuantityFactor": "quantity",
+        "QuoteCurrency": { "maxLength": 3, "type": "string" }
       }
     },
     "Cash": {
@@ -235,12 +236,13 @@
       "columns": {
         "AsOf": "time",
         "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
         "Last": "price",
         "Scheme": { "maxLength": 32, "type": "string" }
       },
       "concurrency": "LatestValue",
-      "description": "The latest price of a symbol, from the market data feed. Ticks are ephemeral: never persisted, synced, or served by the API.",
-      "key": ["Scheme", "Code"],
+      "description": "The latest price of a symbol in a currency: the price of one unit of what the symbol names, as quoted, in units of Currency (NVDA in USD; USD in USD, which is 1; USD in GBP). Published by the market data feed and, for constants such as a currency's price in itself, from the server's initial prices at startup. Ticks are ephemeral: never persisted, synced, or served by the API.",
+      "key": ["Scheme", "Code", "Currency"],
       "persistence": "Ephemeral"
     },
     "PriceOverride": {

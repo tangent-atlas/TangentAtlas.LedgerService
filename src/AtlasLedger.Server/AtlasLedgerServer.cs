@@ -102,6 +102,7 @@ namespace AtlasLedger.Server
             }
 
             builder.Services.AddHostedService<LedgerRecovery>();
+            builder.Services.AddHostedService<InitialPriceService>();   // after recovery: every loaded tenant gets the constants
             builder.Services.AddHostedService<LedgerFlusher>();
 
             // The services on top of the base system (the market feed and compliance) run only while switched on, through

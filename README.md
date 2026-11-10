@@ -52,9 +52,10 @@ runs only in the Development environment, with development sign-in. The programs
 
 ## Services: on while you work, off otherwise
 
-The base system (the API, persistence, and recovery) always runs.  The services on top of it, the market feed and
-compliance, run only while switched on, and every switch starts off, so an idle server does no work and its database
-can pause.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
+The base system (the API, persistence, recovery, and the rules that derive holdings and prices) always runs; the rules
+wait for changes, so an idle server still does no work and its database can pause.  The services on top of it, the
+market feed and compliance, run only while switched on, and every switch starts off.  Compliance is a fact in each
+tenant's rules: switching it on or off restarts the rules with it in or out, and holdings carry on either way.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
 
 ```
 dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when

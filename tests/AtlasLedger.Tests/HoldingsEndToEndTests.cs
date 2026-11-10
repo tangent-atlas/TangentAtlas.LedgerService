@@ -81,8 +81,7 @@ namespace AtlasLedger.Tests
             var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
             var tenantId = Guid.NewGuid();
             var state = ReadState();
-            await tool.SetServiceAsync("compliance", isOn: true, cancellationToken: cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);   // whatever the compliance switch
             await tool.ApplyAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
 
             var holdings = await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 3, cancellationToken);
@@ -154,6 +153,40 @@ namespace AtlasLedger.Tests
             Assert.NotNull(alert);
             Assert.Equal(Joe10Account.AccountId, alert.NodeId);
             Assert.Contains("lopsided", alert.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task HoldingsRunWithComplianceOffAndComplianceJoinsWhenSwitchedOn()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            await tool.SetServiceAsync("compliance", isOn: false, cancellationToken: cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(ReadState()), cancellationToken);
+            var buyId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            await tool.ApplyAsync(tenantId, new LedgerScript()
+                .Insert("Transaction", new TransactionDto { TransactionId = buyId, Kind = TransactionKind.Buy, EffectiveTime = now, EnteredTime = now, Source = EventSource.Simulator, SourceId = "lopsided-off" })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = buyId, LineNumber = 1, AccountId = Joe10Account.AccountId, AssetId = Joe10Account.AssetIdOf("AAA"), Effect = LineEffect.Change, Quantity = 10m, Amount = 1_000m })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = buyId, LineNumber = 2, AccountId = Joe10Account.AccountId, AssetId = Joe10Account.DollarId, Effect = LineEffect.Change, Quantity = -900m, Amount = -900m }), cancellationToken);
+
+            // Compliance off: the holdings are still derived, and no compliance rule fires.
+            var holdings = await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 2, cancellationToken);
+            Assert.Equal(10m, Quantity(holdings, Joe10Account.AssetIdOf("AAA")));
+            await Task.Delay(500, cancellationToken);
+            Assert.Empty(await tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken));
+
+            // Switched on: the engines start again with the switch in working memory, and the lopsided exchange is caught.
+            await tool.SetServiceAsync("compliance", isOn: true, cancellationToken: cancellationToken);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            var alerts = Array.Empty<AlertDto>();
+            while (!alerts.Any(item => item.Rule.StartsWith("UnbalancedTransaction", StringComparison.Ordinal)) && DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(100, cancellationToken);
+                alerts = (await tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken)).ToArray();
+            }
+
+            Assert.Contains(alerts, item => item.Rule.StartsWith("UnbalancedTransaction", StringComparison.Ordinal));
         }
 
         private static decimal Quantity(TenantHoldings holdings, Guid assetId) =>

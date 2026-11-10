@@ -55,7 +55,8 @@ namespace AtlasLedger.Server.Holdings
 
     /// <summary>
     /// Makes each tenant's NRules session, and after every cycle publishes what the holdings rules derived.  It also keeps
-    /// the session's clock fact, moved on once a minute, so overrides expire.
+    /// the session's clock fact, moved on once a minute, so overrides expire, and puts the compliance switch into working
+    /// memory as a fact (<see cref="Compliance.ComplianceOn"/>) when the session is made.
     /// </summary>
     public sealed class HoldingsSessionFactory : IRulesSessionFactory
     {
@@ -65,24 +66,34 @@ namespace AtlasLedger.Server.Holdings
 
         private readonly TimeProvider timeProvider;
 
+        private readonly Func<bool> isComplianceOn;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="HoldingsSessionFactory"/> class.
         /// </summary>
         /// <param name="inner">The factory of the NRules sessions, holding every rule (compliance and holdings).</param>
         /// <param name="store">Where snapshots are published.</param>
         /// <param name="timeProvider">The clock.</param>
-        public HoldingsSessionFactory(NRulesSessionFactory inner, HoldingsStore store, TimeProvider timeProvider)
+        /// <param name="isComplianceOn">Whether the compliance service is switched on.</param>
+        public HoldingsSessionFactory(NRulesSessionFactory inner, HoldingsStore store, TimeProvider timeProvider, Func<bool> isComplianceOn)
         {
             this.inner = inner;
             this.store = store;
             this.timeProvider = timeProvider;
+            this.isComplianceOn = isComplianceOn;
         }
 
         /// <inheritdoc/>
         public IRulesSession CreateSession(IRulesTenant tenant)
         {
             ArgumentNullException.ThrowIfNull(tenant);
-            return new HoldingsSession((NRulesSession)this.inner.CreateSession(tenant), tenant.TenantId, this.store, this.timeProvider);
+            var session = (NRulesSession)this.inner.CreateSession(tenant);
+            if (this.isComplianceOn())
+            {
+                session.Session.Insert(new Compliance.ComplianceOn());
+            }
+
+            return new HoldingsSession(session, tenant.TenantId, this.store, this.timeProvider);
         }
 
         private sealed class HoldingsSession : IRulesSession

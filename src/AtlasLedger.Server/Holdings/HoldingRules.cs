@@ -4,6 +4,7 @@
 // <author>Donald Airey</author>
 namespace AtlasLedger.Server.Holdings
 {
+    using System;
     using System.Collections.Generic;
     using System.Linq;
     using AtlasLedger.Model;
@@ -61,23 +62,28 @@ namespace AtlasLedger.Server.Holdings
     /// A holding: every posted line for an account and an asset, folded in processing order.  Cash, stocks, funds, bonds,
     /// options, futures and crypto alike.
     /// </summary>
+    /// <remarks>
+    /// Starts from the lines, grouped by account and asset, so every join has a key and a holding exists only where a line
+    /// does.  Starting from "any account and any asset" made the network hold every pair of them and test each new line
+    /// against all of them: measured November 10, 200 seconds to load 200 accounts × 1,000 assets that way, 0.2 seconds
+    /// this way (and under a second for 500 × 2,000).
+    /// </remarks>
     [Name("Holdings.Position")]
     public sealed class PositionRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
+            IGrouping<(Guid AccountId, Guid AssetId), PostedLine> lines = default!;
             AccountFact account = default!;
             AssetFact asset = default!;
-            IEnumerable<PostedLine> lines = default!;
 
             this.When()
-                .Match(() => account)
-                .Match(() => asset)
                 .Query(() => lines, query => query
-                    .Match<PostedLine>(item => item.Line.AccountId == account.AccountId, item => item.Line.AssetId == asset.AssetId)
-                    .Collect())
-                .Having(() => lines.Any());
+                    .Match<PostedLine>()
+                    .GroupBy(item => ValueTuple.Create(item.Line.AccountId, item.Line.AssetId)))
+                .Match(() => account, candidate => candidate.AccountId == lines.Key.AccountId)
+                .Match(() => asset, candidate => candidate.AssetId == lines.Key.AssetId);
             this.Then()
                 .Yield(_ => HoldingFold.Position(account, asset, lines));
         }

@@ -74,7 +74,7 @@ namespace AtlasLedger.Server.Holdings
         /// Gets the tenant's holdings.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
-        /// <returns>The holdings, or 409 when the rules haven't run for the tenant (the compliance switch is off).</returns>
+        /// <returns>The holdings, or 409 when the tenant's rules haven't finished their first cycle (just after startup).</returns>
         [HttpGet]
         [Authorize(Policy = LedgerAccessPolicies.TransactionRead)]
         public ActionResult<HoldingsDto> Get(Guid tenantId)
@@ -84,7 +84,7 @@ namespace AtlasLedger.Server.Holdings
                 return this.Problem(
                     statusCode: StatusCodes.Status409Conflict,
                     title: "No holdings yet.",
-                    detail: "The rules haven't run for this tenant since the server started. Switch the rules on (services on compliance) and try again.");
+                    detail: "The tenant's rules haven't finished their first cycle since the server started. Try again in a moment.");
             }
 
             var prices = snapshot.Prices.ToDictionary(price => price.AssetId);

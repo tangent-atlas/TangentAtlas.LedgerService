@@ -5,6 +5,7 @@
 namespace AtlasLedger.Server.Holdings
 {
     using System;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
 
     /// <summary>
@@ -18,47 +19,55 @@ namespace AtlasLedger.Server.Holdings
         /// <summary>An operator's override, in force now.</summary>
         Override,
 
-        /// <summary>No market price yet: the last trade's price.</summary>
+        /// <summary>No market price yet: the price of the last purchase or sale.</summary>
         LastTrade,
+
+        /// <summary>The valuation currency itself, at a price of one.</summary>
+        Currency,
     }
 
     /// <summary>
-    /// A holding: what an account's events in one security add up to.  Derived state, held in the rules session and never
-    /// persisted.
+    /// A transaction line that counts now: every line of an ordinary transaction, and the lines of an override while it is in
+    /// force.  Derived state, in the rules session only.
     /// </summary>
-    /// <param name="AccountId">The account.</param>
-    /// <param name="SecurityId">The security.</param>
-    /// <param name="Quantity">The number of shares.</param>
-    /// <param name="CostBasis">The total paid, fees included; null when an opening balance came without one.</param>
-    /// <param name="IsOverridden">True when an operator's override set the quantity.</param>
-    /// <param name="LastEffectiveTime">The effective time of the last event folded.</param>
-    /// <param name="EventCount">How many events were folded.</param>
-    public sealed record PositionState(Guid AccountId, Guid SecurityId, decimal Quantity, decimal? CostBasis, bool IsOverridden, DateTimeOffset LastEffectiveTime, int EventCount);
+    /// <param name="Line">The line.</param>
+    /// <param name="Transaction">Its transaction.</param>
+    public sealed record PostedLine(TransactionLineFact Line, TransactionFact Transaction);
 
     /// <summary>
-    /// An account's cash: its cash entries and the cash side of its trades.  Derived state.
+    /// A holding: what the posted lines for an account and an asset add up to.  Derived state, never persisted.
     /// </summary>
     /// <param name="AccountId">The account.</param>
-    /// <param name="Cash">The cash, in dollars.</param>
-    /// <param name="LastEffectiveTime">The effective time of the last event folded.</param>
-    /// <param name="EventCount">How many events were folded.</param>
-    public sealed record CashState(Guid AccountId, decimal Cash, DateTimeOffset LastEffectiveTime, int EventCount);
+    /// <param name="AssetId">The asset.</param>
+    /// <param name="AssetType">The asset's type.</param>
+    /// <param name="QuantityFactor">The units one quantity stands for.</param>
+    /// <param name="PriceFactor">The units a quoted price stands for.</param>
+    /// <param name="Quantity">The quantity held: shares, units of currency, face value, contracts.</param>
+    /// <param name="CostBasis">The cost of what is held, in the valuation currency; null when an opening balance came without one.</param>
+    /// <param name="IsOverridden">True when an override in force set the quantity.</param>
+    /// <param name="LastEffectiveTime">The effective time of the last line folded.</param>
+    /// <param name="LineCount">How many lines were folded.</param>
+    public sealed record PositionState(
+        Guid AccountId,
+        Guid AssetId,
+        AssetType AssetType,
+        decimal QuantityFactor,
+        decimal PriceFactor,
+        decimal Quantity,
+        decimal? CostBasis,
+        bool IsOverridden,
+        DateTimeOffset LastEffectiveTime,
+        int LineCount);
 
     /// <summary>
-    /// The price the rules use for a security.  Derived state: never persisted.
+    /// The price the rules use for an asset, as quoted (per share, per 100 of face value, per option contract's share).
+    /// Derived state: never persisted.
     /// </summary>
-    /// <param name="SecurityId">The security.</param>
+    /// <param name="AssetId">The asset.</param>
     /// <param name="Price">The price.</param>
     /// <param name="AsOf">When the price was set.</param>
     /// <param name="Source">Where it came from.</param>
-    public sealed record EffectivePrice(Guid SecurityId, decimal Price, DateTimeOffset AsOf, PriceSource Source);
-
-    /// <summary>
-    /// A position override that is in force now.  Kept apart from the clock so that the clock moving on re-checks only the
-    /// overrides, not every holding.
-    /// </summary>
-    /// <param name="Override">The override.</param>
-    public sealed record PositionOverrideInForce(PositionOverrideFact Override);
+    public sealed record EffectivePrice(Guid AssetId, decimal Price, DateTimeOffset AsOf, PriceSource Source);
 
     /// <summary>
     /// A price override that is in force now.

@@ -54,13 +54,17 @@ namespace AtlasLedger.Client.Mirror
                         "User" => await api.ListAsync<UserDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Member" => await api.ListAsync<MemberDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "AccountConnection" => await api.ListAsync<AccountConnectionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "CashEntry" => await api.ListAsync<CashEntryDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "OpeningBalance" => await api.ListAsync<OpeningBalanceDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "PositionOverride" => await api.ListAsync<PositionOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Asset" => await api.ListAsync<AssetDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Cash" => await api.ListAsync<CashDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Crypto" => await api.ListAsync<CryptoDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Equity" => await api.ListAsync<EquityDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "FixedIncome" => await api.ListAsync<FixedIncomeDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Fund" => await api.ListAsync<FundDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Future" => await api.ListAsync<FutureDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Option" => await api.ListAsync<OptionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "PriceOverride" => await api.ListAsync<PriceOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Security" => await api.ListAsync<SecurityDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Split" => await api.ListAsync<SplitDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Trade" => await api.ListAsync<TradeDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Transaction" => await api.ListAsync<TransactionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "TransactionLine" => await api.ListAsync<TransactionLineDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         _ => throw new InvalidOperationException($"The mirror does not know the table {table}; update it with the model."),
                     };
                 }
@@ -86,13 +90,17 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<UserDto> users: foreach (var dto in users) { transaction.ApplyUser(dto); } break;
                     case IReadOnlyList<MemberDto> members: foreach (var dto in members) { transaction.ApplyMember(dto); } break;
                     case IReadOnlyList<AccountConnectionDto> accountConnections: foreach (var dto in accountConnections) { transaction.ApplyAccountConnection(dto); } break;
-                    case IReadOnlyList<CashEntryDto> cashEntries: foreach (var dto in cashEntries) { transaction.ApplyCashEntry(dto); } break;
-                    case IReadOnlyList<OpeningBalanceDto> openingBalances: foreach (var dto in openingBalances) { transaction.ApplyOpeningBalance(dto); } break;
-                    case IReadOnlyList<PositionOverrideDto> positionOverrides: foreach (var dto in positionOverrides) { transaction.ApplyPositionOverride(dto); } break;
+                    case IReadOnlyList<AssetDto> assets: foreach (var dto in assets) { transaction.ApplyAsset(dto); } break;
+                    case IReadOnlyList<CashDto> cashAssets: foreach (var dto in cashAssets) { transaction.ApplyCash(dto); } break;
+                    case IReadOnlyList<CryptoDto> cryptoAssets: foreach (var dto in cryptoAssets) { transaction.ApplyCrypto(dto); } break;
+                    case IReadOnlyList<EquityDto> equities: foreach (var dto in equities) { transaction.ApplyEquity(dto); } break;
+                    case IReadOnlyList<FixedIncomeDto> fixedIncomes: foreach (var dto in fixedIncomes) { transaction.ApplyFixedIncome(dto); } break;
+                    case IReadOnlyList<FundDto> funds: foreach (var dto in funds) { transaction.ApplyFund(dto); } break;
+                    case IReadOnlyList<FutureDto> futures: foreach (var dto in futures) { transaction.ApplyFuture(dto); } break;
+                    case IReadOnlyList<OptionDto> options: foreach (var dto in options) { transaction.ApplyOption(dto); } break;
                     case IReadOnlyList<PriceOverrideDto> priceOverrides: foreach (var dto in priceOverrides) { transaction.ApplyPriceOverride(dto); } break;
-                    case IReadOnlyList<SecurityDto> securities: foreach (var dto in securities) { transaction.ApplySecurity(dto); } break;
-                    case IReadOnlyList<SplitDto> splits: foreach (var dto in splits) { transaction.ApplySplit(dto); } break;
-                    case IReadOnlyList<TradeDto> trades: foreach (var dto in trades) { transaction.ApplyTrade(dto); } break;
+                    case IReadOnlyList<TransactionDto> transactions: foreach (var dto in transactions) { transaction.ApplyTransaction(dto); } break;
+                    case IReadOnlyList<TransactionLineDto> transactionLines: foreach (var dto in transactionLines) { transaction.ApplyTransactionLine(dto); } break;
                 }
             }
 

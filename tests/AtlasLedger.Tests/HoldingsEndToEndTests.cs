@@ -20,8 +20,8 @@ namespace AtlasLedger.Tests
     using Xunit;
 
     /// <summary>
-    /// The event stream, end to end: the Joe 10 test account is built from a state file, loaded through the API like any
-    /// script, and the rules add its events up into holdings and cash.
+    /// The transaction log, end to end: the Joe 10 test account is built from a state file, loaded through the API like any
+    /// script, and the rules add its transactions up into holdings, US dollars among them.
     /// </summary>
     public sealed class HoldingsEndToEndTests : IClassFixture<ServerFixture>
     {
@@ -71,11 +71,11 @@ namespace AtlasLedger.Tests
 
             Assert.Equal(Text(Joe10Account.Reference(state)), Text(Joe10Account.Reference(state)));
             Assert.Equal(Text(Joe10Account.History(state, 1_000_000m)), Text(Joe10Account.History(state, 1_000_000m)));
-            Assert.Equal(1 + 2, Joe10Account.History(state, 1_000_000m).Operations.Count);   // the deposit, then a purchase per company
+            Assert.Equal(2 + (2 * 3), Joe10Account.History(state, 1_000_000m).Operations.Count);   // the deposit and its line, then each purchase and its two lines
         }
 
         [Fact]
-        public async Task TheRulesAddTheEventsUpToHoldingsAndCash()
+        public async Task TheRulesAddTheTransactionsUpToHoldingsWithCashAsAnAssetLikeAnyOther()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
             var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
@@ -85,50 +85,74 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
 
-            var holdings = await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 2, cancellationToken);
-            Assert.Equal(3_000m, Shares(holdings, "AAA"));
-            Assert.Equal(6_000m, Shares(holdings, "BBB"));
-            Assert.Equal(500_020m, holdings.Cash.Single().Cash);
-            Assert.Equal(1_000_000m, holdings.Holdings.Sum(holding => holding.MarketValue!.Value) + holdings.Cash.Single().Cash);
-            Assert.All(holdings.Holdings, holding => Assert.Equal("LastTrade", holding.PriceSource));   // no market feed yet
+            var holdings = await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 3, cancellationToken);
+            Assert.Equal(3_000m, Quantity(holdings, Joe10Account.AssetIdOf("AAA")));
+            Assert.Equal(6_000m, Quantity(holdings, Joe10Account.AssetIdOf("BBB")));
+            var dollars = holdings.Holdings.Single(holding => holding.AssetId == Joe10Account.DollarId);
+            Assert.Equal(AssetType.Cash, dollars.AssetType);
+            Assert.Equal(500_020m, dollars.Quantity);
+            Assert.Equal("Currency", dollars.PriceSource);
+            Assert.Equal(1_000_000m, holdings.Holdings.Sum(holding => holding.MarketValue!.Value));
+            Assert.All(holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity), holding => Assert.Equal("LastTrade", holding.PriceSource));
 
-            // Loading the history again changes nothing: each event is idempotent on its source and source ID.
+            // Loading the history again changes nothing: each transaction is idempotent on its source and source ID.
             await tool.ApplyAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
             await Task.Delay(300, cancellationToken);   // a change would start a cycle; there is none to wait for
             holdings = await tool.GetHoldingsAsync(tenantId, cancellationToken);
-            Assert.Equal(3_000m, Shares(holdings, "AAA"));
-            Assert.Equal(500_020m, holdings.Cash.Single().Cash);
+            Assert.Equal(3_000m, Quantity(holdings, Joe10Account.AssetIdOf("AAA")));
+            Assert.Equal(500_020m, Quantity(holdings, Joe10Account.DollarId));
 
-            // An operator's override sets a holding until it expires; the others are untouched.
+            // An override sets a holding until it expires; the others are untouched.
             var now = DateTimeOffset.UtcNow;
-            await tool.ApplyAsync(tenantId, new LedgerScript().Insert("PositionOverride", new PositionOverrideDto
-            {
-                PositionOverrideId = Guid.NewGuid(),
-                AccountId = Joe10Account.AccountId,
-                SecurityId = Joe10Account.SecurityIdOf("AAA"),
-                Quantity = 2_500m,
-                ExpiresTime = now.AddHours(1),
-                EffectiveTime = now.AddMinutes(-5),
-                EnteredTime = now,
-                Source = EventSource.Operator,
-                SourceId = "override-1",
-                Reason = "The broker shows 2,500 until its correction posts tomorrow.",
-            }), cancellationToken);
-            holdings = await WaitForAsync(tool, tenantId, found => Shares(found, "AAA") == 2_500m, cancellationToken);
-            Assert.True(holdings.Holdings.Single(holding => holding.SecurityId == Joe10Account.SecurityIdOf("AAA")).IsOverridden);
-            Assert.Equal(6_000m, Shares(holdings, "BBB"));
+            var overrideId = Guid.NewGuid();
+            await tool.ApplyAsync(tenantId, new LedgerScript()
+                .Insert("Transaction", new TransactionDto
+                {
+                    TransactionId = overrideId,
+                    Kind = TransactionKind.Override,
+                    ExpiresTime = now.AddHours(1),
+                    EffectiveTime = now.AddMinutes(-5),
+                    EnteredTime = now,
+                    Source = EventSource.Operator,
+                    SourceId = "override-1",
+                    Reason = "The broker shows 2,500 until its correction posts tomorrow.",
+                })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = overrideId, LineNumber = 1, AccountId = Joe10Account.AccountId, AssetId = Joe10Account.AssetIdOf("AAA"), Effect = LineEffect.SetTo, Quantity = 2_500m }), cancellationToken);
+            holdings = await WaitForAsync(tool, tenantId, found => Quantity(found, Joe10Account.AssetIdOf("AAA")) == 2_500m, cancellationToken);
+            Assert.True(holdings.Holdings.Single(holding => holding.AssetId == Joe10Account.AssetIdOf("AAA")).IsOverridden);
+            Assert.Equal(6_000m, Quantity(holdings, Joe10Account.AssetIdOf("BBB")));
         }
 
         [Fact]
-        public async Task WithoutTheRulesTheHoldingsAnswer409()
+        public async Task AnExchangeThatDoesNotBalanceRaisesAnAlert()
         {
+            var cancellationToken = TestContext.Current.CancellationToken;
             var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
-            var exception = await Assert.ThrowsAsync<LedgerApiException>(() => tool.GetHoldingsAsync(Guid.NewGuid(), TestContext.Current.CancellationToken));
-            Assert.Contains(exception.StatusCode, new[] { HttpStatusCode.Conflict, HttpStatusCode.NotFound });
+            var tenantId = Guid.NewGuid();
+            await tool.SetServiceAsync("compliance", isOn: true, cancellationToken: cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(ReadState()), cancellationToken);
+            var buyId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            await tool.ApplyAsync(tenantId, new LedgerScript()
+                .Insert("Transaction", new TransactionDto { TransactionId = buyId, Kind = TransactionKind.Buy, EffectiveTime = now, EnteredTime = now, Source = EventSource.Simulator, SourceId = "lopsided" })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = buyId, LineNumber = 1, AccountId = Joe10Account.AccountId, AssetId = Joe10Account.AssetIdOf("AAA"), Effect = LineEffect.Change, Quantity = 10m, Amount = 1_000m })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = buyId, LineNumber = 2, AccountId = Joe10Account.AccountId, AssetId = Joe10Account.DollarId, Effect = LineEffect.Change, Quantity = -900m, Amount = -900m }), cancellationToken);
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            AlertDto? alert = null;
+            while (alert is null && DateTimeOffset.UtcNow < deadline)
+            {
+                alert = (await tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken)).FirstOrDefault(item => item.Rule.StartsWith("UnbalancedTransaction", StringComparison.Ordinal));
+                await Task.Delay(100, cancellationToken);
+            }
+
+            Assert.NotNull(alert);
+            Assert.Equal(Joe10Account.AccountId, alert.NodeId);
+            Assert.Contains("lopsided", alert.Message, StringComparison.Ordinal);
         }
 
-        private static decimal Shares(TenantHoldings holdings, string ticker) =>
-            holdings.Holdings.Single(holding => holding.SecurityId == Joe10Account.SecurityIdOf(ticker)).Quantity;
+        private static decimal Quantity(TenantHoldings holdings, Guid assetId) =>
+            holdings.Holdings.Single(holding => holding.AssetId == assetId).Quantity;
 
         private static Joe10State ReadState()
         {

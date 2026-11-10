@@ -1,4 +1,4 @@
-// <copyright file="Program.cs" company="Tangent Atlas">
+﻿// <copyright file="Program.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -23,8 +23,10 @@ namespace AtlasLedger.TestData
             Usage: test-data joe10 --state <joe10.json> [--deposit <dollars>] [--out <folder>]
 
             Writes a test account holding the Joe 10, as two scripts for script-loader:
-              joe10-reference.json   the account, its connection, the ten securities and their tickers (rows)
-              joe10-history.json     a cash deposit, then one purchase per company at the last close (events)
+              joe10-reference.json   the account, its connection, and its assets (US dollars and the ten
+                                     companies) with their names (rows)
+              joe10-history.json     a deposit of dollars, then one purchase per company at the last close,
+                                     each an exchange of dollars for shares in two balanced lines (transactions)
 
               --state <joe10.json>   The forward test's state file (tangent-atlas/forward-test, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
@@ -93,7 +95,7 @@ namespace AtlasLedger.TestData
                 Console.WriteLine(string.Format(english, "  Buy {0,6:#,0} {1,-6} at {2,10:C2} = {3,14:C2}", purchase.Shares, purchase.Ticker, purchase.Price, purchase.Shares * purchase.Price));
             }
 
-            Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; cash left {2:C2}.", deposit, spent, deposit - spent));
+            Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
             Console.WriteLine($"Wrote {referencePath} and {historyPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }

@@ -106,27 +106,41 @@ namespace AtlasLedger.Server.Market
         private bool Tick(DateTimeOffset now, bool isBadPrint)
         {
             // Who holds what, read under each tenant's lock and released before publishing.  A ticker the feed hasn't
-            // priced yet starts from its security's last trade, so a tenant loaded with history isn't valued at $100 a share.
+            // priced yet starts from its asset's last purchase or sale, so a tenant loaded with history isn't valued at $100 a share.
             var holders = new Dictionary<(string Scheme, string Code), List<LedgerPartition>>();
             var openingPrices = new Dictionary<(string Scheme, string Code), decimal>();
             foreach (var partition in this.ledger.Partitions)
             {
                 lock (partition.SyncRoot)
                 {
-                    var lastTrades = new Dictionary<Guid, Trade>();
-                    foreach (var trade in partition.Trades)
+                    // The last purchase or sale of each asset: its line's amount ÷ (quantity × factors) is the quoted price.
+                    var lastTrades = new Dictionary<Guid, (DateTimeOffset EffectiveTime, decimal Price)>();
+                    foreach (var line in partition.TransactionLines)
                     {
-                        if (!lastTrades.TryGetValue(trade.SecurityId, out var latest) || trade.EffectiveTime > latest.EffectiveTime)
+                        var transaction = line.Transaction;
+                        if (!HoldingFold.Exchanges.Contains(transaction.Kind) || line.Amount is not { } amount || line.Quantity == 0m)
                         {
-                            lastTrades[trade.SecurityId] = trade;
+                            continue;
+                        }
+
+                        var units = line.Quantity * line.Asset.QuantityFactor * line.Asset.PriceFactor;
+                        if (units != 0m && (!lastTrades.TryGetValue(line.AssetId, out var latest) || transaction.EffectiveTime > latest.EffectiveTime))
+                        {
+                            lastTrades[line.AssetId] = (transaction.EffectiveTime, Math.Abs(amount / units));
                         }
                     }
 
                     foreach (var symbol in partition.Symbols)
                     {
-                        if (symbol.Scheme == SymbolSchemes.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
+                        // A currency isn't quoted: the valuation currency is worth one of itself.
+                        if (symbol.Scheme == SymbolScheme.Currency)
                         {
-                            openingPrices.TryAdd((symbol.Scheme, symbol.Code), lastTrade.Price);
+                            continue;
+                        }
+
+                        if (symbol.Scheme == SymbolScheme.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
+                        {
+                            openingPrices.TryAdd((symbol.Scheme, symbol.Code), Math.Round(lastTrade.Price, 2));
                         }
 
                         var key = (symbol.Scheme, symbol.Code);

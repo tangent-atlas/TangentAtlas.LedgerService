@@ -17,14 +17,12 @@ namespace AtlasLedger.Server.Holdings
     /// </summary>
     /// <param name="TenantId">The tenant.</param>
     /// <param name="AsOf">When the cycle ran.</param>
-    /// <param name="Positions">Every holding, by account and security.</param>
-    /// <param name="Cash">Every account's cash.</param>
-    /// <param name="Prices">Every priced security's effective price.</param>
+    /// <param name="Positions">Every holding, by account and asset: cash, stocks, funds and the rest alike.</param>
+    /// <param name="Prices">Every priced asset's effective price.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,
         IReadOnlyList<PositionState> Positions,
-        IReadOnlyList<CashState> Cash,
         IReadOnlyList<EffectivePrice> Prices);
 
     /// <summary>
@@ -128,7 +126,6 @@ namespace AtlasLedger.Server.Holdings
                     this.tenantId,
                     now,
                     session.Query<PositionState>().ToArray(),
-                    session.Query<CashState>().ToArray(),
                     session.Query<EffectivePrice>().ToArray()));
                 return fired;
             }

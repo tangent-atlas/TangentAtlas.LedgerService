@@ -1,11 +1,15 @@
-// <copyright file="ComplianceRules.cs" company="Tangent Atlas">
+﻿// <copyright file="ComplianceRules.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
 namespace AtlasLedger.Server.Compliance
 {
     using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Holdings;
     using NRules;
     using NRules.Fluent;
     using NRules.Fluent.Dsl;
@@ -23,7 +27,7 @@ namespace AtlasLedger.Server.Compliance
         /// <summary>
         /// The scheme of a custodian's account number.
         /// </summary>
-        public const string Custodian = "Custodian";
+        public const string Custodian = SymbolScheme.Custodian;
 
         /// <summary>
         /// The rule that every account has a custodian account number.
@@ -34,6 +38,11 @@ namespace AtlasLedger.Server.Compliance
         /// The prefix of the rule that every held symbol's price is positive; the symbol follows it.
         /// </summary>
         public const string InvalidPriceRule = "InvalidPrice";
+
+        /// <summary>
+        /// The prefix of the rule that an exchange's lines balance; the transaction's key follows it.
+        /// </summary>
+        public const string UnbalancedTransactionRule = "UnbalancedTransaction";
 
         /// <summary>
         /// Compiles the rules in this assembly.  Compile once; every tenant's session comes from the result.
@@ -53,6 +62,13 @@ namespace AtlasLedger.Server.Compliance
         /// <param name="code">The symbol's code.</param>
         /// <returns>The rule name recorded on the symbol's alert.</returns>
         public static string InvalidPriceRuleFor(string scheme, string code) => $"{InvalidPriceRule} {scheme}:{code}";
+
+        /// <summary>
+        /// Gets the name of the unbalanced transaction rule for a transaction.
+        /// </summary>
+        /// <param name="transactionId">The transaction.</param>
+        /// <returns>The rule name recorded on the alert.</returns>
+        public static string UnbalancedTransactionRuleFor(Guid transactionId) => $"{UnbalancedTransactionRule} {transactionId}";
 
         /// <summary>
         /// Records a decision to raise an alert.  Rule actions are expression trees, which can't name the transaction, so they
@@ -166,6 +182,39 @@ namespace AtlasLedger.Server.Compliance
                 .Match(() => alert, candidate => candidate.NodeId == symbol.NodeId, candidate => candidate.Rule == ComplianceRules.InvalidPriceRuleFor(symbol.Scheme, symbol.Code));
             this.Then()
                 .Do(_ => ComplianceRules.ClearAlert(actions, alert));
+        }
+    }
+
+    /// <summary>
+    /// Raises an alert on the account of an exchange (a purchase or a sale) whose lines don't balance: one asset is given for
+    /// another, so the values received and given must sum to zero.  The transaction and its lines arrive in one batch, so the
+    /// rule never sees half of one.  Transactions are never changed, so the alert stays until the operator corrects the
+    /// books with another transaction and clears it.
+    /// </summary>
+    [Name("UnbalancedTransaction.Raise")]
+    public sealed class UnbalancedTransactionRaiseRule : Rule
+    {
+        /// <inheritdoc/>
+        public override void Define()
+        {
+            TransactionFact transaction = default!;
+            IEnumerable<TransactionLineFact> lines = default!;
+            LedgerRuleActions actions = default!;
+            this.Dependency().Resolve(() => actions);
+
+            this.When()
+                .Match(() => transaction, candidate => HoldingFold.Exchanges.Contains(candidate.Kind))
+                .Query(() => lines, query => query
+                    .Match<TransactionLineFact>(line => line.TransactionId == transaction.TransactionId)
+                    .Collect())
+                .Having(() => lines.Any() && !HoldingFold.IsBalanced(lines.ToArray()))
+                .Not<AlertFact>(alert => alert.Rule == ComplianceRules.UnbalancedTransactionRuleFor(transaction.TransactionId));
+            this.Then()
+                .Do(_ => ComplianceRules.RaiseAlert(
+                    actions,
+                    lines.First().AccountId,
+                    ComplianceRules.UnbalancedTransactionRuleFor(transaction.TransactionId),
+                    $"The {transaction.Kind} {transaction.SourceId} doesn't balance: its lines sum to {lines.Sum(line => line.Amount ?? 0m)}."));
         }
     }
 }

@@ -1,4 +1,4 @@
-// <copyright file="Joe10Account.cs" company="Tangent Atlas">
+﻿// <copyright file="Joe10Account.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -72,14 +72,16 @@ namespace AtlasLedger.Client.TestData
     }
 
     /// <summary>
-    /// Builds a test account holding the Joe 10: a reference script (the account, its connection, the securities and their
-    /// tickers) and a history script (a cash deposit, then one purchase per company at the close).  Both are ordinary
-    /// ledger scripts, so <c>script-loader</c> loads them.
+    /// Builds a test account holding the Joe 10: a reference script (the account, its connection, and the assets it holds,
+    /// US dollars among them, with their names) and a history script (a deposit of dollars, then one purchase per company at
+    /// the close).  Both are ordinary ledger scripts, so <c>script-loader</c> loads them.
     /// </summary>
     /// <remarks>
-    /// Every key is derived from a name, so building twice gives the same keys and loading twice changes nothing (events
-    /// are idempotent on their source and source ID).  Shares are whole, rounded down, so the purchases never spend more
-    /// than the cash; what is left over stays in cash.  Fees are zero, as at Schwab.
+    /// Cash is an asset like any other.  A purchase exchanges one asset for another, so each is one transaction with two
+    /// lines that balance: the shares received (their cost) and the dollars given.  Every key is derived from a name, so
+    /// building twice gives the same keys and loading twice changes nothing (transactions are idempotent on their source and
+    /// source ID).  Shares are whole, rounded down, so the purchases never spend more than the cash; what is left stays in
+    /// dollars.  Fees are zero, as at Schwab.
     /// </remarks>
     public static class Joe10Account
     {
@@ -88,6 +90,9 @@ namespace AtlasLedger.Client.TestData
 
         /// <summary>The account.</summary>
         public static readonly Guid AccountId = KeyFor("account");
+
+        /// <summary>The US dollar, the account's cash.</summary>
+        public static readonly Guid DollarId = KeyFor("asset/USD");
 
         private const string ExternalAccountNumber = "JOE10-TEST";
 
@@ -102,64 +107,68 @@ namespace AtlasLedger.Client.TestData
             var script = new LedgerScript()
                 .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
                 .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount })
-                .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = ExternalAccountNumber, NodeId = AccountId })
-                .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber });
+                .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
+                .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber })
+                .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
+                .Insert("Asset", new AssetDto { AssetId = DollarId, AssetType = AssetType.Cash, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                .Insert("Cash", new CashDto { AssetId = DollarId, CashType = CashType.Currency, CurrencyCode = CurrencyCode.UnitedStatesDollar })
+                .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Currency, Code = CurrencyCode.UnitedStatesDollar, NodeId = DollarId });
             foreach (var holding in state.Holdings)
             {
-                var securityId = SecurityIdOf(holding.Ticker);
+                var assetId = AssetIdOf(holding.Ticker);
                 script
-                    .Insert("Node", new NodeDto { NodeId = securityId, DisplayName = holding.Ticker, FullName = holding.Ticker, NodeStatus = NodeStatus.Active, NodeType = NodeType.Security })
-                    .Insert("Security", new SecurityDto { SecurityId = securityId, SecurityType = SecurityType.CommonStock })
-                    .Insert("Symbol", new SymbolDto { Scheme = "Ticker", Code = holding.Ticker, NodeId = securityId });
+                    .Insert("Node", new NodeDto { NodeId = assetId, DisplayName = holding.Ticker, FullName = holding.Ticker, NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
+                    .Insert("Asset", new AssetDto { AssetId = assetId, AssetType = AssetType.Equity, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                    .Insert("Equity", new EquityDto { AssetId = assetId, EquityType = EquityType.CommonStock })
+                    .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Ticker, Code = holding.Ticker, NodeId = assetId });
             }
 
             return script;
         }
 
         /// <summary>
-        /// Builds the history script: events that say what happened.  The deposit is effective at the open; the purchases
-        /// at the close, in order of weight.
+        /// Builds the history script: transactions that say what happened, each inserted with its lines.  The deposit is
+        /// effective at the open; the purchases at the close, in order of weight.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
-        /// <param name="deposit">The cash paid in, in dollars.</param>
+        /// <param name="deposit">The dollars paid in.</param>
         /// <returns>The script.</returns>
         public static LedgerScript History(Joe10State state, decimal deposit)
         {
             ArgumentNullException.ThrowIfNull(state);
             var entered = state.Close;
+            var depositId = KeyFor("deposit");
             var script = new LedgerScript()
-                .Insert("CashEntry", new CashEntryDto
+                .Insert("Transaction", new TransactionDto
                 {
-                    CashEntryId = KeyFor("deposit"),
-                    AccountId = AccountId,
-                    Kind = CashEntryKind.Deposit,
-                    Amount = deposit,
+                    TransactionId = depositId,
+                    Kind = TransactionKind.Deposit,
                     Source = EventSource.Simulator,
                     SourceId = "joe10-deposit",
                     EffectiveTime = state.Close.AddHours(-6.5),
                     EnteredTime = entered,
                     Reason = "The Joe 10 test account's opening deposit.",
-                });
+                })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = depositId, LineNumber = 1, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = deposit, Amount = deposit });
             var sequence = 0L;
             foreach (var purchase in Purchases(state, deposit))
             {
                 sequence++;
-                script.Insert("Trade", new TradeDto
-                {
-                    TradeId = KeyFor($"buy/{purchase.Ticker}"),
-                    AccountId = AccountId,
-                    SecurityId = SecurityIdOf(purchase.Ticker),
-                    Side = TradeSide.Buy,
-                    Quantity = purchase.Shares,
-                    Price = purchase.Price,
-                    Fees = 0m,
-                    NetAmount = -(purchase.Shares * purchase.Price),
-                    Source = EventSource.Simulator,
-                    SourceId = $"joe10-buy-{purchase.Ticker}",
-                    SourceSequence = sequence,
-                    EffectiveTime = state.Close,
-                    EnteredTime = entered,
-                });
+                var transactionId = KeyFor($"buy/{purchase.Ticker}");
+                var cost = purchase.Shares * purchase.Price;
+                script
+                    .Insert("Transaction", new TransactionDto
+                    {
+                        TransactionId = transactionId,
+                        Kind = TransactionKind.Buy,
+                        Source = EventSource.Simulator,
+                        SourceId = $"joe10-buy-{purchase.Ticker}",
+                        SourceSequence = sequence,
+                        EffectiveTime = state.Close,
+                        EnteredTime = entered,
+                    })
+                    .Insert("TransactionLine", new TransactionLineDto { TransactionId = transactionId, LineNumber = 1, AccountId = AccountId, AssetId = AssetIdOf(purchase.Ticker), Effect = LineEffect.Change, Quantity = purchase.Shares, Amount = cost })
+                    .Insert("TransactionLine", new TransactionLineDto { TransactionId = transactionId, LineNumber = 2, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = -cost, Amount = -cost });
             }
 
             return script;
@@ -170,7 +179,7 @@ namespace AtlasLedger.Client.TestData
         /// down.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
-        /// <param name="deposit">The cash paid in, in dollars.</param>
+        /// <param name="deposit">The dollars paid in.</param>
         /// <returns>Each purchase.</returns>
         public static IReadOnlyList<(string Ticker, decimal Shares, decimal Price)> Purchases(Joe10State state, decimal deposit)
         {
@@ -182,11 +191,11 @@ namespace AtlasLedger.Client.TestData
         }
 
         /// <summary>
-        /// The security for a ticker.
+        /// The asset for a ticker.
         /// </summary>
         /// <param name="ticker">The ticker.</param>
-        /// <returns>The security's node ID.</returns>
-        public static Guid SecurityIdOf(string ticker) => KeyFor($"security/{ticker}");
+        /// <returns>The asset's node ID.</returns>
+        public static Guid AssetIdOf(string ticker) => KeyFor($"asset/{ticker}");
 
         // A name-based key (RFC 9562, version 8: SHA-256 of a fixed prefix and the name), so the same name always gives the
         // same key.

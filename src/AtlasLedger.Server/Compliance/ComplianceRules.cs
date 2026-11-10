@@ -94,14 +94,6 @@ namespace AtlasLedger.Server.Compliance
     }
 
     /// <summary>
-    /// In working memory while the compliance service is switched on: every compliance rule requires it, so switching the
-    /// service off silences compliance while the rest of the rules (holdings, prices) keep running.  One per session.
-    /// </summary>
-    public sealed class ComplianceOn
-    {
-    }
-
-    /// <summary>
     /// Raises an alert for an account with no custodian account number.
     /// </summary>
     [Name("MissingCustodian.Raise")]
@@ -115,7 +107,6 @@ namespace AtlasLedger.Server.Compliance
             this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Exists<ComplianceOn>()
                 .Match(() => account)
                 .Not<SymbolFact>(symbol => symbol.NodeId == account.AccountId, symbol => symbol.Scheme == ComplianceRules.Custodian)
                 .Not<AlertFact>(alert => alert.NodeId == account.AccountId, alert => alert.Rule == ComplianceRules.MissingCustodianRule);
@@ -139,7 +130,6 @@ namespace AtlasLedger.Server.Compliance
             this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Exists<ComplianceOn>()
                 .Match(() => account)
                 .Exists<SymbolFact>(symbol => symbol.NodeId == account.AccountId, symbol => symbol.Scheme == ComplianceRules.Custodian)
                 .Match(() => alert, candidate => candidate.NodeId == account.AccountId, candidate => candidate.Rule == ComplianceRules.MissingCustodianRule);
@@ -163,7 +153,6 @@ namespace AtlasLedger.Server.Compliance
             this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Exists<ComplianceOn>()
                 .Match(() => symbol)
                 .Match(() => price, candidate => candidate.Scheme == symbol.Scheme, candidate => candidate.Code == symbol.Code, candidate => candidate.Last <= 0m)
                 .Not<AlertFact>(alert => alert.NodeId == symbol.NodeId, alert => alert.Rule == ComplianceRules.InvalidPriceRuleFor(symbol.Scheme, symbol.Code));
@@ -188,7 +177,6 @@ namespace AtlasLedger.Server.Compliance
             this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Exists<ComplianceOn>()
                 .Match(() => symbol)
                 .Match(() => price, candidate => candidate.Scheme == symbol.Scheme, candidate => candidate.Code == symbol.Code, candidate => candidate.Last > 0m)
                 .Match(() => alert, candidate => candidate.NodeId == symbol.NodeId, candidate => candidate.Rule == ComplianceRules.InvalidPriceRuleFor(symbol.Scheme, symbol.Code));
@@ -215,7 +203,6 @@ namespace AtlasLedger.Server.Compliance
             this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Exists<ComplianceOn>()
                 .Match(() => transaction, candidate => HoldingFold.Exchanges.Contains(candidate.Kind))
                 .Query(() => lines, query => query
                     .Match<TransactionLineFact>(line => line.TransactionId == transaction.TransactionId)

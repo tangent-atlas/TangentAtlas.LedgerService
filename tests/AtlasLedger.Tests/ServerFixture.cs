@@ -35,6 +35,7 @@ namespace AtlasLedger.Tests
                 "--urls", "http://127.0.0.1:0",
                 "--MarketFeed:TickInterval=00:00:00.300",
                 "--MarketFeed:BadPrintInterval=00:00:01",
+                "--Services:StartOn=",   // every test starts with every service off, and turns on what it needs
                 "--Logging:LogLevel:Default=None",
                 "--Logging:LogLevel:Microsoft.Hosting.Lifetime=None",
                 "--Logging:LogLevel:AtlasLedger=None",

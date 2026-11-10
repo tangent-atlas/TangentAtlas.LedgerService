@@ -300,7 +300,7 @@ namespace AtlasLedger.Client
             {
                 var state = service.OnUntil is { } until
                     ? $"on until {until.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)} ({Remaining(until - DateTimeOffset.Now)} left)"
-                    : "off";
+                    : service.IsOn ? "on until turned off" : "off";
                 output.WriteLine($"{service.Name.PadRight(width)}  {state,-40}  {service.Description}");
             }
         }

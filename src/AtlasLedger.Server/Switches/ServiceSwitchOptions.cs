@@ -26,5 +26,13 @@ namespace AtlasLedger.Server.Switches
         /// a month.
         /// </summary>
         public TimeSpan MaximumDuration { get; set; } = TimeSpan.FromHours(24);
+
+        /// <summary>
+        /// Gets or sets the services switched on when the server starts, by name, separated by commas (for example
+        /// <c>rules</c>, or <c>rules,market-feed</c>); empty starts every service off, for diagnostics.  A service started
+        /// this way stays on until it is turned off.  Default: the rules engine.  From the environment:
+        /// <c>Services__StartOn=</c> starts everything off.
+        /// </summary>
+        public string StartOn { get; set; } = ServiceSwitchboard.Rules;
     }
 }

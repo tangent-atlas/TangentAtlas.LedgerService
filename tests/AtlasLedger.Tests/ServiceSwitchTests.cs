@@ -17,6 +17,7 @@ namespace AtlasLedger.Tests
     using client::AtlasLedger.Client.Api;
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Model;
+    using Microsoft.Extensions.Options;
     using server::AtlasLedger.Server.Switches;
     using Xunit;
 
@@ -54,6 +55,34 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
+        /// The settings choose which services start on: by default the rules engine, on until turned off; empty starts them
+        /// all off, for diagnostics; a name that isn't a service stops the server starting.
+        /// </summary>
+        [Fact]
+        public void TheSettingsChooseWhichServicesStartOn()
+        {
+            var byDefault = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions()));
+            Assert.True(byDefault[ServiceSwitchboard.Rules].IsOnUntilTurnedOff);
+            Assert.False(byDefault[ServiceSwitchboard.MarketFeed].IsOn);
+            Assert.True(server::AtlasLedger.Server.Switches.ServiceState.From(byDefault[ServiceSwitchboard.Rules]) is { IsOn: true, OnUntil: null });
+
+            var both = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = " rules , market-feed " }));
+            Assert.All(both.All, service => Assert.True(service.IsOnUntilTurnedOff));
+
+            var none = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = string.Empty }));
+            Assert.All(none.All, service => Assert.False(service.IsOn));
+
+            Assert.Throws<InvalidOperationException>(() => new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = "compliance" })));
+
+            // On until turned off waits for a turn on or off, not for a time.
+            var rules = byDefault[ServiceSwitchboard.Rules];
+            var waited = rules.WaitForChangeAsync(TestContext.Current.CancellationToken);
+            Assert.False(waited.IsCompleted);
+            rules.TurnOff();
+            Assert.False(rules.IsOn);
+        }
+
+        /// <summary>
         /// Only an allowed tool may see or change the services: anyone else signed in gets 404, as for a tenant they do not
         /// belong to, and anyone not signed in gets 401.  A duration over the maximum is refused.
         /// </summary>
@@ -68,7 +97,7 @@ namespace AtlasLedger.Tests
             var advisor = new LedgerApiClient(fixture.HttpClient, DevelopmentCallers.Advisor);
 
             var services = await tool.GetServicesAsync(cancellationToken);
-            Assert.Equal(new[] { ServiceSwitchboard.Compliance, ServiceSwitchboard.MarketFeed }, services.Select(service => service.Name));
+            Assert.Equal(new[] { ServiceSwitchboard.MarketFeed, ServiceSwitchboard.Rules }, services.Select(service => service.Name));
             Assert.All(services, service => Assert.False(service.IsOn));
 
             Assert.Equal(HttpStatusCode.NotFound, (await Assert.ThrowsAsync<LedgerApiException>(() => advisor.GetServicesAsync(cancellationToken))).StatusCode);
@@ -91,12 +120,13 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
-        /// With compliance off, the rules do nothing; turned on, they raise the alert the data calls for; turned off again,
-        /// they stop, and the alert stays until they run again.
+        /// With the rules engine off there are no rules: no alerts and no holdings (409); turned on, the rules raise the alert
+        /// the data calls for and derive the holdings; turned off again, they stop, the holdings go, and the alert stays until
+        /// they run again.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
         [Fact]
-        public async Task ComplianceRunsOnlyWhileOn()
+        public async Task TheRulesRunOnlyWhileTheEngineIsOn()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
             await using var fixture = new ServerFixture();
@@ -111,17 +141,20 @@ namespace AtlasLedger.Tests
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             Assert.Empty(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken));
+            Assert.Equal(HttpStatusCode.Conflict, (await Assert.ThrowsAsync<LedgerApiException>(() => tool.GetHoldingsAsync(tenant, cancellationToken))).StatusCode);
 
-            await tool.SetServiceAsync(ServiceSwitchboard.Compliance, true, TimeSpan.FromMinutes(5), cancellationToken);
+            await tool.SetServiceAsync(ServiceSwitchboard.Rules, true, TimeSpan.FromMinutes(5), cancellationToken);
             await WaitUntilAsync(async () => (await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken)).Any(alert => alert.Rule == "MissingCustodian"));
+            Assert.Empty((await tool.GetHoldingsAsync(tenant, cancellationToken)).Holdings);   // derived: the account holds nothing yet
 
-            await tool.SetServiceAsync(ServiceSwitchboard.Compliance, false, null, cancellationToken);
+            await tool.SetServiceAsync(ServiceSwitchboard.Rules, false, null, cancellationToken);
             await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+            Assert.Equal(HttpStatusCode.Conflict, (await Assert.ThrowsAsync<LedgerApiException>(() => tool.GetHoldingsAsync(tenant, cancellationToken))).StatusCode);
             await tool.InsertAsync(tenant, "Symbol", new SymbolDto { Scheme = "Custodian", Code = "9999-0001", NodeId = nodeId }, cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             Assert.Contains(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken), alert => alert.Rule == "MissingCustodian");
 
-            await tool.SetServiceAsync(ServiceSwitchboard.Compliance, true, TimeSpan.FromMinutes(5), cancellationToken);
+            await tool.SetServiceAsync(ServiceSwitchboard.Rules, true, TimeSpan.FromMinutes(5), cancellationToken);
             await WaitUntilAsync(async () => !(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken)).Any());
         }
 

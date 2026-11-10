@@ -51,12 +51,17 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="tenantId">The tenant.</param>
         /// <returns>The snapshot, or null if the rules haven't run for the tenant since the server started.</returns>
         public HoldingsSnapshot? Find(Guid tenantId) => this.snapshots.TryGetValue(tenantId, out var snapshot) ? snapshot : null;
+
+        /// <summary>
+        /// Forgets every snapshot, when the rules engine stops: no engine, no holdings, rather than holdings that have
+        /// stopped moving.
+        /// </summary>
+        public void Clear() => this.snapshots.Clear();
     }
 
     /// <summary>
     /// Makes each tenant's NRules session, and after every cycle publishes what the holdings rules derived.  It also keeps
-    /// the session's clock fact, moved on once a minute, so overrides expire, and puts the compliance switch into working
-    /// memory as a fact (<see cref="Compliance.ComplianceOn"/>) when the session is made.
+    /// the session's clock fact, moved on once a minute, so overrides expire.
     /// </summary>
     public sealed class HoldingsSessionFactory : IRulesSessionFactory
     {
@@ -66,34 +71,24 @@ namespace AtlasLedger.Server.Holdings
 
         private readonly TimeProvider timeProvider;
 
-        private readonly Func<bool> isComplianceOn;
-
         /// <summary>
         /// Initializes a new instance of the <see cref="HoldingsSessionFactory"/> class.
         /// </summary>
         /// <param name="inner">The factory of the NRules sessions, holding every rule (compliance and holdings).</param>
         /// <param name="store">Where snapshots are published.</param>
         /// <param name="timeProvider">The clock.</param>
-        /// <param name="isComplianceOn">Whether the compliance service is switched on.</param>
-        public HoldingsSessionFactory(NRulesSessionFactory inner, HoldingsStore store, TimeProvider timeProvider, Func<bool> isComplianceOn)
+        public HoldingsSessionFactory(NRulesSessionFactory inner, HoldingsStore store, TimeProvider timeProvider)
         {
             this.inner = inner;
             this.store = store;
             this.timeProvider = timeProvider;
-            this.isComplianceOn = isComplianceOn;
         }
 
         /// <inheritdoc/>
         public IRulesSession CreateSession(IRulesTenant tenant)
         {
             ArgumentNullException.ThrowIfNull(tenant);
-            var session = (NRulesSession)this.inner.CreateSession(tenant);
-            if (this.isComplianceOn())
-            {
-                session.Session.Insert(new Compliance.ComplianceOn());
-            }
-
-            return new HoldingsSession(session, tenant.TenantId, this.store, this.timeProvider);
+            return new HoldingsSession((NRulesSession)this.inner.CreateSession(tenant), tenant.TenantId, this.store, this.timeProvider);
         }
 
         private sealed class HoldingsSession : IRulesSession

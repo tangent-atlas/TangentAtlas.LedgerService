@@ -52,22 +52,24 @@ runs only in the Development environment, with development sign-in. The programs
 
 ## Services: on while you work, off otherwise
 
-The base system (the API, persistence, recovery, and the rules that derive holdings and prices) always runs; the rules
-wait for changes, so an idle server still does no work and its database can pause.  The services on top of it, the
-market feed and compliance, run only while switched on, and every switch starts off.  Compliance is a fact in each
-tenant's rules: switching it on or off restarts the rules with it in or out, and holdings carry on either way.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
+The base system (the API, persistence, and recovery) always runs.  The services on top of it, the market feed and the
+rules engine, run only while switched on.  `Services:StartOn` names those on when the server starts (on until turned
+off): by default `rules`; empty (`Services__StartOn=`) starts everything off, for diagnostics.  A service turned on
+through the API stays on for four hours unless told otherwise (at most 24).  No engine, no rules: holdings, prices and
+compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
+on rebuilds them from the log.
 
 ```
 dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when
 dotnet run --project src/AtlasLedger.Operator -- services on               # all, for four hours
-dotnet run --project src/AtlasLedger.Operator -- services on compliance --for 1.5
+dotnet run --project src/AtlasLedger.Operator -- services on rules --for 1.5
 dotnet run --project src/AtlasLedger.Operator -- services off              # all
 ```
 
 With `ledger-client.json` in place the operator reaches the server in Azure; `--server` (or `ATLAS_LEDGER_SERVER`) names
-another.  The walkthrough turns the services on and off again when it finishes.  The API is `v1/system/services`, the
-one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage` application permission (the
-operator console, not the script loader) may use it, and anyone else signed in gets 404.
+another.  The walkthrough turns on the services that are off, and off again only those, when it finishes.  The API is
+`v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
+application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
 
 ## License
 

@@ -27,7 +27,7 @@ namespace AtlasLedger.Server.Switches
         public bool IsOn { get; set; }
 
         /// <summary>
-        /// Gets or sets when the service turns itself off; null when it is off.
+        /// Gets or sets when the service turns itself off; null when it is off, or on until turned off.
         /// </summary>
         public DateTimeOffset? OnUntil { get; set; }
 
@@ -39,8 +39,9 @@ namespace AtlasLedger.Server.Switches
         public static ServiceState From(ServiceSwitch serviceSwitch)
         {
             ArgumentNullException.ThrowIfNull(serviceSwitch);
+            // On with no end reads as on, with no time to turn off.
             var onUntil = serviceSwitch.OnUntil;
-            return new ServiceState { Name = serviceSwitch.Name, Description = serviceSwitch.Description, IsOn = onUntil is not null, OnUntil = onUntil };
+            return new ServiceState { Name = serviceSwitch.Name, Description = serviceSwitch.Description, IsOn = onUntil is not null, OnUntil = onUntil == DateTimeOffset.MaxValue ? null : onUntil };
         }
     }
 }

@@ -37,7 +37,7 @@ namespace AtlasLedger.Operator
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
                                               compliance must be on.
-              services                        Show the server's optional services (market feed, compliance).
+              services                        Show the server's optional services (market feed, rules engine).
               services on [name...] [--for <hours>]
                                               Turn services on (all, if none named) for a while (default 4 hours;
                                               hours like 4 or 0.5, or h:mm); they turn themselves off.

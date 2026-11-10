@@ -9,6 +9,7 @@ namespace AtlasLedger.Server.Compliance
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Holdings;
     using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
     using Microsoft.Extensions.Hosting;
@@ -16,14 +17,16 @@ namespace AtlasLedger.Server.Compliance
     using Microsoft.Extensions.Options;
 
     /// <summary>
-    /// Runs every tenant's rules (holdings, prices, compliance), always: starts a rules engine for every tenant, and for
-    /// each new one as it appears; stops them at shutdown; trims each tenant's change journal to what its engine still
-    /// needs; and logs what the engines decide.  The compliance switch (<see cref="ServiceSwitchboard.Compliance"/>) only
-    /// decides whether the compliance rules take part: it is a fact in working memory (<see cref="ComplianceOn"/>).
+    /// Runs the rules engine (holdings, prices and compliance alike) for every tenant while its switch
+    /// (<see cref="ServiceSwitchboard.Rules"/>) is on: starts an engine for every tenant, and for each new one as it appears;
+    /// stops them all when the switch goes off and at shutdown; and logs what the engines decide.  No engine, no rules: while
+    /// it is off there are no holdings and no alerts.  Whether the engines run or not, it trims each tenant's change journal
+    /// to what an engine still needs, which is nothing while they are off.
     /// </summary>
     /// <remarks>
-    /// Every change of state happens on this service's one loop, so a switch change and a new tenant never race.  Alerts
-    /// already raised stay as they are while compliance is off; the rules reconcile them when it comes on again.
+    /// Every change of state happens on this service's one loop, so turning on, turning off, and a new tenant never race.
+    /// Alerts already raised stay as they are while the engines are off; the engines reconcile them when they start again,
+    /// and the holdings are rebuilt from the log.
     /// </remarks>
     internal sealed partial class RulesService : BackgroundService
     {
@@ -35,9 +38,11 @@ namespace AtlasLedger.Server.Compliance
 
         private readonly ServiceSwitch serviceSwitch;
 
+        private readonly HoldingsStore holdings;
+
         private readonly SemaphoreSlim partitionCreated = new SemaphoreSlim(0);
 
-        private bool? isComplianceOn;
+        private bool isRunning;
 
         private readonly ILogger<RulesService> logger;
 
@@ -49,12 +54,13 @@ namespace AtlasLedger.Server.Compliance
         /// <param name="options">The compliance settings.</param>
         /// <param name="switchboard">The services' switches.</param>
         /// <param name="logger">The logger.</param>
-        public RulesService(Ledger ledger, RulesEngineHost host, IOptions<ComplianceOptions> options, ServiceSwitchboard switchboard, ILogger<RulesService> logger)
+        public RulesService(Ledger ledger, RulesEngineHost host, IOptions<ComplianceOptions> options, ServiceSwitchboard switchboard, HoldingsStore holdings, ILogger<RulesService> logger)
         {
             this.ledger = ledger;
             this.host = host;
             this.options = options.Value;
-            this.serviceSwitch = switchboard[ServiceSwitchboard.Compliance];
+            this.serviceSwitch = switchboard[ServiceSwitchboard.Rules];
+            this.holdings = holdings;
             this.logger = logger;
         }
 
@@ -115,34 +121,31 @@ namespace AtlasLedger.Server.Compliance
         /// </summary>
         private async Task ReconcileAsync()
         {
-            // The engines always run: holdings are core state.  The compliance switch is a fact in each session's working
-            // memory, put there when the session is made, so a change of the switch restarts the engines, and each starts
-            // again from a snapshot with the fact in or out.  Switching is rare; a restart costs one rebuild.
-            var isOn = this.serviceSwitch.IsOn;
-            if (this.isComplianceOn is { } wasOn && wasOn != isOn)
+            if (this.serviceSwitch.IsOn)
             {
+                foreach (var partition in this.ledger.Partitions)
+                {
+                    this.Start(partition);
+                }
+
+                if (!this.isRunning)
+                {
+                    this.isRunning = true;
+                    this.LogSwitchedOn(this.serviceSwitch.OnUntil, this.host.Tenants.Count);
+                }
+            }
+            else if (this.isRunning || this.host.Tenants.Count > 0)
+            {
+                var count = this.host.Tenants.Count;
                 foreach (var tenantId in this.host.Tenants)
                 {
                     await this.host.StopAsync(tenantId).ConfigureAwait(false);
                 }
-            }
 
-            foreach (var partition in this.ledger.Partitions)
-            {
-                this.Start(partition);
-            }
+                this.holdings.Clear();
 
-            if (this.isComplianceOn != isOn)
-            {
-                this.isComplianceOn = isOn;
-                if (isOn)
-                {
-                    this.LogSwitchedOn(this.serviceSwitch.OnUntil, this.host.Tenants.Count);
-                }
-                else
-                {
-                    this.LogSwitchedOff(this.host.Tenants.Count);
-                }
+                this.isRunning = false;
+                this.LogSwitchedOff(count);
             }
         }
 
@@ -171,9 +174,16 @@ namespace AtlasLedger.Server.Compliance
 
                 try
                 {
-                    if (this.host.FindEngine(partition.TenantId) is { } engine && engine.AppliedSequence > 0)
+                    if (this.host.FindEngine(partition.TenantId) is { } engine)
                     {
-                        partition.TrimJournal(engine.AppliedSequence);
+                        if (engine.AppliedSequence > 0)
+                        {
+                            partition.TrimJournal(engine.AppliedSequence);
+                        }
+                    }
+                    else if (!this.serviceSwitch.IsOn)
+                    {
+                        partition.TrimJournal(long.MaxValue);
                     }
                 }
                 catch (InvalidOperationException)
@@ -198,19 +208,19 @@ namespace AtlasLedger.Server.Compliance
 
         private void OnCycleFailed(object? sender, RulesCycleFailedEventArgs eventArgs) => this.LogFailed(eventArgs.Exception, eventArgs.TenantId);
 
-        [LoggerMessage(Level = LogLevel.Information, Message = "Compliance: switched on until {OnUntil}; the rules of {TenantCount} tenant(s) include it.")]
+        [LoggerMessage(Level = LogLevel.Information, Message = "Rules: switched on until {OnUntil}; {TenantCount} tenant engine(s) running.")]
         private partial void LogSwitchedOn(DateTimeOffset? onUntil, int tenantCount);
 
-        [LoggerMessage(Level = LogLevel.Information, Message = "Compliance: switched off; the rules of {TenantCount} tenant(s) keep running without it.")]
+        [LoggerMessage(Level = LogLevel.Information, Message = "Rules: switched off; {TenantCount} tenant engine(s) stopped.")]
         private partial void LogSwitchedOff(int tenantCount);
 
-        [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: {RulesFired} rule(s) fired from {FactChanges} fact change(s), committed at {Sequence}.")]
+        [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: {RulesFired} decision(s) from {FactChanges} fact change(s), committed at {Sequence}.")]
         private partial void LogDecisions(Guid tenantId, int rulesFired, int factChanges, long sequence);
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: decisions refused ({Reason}); the rules decide again with newer data.")]
         private partial void LogRejected(Guid tenantId, string reason);
 
-        [LoggerMessage(Level = LogLevel.Error, Message = "Rules for tenant {TenantId}: a cycle failed; the session is rebuilt from a snapshot.")]
+        [LoggerMessage(Level = LogLevel.Error, Message = "Rules for tenant {TenantId}: a rules cycle failed; the session is rebuilt from a snapshot.")]
         private partial void LogFailed(Exception exception, Guid tenantId);
     }
 }

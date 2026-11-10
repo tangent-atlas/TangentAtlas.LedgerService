@@ -112,9 +112,8 @@ namespace AtlasLedger.Server
             builder.Services.AddSingleton<ServiceSwitchboard>();
             builder.Services.Configure<ServiceSwitchOptions>(configuration.GetSection(ServiceSwitchOptions.SectionName));
 
-            // The rules (holdings and compliance): compiled once; each tenant gets its own engine and one NRules session
-            // holding every rule.  The engines always run; the compliance switch is a fact in working memory that only the
-            // compliance rules need.  After each cycle the holdings the rules derived are published for the API to read.
+            // The rules engine (holdings and compliance): a service on its own switch; compiled once; each tenant gets its own
+            // engine and one NRules session holding every rule.  After each cycle the holdings the rules derived are published for the API to read.
             builder.Services.Configure<ComplianceOptions>(configuration.GetSection(ComplianceOptions.SectionName));
             builder.Services.AddSingleton<HoldingsStore>();
             builder.Services.AddSingleton(services =>
@@ -124,8 +123,7 @@ namespace AtlasLedger.Server
                     new HoldingsSessionFactory(
                         new NRulesSessionFactory(ComplianceRules.Compile()),
                         services.GetRequiredService<HoldingsStore>(),
-                        services.GetRequiredService<TimeProvider>(),
-                        () => services.GetRequiredService<ServiceSwitchboard>()[ServiceSwitchboard.Compliance].IsOn),
+                        services.GetRequiredService<TimeProvider>()),
                     new RulesEngineOptions { MinimumInterval = compliance.MinimumInterval },
                     compliance.MaximumConcurrentCycles);
             });

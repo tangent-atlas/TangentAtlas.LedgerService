@@ -30,8 +30,14 @@ namespace AtlasLedger.Model
         /// <summary>The US dollar.</summary>
         public const string UnitedStatesDollar = "USD";
 
-        /// <summary>The currency every tenant values its holdings in, for now.</summary>
-        public const string Valuation = UnitedStatesDollar;
+        /// <summary>The Canadian dollar.</summary>
+        public const string CanadianDollar = "CAD";
+
+        /// <summary>The pound sterling.</summary>
+        public const string PoundSterling = "GBP";
+
+        /// <summary>The euro.</summary>
+        public const string Euro = "EUR";
     }
 
     /// <summary>

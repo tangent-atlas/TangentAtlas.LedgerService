@@ -33,6 +33,11 @@ namespace AtlasLedger.Schema.Migrations
                     b.Property<int>("AccountType")
                         .HasColumnType("int");
 
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 

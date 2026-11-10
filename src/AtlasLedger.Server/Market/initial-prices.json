@@ -1,6 +1,9 @@
 {
-  "description": "Prices published into every tenant's price store at startup and when a tenant is created: constants the market feed doesn't supply. Each is the price of one unit of the symbol, in units of the currency. Prices are never persisted, so these are published again after every restart.",
+  "description": "Prices published into every tenant's price store at startup and when a tenant is created: constants the market feed doesn't supply. Each is the price of one unit of the symbol, in units of the currency. Only what is true by definition belongs here (a currency's price in itself is 1); exchange rates between currencies move, so they come from a feed. Prices are never persisted, so these are published again after every restart.",
   "prices": [
-    { "scheme": "Currency", "code": "USD", "currency": "USD", "last": 1 }
+    { "scheme": "Currency", "code": "USD", "currency": "USD", "last": 1 },
+    { "scheme": "Currency", "code": "CAD", "currency": "CAD", "last": 1 },
+    { "scheme": "Currency", "code": "GBP", "currency": "GBP", "last": 1 },
+    { "scheme": "Currency", "code": "EUR", "currency": "EUR", "last": 1 }
   ]
 }

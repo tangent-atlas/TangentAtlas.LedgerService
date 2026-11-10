@@ -23,10 +23,11 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="CostBasis">The cost of what is held; null when unknown.</param>
     /// <param name="IsOverridden">True when an override in force set the quantity.</param>
     /// <param name="Price">The effective price, as quoted, if the asset has one.</param>
+    /// <param name="QuoteCurrency">The currency the price is in.</param>
     /// <param name="PriceSource">Where the price came from.</param>
-    /// <param name="Currency">The currency the price is in: the asset's quote currency.</param>
-    /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the quote currency's rate, in the valuation
-    /// currency, if there is a price and a rate.</param>
+    /// <param name="Currency">The account's currency: the cost basis and market value are in it.</param>
+    /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
+    /// account's currency, if there is a price and a rate.</param>
     public sealed record HoldingDto(
         Guid AccountId,
         Guid AssetId,
@@ -35,19 +36,20 @@ namespace AtlasLedger.Server.Holdings
         decimal? CostBasis,
         bool IsOverridden,
         decimal? Price,
-        string Currency,
+        string QuoteCurrency,
         PriceSource? PriceSource,
+        string Currency,
         decimal? MarketValue);
 
     /// <summary>
     /// A tenant's holdings and prices at the end of the last rules cycle.
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
-    /// <param name="ValuationCurrency">The currency market values are in.</param>
-    /// <param name="Holdings">The holdings with any quantity (zero holdings are left out).</param>
+    /// <param name="Holdings">The holdings with any quantity (zero holdings are left out), each valued in its account's
+    /// currency.</param>
     /// <param name="Prices">Each priced asset's effective price.</param>
-    /// <param name="Rates">Each currency's price in the valuation currency.</param>
-    public sealed record HoldingsDto(DateTimeOffset AsOf, string ValuationCurrency, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates);
+    /// <param name="Rates">Each published rate between currencies.</param>
+    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates);
 
     /// <summary>
     /// Serves what the tenant's transactions add up to: the rules' published snapshot, never the ledger's tables.
@@ -86,7 +88,7 @@ namespace AtlasLedger.Server.Holdings
             }
 
             var prices = snapshot.Prices.ToDictionary(price => price.AssetId);
-            var rates = snapshot.Rates.ToDictionary(rate => rate.CurrencyCode, rate => rate.Rate);
+            var rates = snapshot.Rates.ToDictionary(rate => (rate.FromCurrency, rate.ToCurrency), rate => rate.Rate);
             var holdings = snapshot.Positions
                 .Where(position => position.Quantity != 0m)
                 .OrderBy(position => position.AccountId)
@@ -95,7 +97,6 @@ namespace AtlasLedger.Server.Holdings
                 .Select(position =>
                 {
                     var price = prices.GetValueOrDefault(position.AssetId);
-                    decimal? rate = rates.TryGetValue(position.QuoteCurrency, out var found) ? found : null;
                     return new HoldingDto(
                         position.AccountId,
                         position.AssetId,
@@ -106,15 +107,15 @@ namespace AtlasLedger.Server.Holdings
                         price?.Price,
                         position.QuoteCurrency,
                         price?.Source,
-                        price is null || rate is null ? null : HoldingFold.MarketValue(position.Quantity, position.QuantityFactor, price.Price, position.PriceFactor, rate.Value));
+                        position.AccountCurrency,
+                        HoldingFold.MarketValue(position, price, rates));
                 })
                 .ToArray();
             return this.Ok(new HoldingsDto(
                 snapshot.AsOf,
-                CurrencyCode.Valuation,
                 holdings,
                 snapshot.Prices.OrderBy(price => price.AssetId).ToArray(),
-                snapshot.Rates.OrderBy(rate => rate.CurrencyCode, StringComparer.Ordinal).ToArray()));
+                snapshot.Rates.OrderBy(rate => rate.FromCurrency, StringComparer.Ordinal).ThenBy(rate => rate.ToCurrency, StringComparer.Ordinal).ToArray()));
         }
     }
 }

@@ -7,6 +7,7 @@ extern alias server;
 namespace AtlasLedger.Tests
 {
     using System;
+    using System.Collections.Generic;
     using System.Linq;
     using AtlasLedger.Model;
     using server::AtlasLedger.Model;
@@ -21,6 +22,8 @@ namespace AtlasLedger.Tests
     public sealed class HoldingFoldTests
     {
         private static readonly Guid Account = Guid.Parse("00000000-0000-0000-0000-00000000000a");
+
+        private static readonly AccountFact Holder = new AccountFact(new AccountDto { AccountId = Account, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
 
         private static readonly AssetFact Stock = AssetOf(Guid.Parse("00000000-0000-0000-0000-00000000000b"), AssetType.Equity, ValueFactor.One, ValueFactor.One);
 
@@ -37,7 +40,7 @@ namespace AtlasLedger.Tests
         {
             var lines = Buy(100, 10m, Morning).Concat(Buy(100, 20m, Morning.AddHours(1))).Concat(Sell(50, 30m, Morning.AddHours(2))).ToArray();
 
-            var stock = HoldingFold.Position(Account, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
 
             Assert.Equal(150m, stock.Quantity);
             Assert.Equal(2_250m, stock.CostBasis);   // 3,000 paid for 200; a quarter sold
@@ -49,7 +52,7 @@ namespace AtlasLedger.Tests
         {
             var lines = Deposit(1_000m, Morning).Concat(Buy(10, 20m, Morning.AddHours(1))).Concat(Sell(5, 30m, Morning.AddHours(2))).ToArray();
 
-            var dollars = HoldingFold.Position(Account, Dollar, lines.Where(line => line.Line.AssetId == Dollar.AssetId));
+            var dollars = HoldingFold.Position(Holder, Dollar, lines.Where(line => line.Line.AssetId == Dollar.AssetId));
 
             Assert.Equal(950m, dollars.Quantity);   // 1,000 − 200 + 150
             Assert.Equal(AssetType.Cash, dollars.AssetType);
@@ -63,7 +66,7 @@ namespace AtlasLedger.Tests
             var setTo100 = Override(100, Morning.AddHours(1));
             var late = Buy(50, 10m, Morning);
 
-            var stock = HoldingFold.Position(Account, Stock, late.Concat(setTo100).Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, late.Concat(setTo100).Where(line => line.Line.AssetId == Stock.AssetId));
 
             Assert.True(late[0].Transaction.RowVersion > setTo100[0].Transaction.RowVersion);
             Assert.Equal(100m, stock.Quantity);
@@ -89,7 +92,7 @@ namespace AtlasLedger.Tests
                 .Concat(Lines(TransactionKind.Split, Morning.AddDays(1), null, null, (Stock, LineEffect.Change, 10m, 0m)))
                 .Concat(Buy(5, 50m, Morning.AddDays(2)));
 
-            var stock = HoldingFold.Position(Account, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
 
             Assert.Equal(25m, stock.Quantity);   // 10, doubled, then 5 more
             Assert.Equal(1_250m, stock.CostBasis);
@@ -101,8 +104,8 @@ namespace AtlasLedger.Tests
             var known = Lines(TransactionKind.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, 500m));
             var unknown = Lines(TransactionKind.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, null));
 
-            Assert.Equal(550m, HoldingFold.Position(Account, Stock, known.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId)).CostBasis);
-            var position = HoldingFold.Position(Account, Stock, unknown.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId));
+            Assert.Equal(550m, HoldingFold.Position(Holder, Stock, known.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId)).CostBasis);
+            var position = HoldingFold.Position(Holder, Stock, unknown.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId));
             Assert.Equal(15m, position.Quantity);
             Assert.Null(position.CostBasis);
         }
@@ -123,8 +126,8 @@ namespace AtlasLedger.Tests
         public void PricesComeFromAnOverrideThenTheMarketThenTheLastExchange()
         {
             var exchanges = Buy(1, 10m, Morning).Concat(Buy(1, 11m, Morning.AddHours(1))).Where(line => line.Line.AssetId == Stock.AssetId).ToArray();
-            var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.Valuation, Last = 12m, AsOf = Morning.AddHours(2) });
-            var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.Valuation, Last = 0m, AsOf = Morning.AddHours(2) });
+            var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 12m, AsOf = Morning.AddHours(2) });
+            var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 0m, AsOf = Morning.AddHours(2) });
             var priceOverride = new PriceOverrideFact(new PriceOverrideDto
             {
                 PriceOverrideId = Guid.NewGuid(), AssetId = Stock.AssetId, Price = 13m, ExpiresTime = Morning.AddDays(1),
@@ -154,6 +157,28 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public void AHoldingIsValuedInItsAccountsCurrencyAtAPublishedRateOrNotAtAll()
+        {
+            // 100 shares quoted in pounds, held in a dollar account.
+            var position = new PositionState(Account, Guid.NewGuid(), AssetType.Equity, CurrencyCode.UnitedStatesDollar, CurrencyCode.PoundSterling, 1m, 1m, 100m, null, false, Morning, 1);
+            var price = new EffectivePrice(position.AssetId, 10m, CurrencyCode.PoundSterling, Morning, PriceSource.Market);
+            var identities = new Dictionary<(string From, string To), decimal>
+            {
+                [(CurrencyCode.UnitedStatesDollar, CurrencyCode.UnitedStatesDollar)] = 1m,
+                [(CurrencyCode.PoundSterling, CurrencyCode.PoundSterling)] = 1m,
+            };
+
+            // No rate from pounds to dollars: no value, never an assumed one; nor one from a rate the other way round.
+            Assert.Null(HoldingFold.MarketValue(position, price, identities));
+            Assert.Null(HoldingFold.MarketValue(position, price, new Dictionary<(string From, string To), decimal>(identities) { [(CurrencyCode.UnitedStatesDollar, CurrencyCode.PoundSterling)] = 0.8m }));
+
+            // With the feed's rate, £1,000 is $1,250; in a pound account the same holding is £1,000 at the rate of 1.
+            Assert.Equal(1_250m, HoldingFold.MarketValue(position, price, new Dictionary<(string From, string To), decimal>(identities) { [(CurrencyCode.PoundSterling, CurrencyCode.UnitedStatesDollar)] = 1.25m }));
+            Assert.Equal(1_000m, HoldingFold.MarketValue(position with { AccountCurrency = CurrencyCode.PoundSterling }, price, identities));
+            Assert.Null(HoldingFold.MarketValue(position, null, identities));
+        }
+
+        [Fact]
         public void AnExchangeBalancesWhenWhatIsGivenEqualsWhatIsReceived()
         {
             Assert.True(HoldingFold.IsBalanced(Buy(10, 20m, Morning).Select(line => line.Line).ToArray()));
@@ -163,14 +188,14 @@ namespace AtlasLedger.Tests
         }
 
         private static decimal Quantity(params PostedLine[][] transactions) =>
-            HoldingFold.Position(Account, Stock, transactions.SelectMany(lines => lines).Where(line => line.Line.AssetId == Stock.AssetId)).Quantity;
+            HoldingFold.Position(Holder, Stock, transactions.SelectMany(lines => lines).Where(line => line.Line.AssetId == Stock.AssetId)).Quantity;
 
         private static (decimal, PriceSource)? Pair(EffectivePrice? price) => price is null ? null : (price.Price, price.Source);
 
         private static long Next() => System.Threading.Interlocked.Increment(ref ledgerSequence);
 
         private static AssetFact AssetOf(Guid assetId, AssetType assetType, decimal quantityFactor, decimal priceFactor) =>
-            new AssetFact(new AssetDto { AssetId = assetId, AssetType = assetType, QuoteCurrency = CurrencyCode.Valuation, QuantityFactor = quantityFactor, PriceFactor = priceFactor });
+            new AssetFact(new AssetDto { AssetId = assetId, AssetType = assetType, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = quantityFactor, PriceFactor = priceFactor });
 
         private static PostedLine[] Deposit(decimal dollars, DateTimeOffset at) =>
             Lines(TransactionKind.Deposit, at, null, null, (Dollar, LineEffect.Change, dollars, dollars));

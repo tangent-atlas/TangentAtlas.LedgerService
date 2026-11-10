@@ -42,12 +42,13 @@ namespace AtlasLedger.Server.Holdings
         /// <summary>
         /// Folds the posted lines of one holding (an account's quantity of one asset).
         /// </summary>
-        /// <param name="accountId">The account.</param>
+        /// <param name="account">The account.</param>
         /// <param name="asset">The asset.</param>
         /// <param name="lines">The holding's posted lines, in any order.</param>
         /// <returns>The holding's state.</returns>
-        public static PositionState Position(Guid accountId, AssetFact asset, IEnumerable<PostedLine> lines)
+        public static PositionState Position(AccountFact account, AssetFact asset, IEnumerable<PostedLine> lines)
         {
+            ArgumentNullException.ThrowIfNull(account);
             ArgumentNullException.ThrowIfNull(asset);
             ArgumentNullException.ThrowIfNull(lines);
             var quantity = 0m;
@@ -92,7 +93,7 @@ namespace AtlasLedger.Server.Holdings
                 cost = held > 0m && quantity > 0m ? cost * (quantity / held) : 0m;
             }
 
-            return new PositionState(accountId, asset.AssetId, asset.AssetType, asset.QuoteCurrency, asset.QuantityFactor, asset.PriceFactor, quantity, isCostKnown ? cost : null, isOverridden, last, count);
+            return new PositionState(account.AccountId, asset.AssetId, asset.AssetType, account.Currency, asset.QuoteCurrency, asset.QuantityFactor, asset.PriceFactor, quantity, isCostKnown ? cost : null, isOverridden, last, count);
         }
 
         /// <summary>
@@ -142,17 +143,34 @@ namespace AtlasLedger.Server.Holdings
         }
 
         /// <summary>
-        /// The market value of a quantity at a quoted price, in the valuation currency: quantity × QuantityFactor × price ×
-        /// PriceFactor × the price of the quote currency in the valuation currency.  The same formula for every asset.
+        /// The market value of a quantity at a quoted price, in the account's currency: quantity × QuantityFactor × price ×
+        /// PriceFactor × the price of the quote currency in the account's currency.  The same formula for every asset.
         /// </summary>
         /// <param name="quantity">The quantity.</param>
         /// <param name="quantityFactor">The units one quantity stands for.</param>
         /// <param name="price">The quoted price, in the quote currency.</param>
         /// <param name="priceFactor">The units a quoted price stands for.</param>
-        /// <param name="currencyRate">The price of one unit of the quote currency in the valuation currency.</param>
-        /// <returns>The value, in the valuation currency.</returns>
+        /// <param name="currencyRate">The price of one unit of the quote currency in the account's currency.</param>
+        /// <returns>The value, in the account's currency.</returns>
         public static decimal MarketValue(decimal quantity, decimal quantityFactor, decimal price, decimal priceFactor, decimal currencyRate) =>
             quantity * quantityFactor * price * priceFactor * currencyRate;
+
+        /// <summary>
+        /// A holding's market value in its account's currency, or null when there is no price or no rate to convert it with:
+        /// a value is never assumed.
+        /// </summary>
+        /// <param name="position">The holding.</param>
+        /// <param name="price">The asset's effective price, if any.</param>
+        /// <param name="rates">The rates, by (from, to) currency.</param>
+        /// <returns>The value, or null.</returns>
+        public static decimal? MarketValue(PositionState position, EffectivePrice? price, IReadOnlyDictionary<(string From, string To), decimal> rates)
+        {
+            ArgumentNullException.ThrowIfNull(position);
+            ArgumentNullException.ThrowIfNull(rates);
+            return price is not null && rates.TryGetValue((position.QuoteCurrency, position.AccountCurrency), out var rate)
+                ? MarketValue(position.Quantity, position.QuantityFactor, price.Price, position.PriceFactor, rate)
+                : null;
+        }
 
         /// <summary>
         /// Whether an exchange balances: at least two lines, every line valued, and the values summing to zero (to the cent).

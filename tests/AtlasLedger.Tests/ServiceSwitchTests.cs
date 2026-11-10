@@ -106,7 +106,7 @@ namespace AtlasLedger.Tests
             var nodeId = Guid.NewGuid();
             var accountWithoutCustodian = new LedgerScript()
                 .Insert("Node", new NodeDto { NodeId = nodeId, DisplayName = "Jones IRA", FullName = "Jones IRA", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = nodeId, AccountType = AccountType.ManagedAccount });
+                .Insert("Account", new AccountDto { AccountId = nodeId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
             await tool.ApplyAsync(tenant, accountWithoutCustodian, cancellationToken);
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);

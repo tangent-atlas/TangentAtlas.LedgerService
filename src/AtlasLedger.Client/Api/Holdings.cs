@@ -19,25 +19,26 @@ namespace AtlasLedger.Client.Api
     /// <param name="CostBasis">The cost of what is held; null when unknown.</param>
     /// <param name="IsOverridden">True when an override in force set the quantity.</param>
     /// <param name="Price">The effective price, as quoted, if any.</param>
-    /// <param name="Currency">The currency the price is in: the asset's quote currency.</param>
+    /// <param name="QuoteCurrency">The currency the price is in.</param>
     /// <param name="PriceSource">Where the price came from: Market, Override or LastTrade.</param>
-    /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the quote currency's rate, in the valuation
-    /// currency, if there is a price and a rate.</param>
-    public sealed record Holding(Guid AccountId, Guid AssetId, AssetType AssetType, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, string Currency, string? PriceSource, decimal? MarketValue);
+    /// <param name="Currency">The account's currency: the cost basis and market value are in it.</param>
+    /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
+    /// account's currency, if there is a price and a rate.</param>
+    public sealed record Holding(Guid AccountId, Guid AssetId, AssetType AssetType, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, string QuoteCurrency, string? PriceSource, string Currency, decimal? MarketValue);
 
     /// <summary>
-    /// The price of one unit of a currency in the valuation currency.
+    /// The price of one unit of a currency in another.
     /// </summary>
-    /// <param name="CurrencyCode">The currency.</param>
-    /// <param name="Rate">Its price in the valuation currency.</param>
-    public sealed record CurrencyRate(string CurrencyCode, decimal Rate);
+    /// <param name="FromCurrency">The currency priced.</param>
+    /// <param name="ToCurrency">The currency its price is in.</param>
+    /// <param name="Rate">The price.</param>
+    public sealed record CurrencyRate(string FromCurrency, string ToCurrency, decimal Rate);
 
     /// <summary>
     /// A tenant's holdings, as the rules derived them from its transactions.
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
-    /// <param name="ValuationCurrency">The currency market values are in.</param>
-    /// <param name="Holdings">The holdings with any quantity.</param>
-    /// <param name="Rates">Each currency's price in the valuation currency.</param>
-    public sealed record TenantHoldings(DateTimeOffset AsOf, string ValuationCurrency, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates);
+    /// <param name="Holdings">The holdings with any quantity, each valued in its account's currency.</param>
+    /// <param name="Rates">Each published rate between currencies.</param>
+    public sealed record TenantHoldings(DateTimeOffset AsOf, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates);
 }

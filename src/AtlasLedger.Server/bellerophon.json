@@ -33,9 +33,11 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
+      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them.",
       "columns": {
         "AccountId": "guid",
-        "AccountType": "accountType"
+        "AccountType": "accountType",
+        "Currency": { "maxLength": 3, "type": "string" }
       },
       "key": ["AccountId"],
       "references": {
@@ -75,7 +77,7 @@
       }
     },
     "Asset": {
-      "description": "Anything that can be held: cash, a stock, a fund, a bond, an option, a future or a coin. Its identity is a node, its Symbol rows are its names in each scheme (Currency, Ticker, Cusip), and one extension table by asset type holds what is particular to it. Its price is quoted in QuoteCurrency (ISO 4217; a currency is quoted in the valuation currency). Market value in the valuation currency is quantity × QuantityFactor × price × PriceFactor × the price of QuoteCurrency in the valuation currency: QuantityFactor is the units one quantity stands for (100 shares for an option, a futures contract's multiplier), PriceFactor the units a quoted price stands for (0.01 for a bond priced per 100 of face value, or a future quoted in cents).",
+      "description": "Anything that can be held: cash, a stock, a fund, a bond, an option, a future or a coin. Its identity is a node, its Symbol rows are its names in each scheme (Currency, Ticker, Cusip), and one extension table by asset type holds what is particular to it. Its price is quoted in QuoteCurrency (ISO 4217; a currency is quoted in itself, at 1). Market value in an account's currency is quantity × QuantityFactor × price × PriceFactor × the price of QuoteCurrency in the account's currency: QuantityFactor is the units one quantity stands for (100 shares for an option, a futures contract's multiplier), PriceFactor the units a quoted price stands for (0.01 for a bond priced per 100 of face value, or a future quoted in cents).",
       "key": ["AssetId"],
       "references": {
         "Node": { "columns": ["AssetId"] }
@@ -299,7 +301,7 @@
       }
     },
     "TransactionLine": {
-      "description": "What a transaction does to one holding: an account's quantity of one asset. Effect Change adds Quantity (negative to remove); Effect SetTo sets it (an override). Amount is the line's value in the tenant's currency at the transaction: what was received (positive) or given (negative); for a purchase, the cost; null when unknown. RelatedAssetId names another asset the line is about (the company that paid a dividend).",
+      "description": "What a transaction does to one holding: an account's quantity of one asset. Effect Change adds Quantity (negative to remove); Effect SetTo sets it (an override). Amount is the line's value in the account's currency at the transaction: what was received (positive) or given (negative); for a purchase, the cost; null when unknown. RelatedAssetId names another asset the line is about (the company that paid a dividend).",
       "writeMode": "AppendOnly",
       "key": ["TransactionId", "LineNumber"],
       "references": {

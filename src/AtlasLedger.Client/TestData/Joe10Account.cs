@@ -106,7 +106,7 @@ namespace AtlasLedger.Client.TestData
             ArgumentNullException.ThrowIfNull(state);
             var script = new LedgerScript()
                 .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount })
+                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
                 .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber })
                 .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })

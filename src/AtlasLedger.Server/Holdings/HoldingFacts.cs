@@ -37,11 +37,12 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="AccountId">The account.</param>
     /// <param name="AssetId">The asset.</param>
     /// <param name="AssetType">The asset's type.</param>
+    /// <param name="AccountCurrency">The currency the account is kept in: the holding's cost and market value are in it.</param>
     /// <param name="QuoteCurrency">The currency the asset's price is quoted in.</param>
     /// <param name="QuantityFactor">The units one quantity stands for.</param>
     /// <param name="PriceFactor">The units a quoted price stands for.</param>
     /// <param name="Quantity">The quantity held: shares, units of currency, face value, contracts.</param>
-    /// <param name="CostBasis">The cost of what is held, in the valuation currency; null when an opening balance came without one.</param>
+    /// <param name="CostBasis">The cost of what is held, in the account's currency; null when an opening balance came without one.</param>
     /// <param name="IsOverridden">True when an override in force set the quantity.</param>
     /// <param name="LastEffectiveTime">The effective time of the last line folded.</param>
     /// <param name="LineCount">How many lines were folded.</param>
@@ -49,6 +50,7 @@ namespace AtlasLedger.Server.Holdings
         Guid AccountId,
         Guid AssetId,
         AssetType AssetType,
+        string AccountCurrency,
         string QuoteCurrency,
         decimal QuantityFactor,
         decimal PriceFactor,
@@ -70,12 +72,14 @@ namespace AtlasLedger.Server.Holdings
     public sealed record EffectivePrice(Guid AssetId, decimal Price, string Currency, DateTimeOffset AsOf, PriceSource Source);
 
     /// <summary>
-    /// The price of one unit of a currency in the valuation currency (USD in USD is 1, from the initial prices): what turns
-    /// a value in an asset's quote currency into the valuation currency.  Derived state: never persisted.
+    /// The price of one unit of a currency in another: what turns a value in an asset's quote currency into its account's
+    /// currency.  A currency in itself is 1, from the initial prices; between currencies, from the feed.  Derived state:
+    /// never persisted.
     /// </summary>
-    /// <param name="CurrencyCode">The currency.</param>
-    /// <param name="Rate">Its price in the valuation currency.</param>
-    public sealed record CurrencyRate(string CurrencyCode, decimal Rate);
+    /// <param name="FromCurrency">The currency priced.</param>
+    /// <param name="ToCurrency">The currency its price is in.</param>
+    /// <param name="Rate">The price of one unit of <paramref name="FromCurrency"/> in <paramref name="ToCurrency"/>.</param>
+    public sealed record CurrencyRate(string FromCurrency, string ToCurrency, decimal Rate);
 
     /// <summary>
     /// A price override that is in force now.

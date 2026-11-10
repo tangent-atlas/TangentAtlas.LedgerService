@@ -19,7 +19,7 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="AsOf">When the cycle ran.</param>
     /// <param name="Positions">Every holding, by account and asset: cash, stocks, funds and the rest alike.</param>
     /// <param name="Prices">Every priced asset's effective price, in its quote currency.</param>
-    /// <param name="Rates">Every currency's price in the valuation currency.</param>
+    /// <param name="Rates">Every published rate between currencies.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,

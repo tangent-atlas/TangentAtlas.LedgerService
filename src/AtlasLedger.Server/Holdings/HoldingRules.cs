@@ -79,7 +79,7 @@ namespace AtlasLedger.Server.Holdings
                     .Collect())
                 .Having(() => lines.Any());
             this.Then()
-                .Yield(_ => HoldingFold.Position(account.AccountId, asset, lines));
+                .Yield(_ => HoldingFold.Position(account, asset, lines));
         }
     }
 
@@ -104,9 +104,9 @@ namespace AtlasLedger.Server.Holdings
     }
 
     /// <summary>
-    /// A currency's rate: the price of one unit of it in the valuation currency, which values everything quoted in it.  A
-    /// currency is quoted in the valuation currency, so its rate is its own effective price (USD in USD is 1, from the
-    /// initial prices).
+    /// A rate between two currencies: the latest price of one in the other, from the price table (a currency in itself is
+    /// 1, from the initial prices; between currencies, from the feed).  Nothing is inverted or chained: a rate is used only
+    /// as published.
     /// </summary>
     [Name("Holdings.CurrencyRate")]
     public sealed class CurrencyRateRule : Rule
@@ -114,14 +114,12 @@ namespace AtlasLedger.Server.Holdings
         /// <inheritdoc/>
         public override void Define()
         {
-            CashFact cash = default!;
-            EffectivePrice price = default!;
+            PriceFact price = default!;
 
             this.When()
-                .Match(() => cash)
-                .Match(() => price, candidate => candidate.AssetId == cash.AssetId, candidate => candidate.Currency == CurrencyCode.Valuation);
+                .Match(() => price, candidate => candidate.Scheme == SymbolScheme.Currency, candidate => candidate.Last > 0m);
             this.Then()
-                .Yield(_ => new CurrencyRate(cash.CurrencyCode, price.Price));
+                .Yield(_ => new CurrencyRate(price.Code, price.Currency, price.Last));
         }
     }
 

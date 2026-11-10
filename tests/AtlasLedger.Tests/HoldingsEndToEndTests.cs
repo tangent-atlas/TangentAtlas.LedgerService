@@ -93,8 +93,10 @@ namespace AtlasLedger.Tests
             Assert.Equal(500_020m, dollars.Quantity);
             Assert.Equal("Market", dollars.PriceSource);   // USD in USD = 1, from the initial prices, not assumed
             Assert.Equal(1m, dollars.Price);
-            Assert.Equal("USD", holdings.ValuationCurrency);
-            Assert.Equal(1m, holdings.Rates.Single(rate => rate.CurrencyCode == "USD").Rate);
+            Assert.All(holdings.Holdings, holding => Assert.Equal("USD", holding.Currency));   // valued in the account's currency
+            Assert.Equal(
+                [("CAD", "CAD", 1m), ("EUR", "EUR", 1m), ("GBP", "GBP", 1m), ("USD", "USD", 1m)],
+                holdings.Rates.Select(rate => (rate.FromCurrency, rate.ToCurrency, rate.Rate)));   // the initial prices; no cross rates assumed
             Assert.Equal(1_000_000m, holdings.Holdings.Sum(holding => holding.MarketValue!.Value));
             Assert.All(holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity), holding => Assert.Equal("LastTrade", holding.PriceSource));
 

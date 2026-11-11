@@ -120,6 +120,44 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public async Task TwoTenantsWithTheSameKeysAreSeparateOrdersAtTheBroker()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(Trading);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var state = ReadState();
+            var (orderId, brokerOrderId) = (Guid.NewGuid(), Guid.NewGuid());
+            var tenants = new[] { (TenantId: Guid.NewGuid(), Quantity: 10m), (TenantId: Guid.NewGuid(), Quantity: 20m) };
+            foreach (var (tenantId, _) in tenants)
+            {
+                await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+                await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            }
+
+            await Task.Delay(1_000, cancellationToken);   // the simulated feed prices AAA
+
+            // The same order, allocation and broker order keys in both tenants (tenants share nothing), for different quantities.
+            var now = DateTimeOffset.UtcNow;
+            foreach (var (tenantId, quantity) in tenants)
+            {
+                await tool.ApplyAsync(tenantId, new LedgerScript()
+                    .Insert("Order", new OrderDto { OrderId = orderId, AssetId = Joe10Account.AssetIdOf("AAA"), Side = OrderSide.Buy, Origin = OrderOrigin.Manual, EnteredTime = now })
+                    .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = quantity })
+                    .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, Broker = EventSource.Simulator, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now }), cancellationToken);
+            }
+
+            // Each fills for its own quantity: the broker saw two orders, not one sent twice.
+            foreach (var (tenantId, quantity) in tenants)
+            {
+                var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.SingleOrDefault()?.Status == "Filled");
+                Assert.Equal(quantity, orders.Orders.Single().Filled);
+            }
+
+            Assert.NotEqual(BrokerOrderRequest.ClientOrderIdFor(tenants[0].TenantId, brokerOrderId), BrokerOrderRequest.ClientOrderIdFor(tenants[1].TenantId, brokerOrderId));
+        }
+
+        [Fact]
         public async Task AnOpenOrderCanBeCancelled()
         {
             var cancellationToken = TestContext.Current.CancellationToken;

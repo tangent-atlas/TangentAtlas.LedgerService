@@ -52,7 +52,7 @@ namespace AtlasLedger.Server.Brokers
         public Task<IReadOnlyList<BrokerReport>> PlaceAsync(BrokerOrderRequest order, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(order);
-            var known = this.orders.GetOrAdd(order.BrokerOrderId, _ => new Known(order));
+            var known = this.orders.GetOrAdd(order.ClientOrderId, _ => new Known(order));
             lock (known)
             {
                 if (known.Reports.Count == 0)
@@ -76,7 +76,7 @@ namespace AtlasLedger.Server.Brokers
         public Task<IReadOnlyList<BrokerReport>> CancelAsync(BrokerOrderRequest order, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(order);
-            if (!this.orders.TryGetValue(order.BrokerOrderId, out var known))
+            if (!this.orders.TryGetValue(order.ClientOrderId, out var known))
             {
                 return Task.FromResult<IReadOnlyList<BrokerReport>>(Array.Empty<BrokerReport>());
             }
@@ -97,7 +97,7 @@ namespace AtlasLedger.Server.Brokers
         public Task<IReadOnlyList<BrokerReport>> GetReportsAsync(BrokerOrderRequest order, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(order);
-            if (!this.orders.TryGetValue(order.BrokerOrderId, out var known))
+            if (!this.orders.TryGetValue(order.ClientOrderId, out var known))
             {
                 return Task.FromResult<IReadOnlyList<BrokerReport>>(Array.Empty<BrokerReport>());
             }
@@ -144,7 +144,7 @@ namespace AtlasLedger.Server.Brokers
             public bool IsDone => this.reports.Any(report => report.ReportType is ExecutionReportType.Fill or ExecutionReportType.Cancelled or ExecutionReportType.Rejected or ExecutionReportType.Expired);
 
             public void Add(ExecutionReportType type, decimal? quantity, decimal? price, decimal? fees, DateTimeOffset time, string? text) =>
-                this.reports.Add(new BrokerReport($"sim-{this.Order.BrokerOrderId:N}-{this.reports.Count}", type, quantity, price, fees, time, text));
+                this.reports.Add(new BrokerReport($"sim-{this.Order.ClientOrderId:N}-{this.reports.Count}", type, quantity, price, fees, time, text));
 
             public IReadOnlyList<BrokerReport> Snapshot() => this.reports.ToArray();
         }

@@ -6,6 +6,8 @@ namespace AtlasLedger.Server.Brokers
 {
     using System;
     using System.Collections.Generic;
+    using System.Security.Cryptography;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
@@ -14,7 +16,10 @@ namespace AtlasLedger.Server.Brokers
     /// A broker order as the router hands it to a broker: what to trade, where, and how.
     /// </summary>
     /// <param name="TenantId">The tenant.</param>
-    /// <param name="BrokerOrderId">Our ID for the order, given to the broker so a retried send is the same order.</param>
+    /// <param name="BrokerOrderId">The broker order's key in the tenant's ledger.</param>
+    /// <param name="ClientOrderId">The ID the broker is given, so a retried send is the same order: derived from the tenant
+    /// and the broker order, so it is unique across tenants (two tenants may use the same keys; the broker sees one account
+    /// of orders for all of them).  A broker adapter keys everything it knows about an order on this.</param>
     /// <param name="Side">Buy or sell.</param>
     /// <param name="Ticker">The asset's ticker.</param>
     /// <param name="QuoteCurrency">The currency it is quoted in.</param>
@@ -26,6 +31,7 @@ namespace AtlasLedger.Server.Brokers
     public sealed record BrokerOrderRequest(
         Guid TenantId,
         Guid BrokerOrderId,
+        Guid ClientOrderId,
         OrderSide Side,
         string Ticker,
         string QuoteCurrency,
@@ -33,7 +39,23 @@ namespace AtlasLedger.Server.Brokers
         OrderType OrderType,
         decimal? LimitPrice,
         TimeInForce TimeInForce,
-        string? BrokerAccount);
+        string? BrokerAccount)
+    {
+        /// <summary>
+        /// The ID a broker is given for a broker order: unique across tenants, since tenants share nothing and may use the
+        /// same keys, while a broker sees the orders of all of them (a name-based UUID, version 8, SHA-256).
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="brokerOrderId">The broker order's key in the tenant.</param>
+        /// <returns>The ID.</returns>
+        public static Guid ClientOrderIdFor(Guid tenantId, Guid brokerOrderId)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"tangent-atlas/client-order/{tenantId:N}/{brokerOrderId:N}"));
+            hash[6] = (byte)((hash[6] & 0x0F) | 0x80);
+            hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+            return new Guid(hash.AsSpan(0, 16), bigEndian: true);
+        }
+    }
 
     /// <summary>
     /// Something a broker reported about an order, before it is recorded as an execution report.

@@ -193,7 +193,7 @@ namespace AtlasLedger.Server.Brokers
                     var brokerAccount = accounts.Length == 1 ? custodians.GetValueOrDefault(accounts[0]) : null;
                     var cancelRequests = cancels[brokerOrder.BrokerOrderId].ToArray();
                     work.Add(new Work(
-                        new BrokerOrderRequest(partition.TenantId, brokerOrder.BrokerOrderId, order.Side, ticker, asset.QuoteCurrency, brokerOrder.Quantity, brokerOrder.OrderType, brokerOrder.LimitPrice, brokerOrder.TimeInForce, brokerAccount),
+                        new BrokerOrderRequest(partition.TenantId, brokerOrder.BrokerOrderId, BrokerOrderRequest.ClientOrderIdFor(partition.TenantId, brokerOrder.BrokerOrderId), order.Side, ticker, asset.QuoteCurrency, brokerOrder.Quantity, brokerOrder.OrderType, brokerOrder.LimitPrice, brokerOrder.TimeInForce, brokerAccount),
                         brokerOrder.Broker,
                         Math.Max(brokerOrder.RowVersion, cancelRequests.Select(cancel => cancel.RowVersion).DefaultIfEmpty().Max()),
                         reports.Length == 0,

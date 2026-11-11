@@ -14,12 +14,9 @@ namespace AtlasLedger.Client.Api
     /// <param name="Job">Its key.</param>
     /// <param name="Kind">Task or Service.</param>
     /// <param name="MarketDaysOnly">Whether its schedules skip market holidays.</param>
-    /// <param name="IsRunning">Whether it is running now.</param>
-    /// <param name="RunningSince">When the run in progress started.</param>
-    /// <param name="StartedBy">The schedule that started it, or null if it was run by hand.</param>
-    /// <param name="LastRun">When its last run ended, since the server started.</param>
-    /// <param name="LastOutcome">What that run did.</param>
-    public sealed record JobActivity(string Job, string Kind, bool MarketDaysOnly, bool IsRunning, DateTimeOffset? RunningSince, Guid? StartedBy, DateTimeOffset? LastRun, string? LastOutcome);
+    /// <param name="Running">The run in progress, if any.</param>
+    /// <param name="Last">The latest run that has ended, if any.</param>
+    public sealed record JobActivity(string Job, string Kind, bool MarketDaysOnly, JobRunDto? Running, JobRunDto? Last);
 
     /// <summary>
     /// A schedule row as the server's scheduler holds it.
@@ -53,12 +50,6 @@ namespace AtlasLedger.Client.Api
     /// </summary>
     /// <param name="Jobs">Every job the server has, and what it is doing for the tenant.</param>
     /// <param name="Schedules">The tenant's schedule rows.</param>
-    public sealed record TenantJobs(IReadOnlyList<JobActivity> Jobs, IReadOnlyList<JobScheduleState> Schedules);
-
-    /// <summary>
-    /// What a task run by hand did.
-    /// </summary>
-    /// <param name="Job">The task.</param>
-    /// <param name="Outcome">What it did.</param>
-    public sealed record JobRun(string Job, string Outcome);
+    /// <param name="Runs">The tenant's latest runs, newest first.</param>
+    public sealed record TenantJobs(IReadOnlyList<JobActivity> Jobs, IReadOnlyList<JobScheduleState> Schedules, IReadOnlyList<JobRunDto> Runs);
 }

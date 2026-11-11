@@ -44,7 +44,8 @@ namespace AtlasLedger.Operator
               jobs <tenant>                   Show the tenant's jobs (running or not, and what each last did) and
                                               its schedules (off, on or scheduled, and when each next starts and
                                               stops).
-              jobs run <tenant> <job>         Run a task now, whatever its schedules say.
+              jobs run <tenant> <job>         Run a task now, whatever its schedules say (unless it is off); the
+                                              run is recorded in the tenant's JobRun log.
               jobs set <tenant> <job> off|on|scheduled
                                               Set the status of every schedule of the job: off (it doesn't run on
                                               its own), on (a service runs until turned off) or scheduled.

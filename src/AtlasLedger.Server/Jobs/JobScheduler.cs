@@ -250,7 +250,7 @@ namespace AtlasLedger.Server.Jobs
                 {
                     foreach (var partition in this.ledger.Partitions.ToArray())
                     {
-                        this.Watch(partition);
+                        this.Watch(partition, isRecovered: true);
                     }
 
                     await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
@@ -277,13 +277,17 @@ namespace AtlasLedger.Server.Jobs
             await quartz.DeleteJob(StopKey(tenantId, id), cancellationToken).ConfigureAwait(false);
         }
 
-        private void OnPartitionCreated(object? sender, LedgerPartition partition) => this.Watch(partition);
+        private void OnPartitionCreated(object? sender, LedgerPartition partition) => this.Watch(partition, isRecovered: false);
 
-        private void Watch(LedgerPartition partition)
+        /// <summary>
+        /// Starts watching a tenant.  A recovered tenant (loaded at start-up) may hold runs from before the restart; a
+        /// tenant created since can't.
+        /// </summary>
+        private void Watch(LedgerPartition partition, bool isRecovered)
         {
             if (this.started.Task.IsCompletedSuccessfully && this.tenants.TryAdd(partition.TenantId, new ConcurrentDictionary<Guid, ScheduleState>()))
             {
-                _ = Task.Run(() => this.WatchAsync(this.started.Task.Result, partition, this.stopping), this.stopping);
+                _ = Task.Run(() => this.WatchAsync(this.started.Task.Result, partition, isRecovered, this.stopping), this.stopping);
             }
         }
 
@@ -291,10 +295,12 @@ namespace AtlasLedger.Server.Jobs
         /// One tenant's watcher: acts on its rows, then waits for its next commit.  The sequence is read before acting, so a
         /// commit made while acting wakes it again.
         /// </summary>
-        private async Task WatchAsync(IScheduler quartz, LedgerPartition partition, CancellationToken cancellationToken)
+        private async Task WatchAsync(IScheduler quartz, LedgerPartition partition, bool isRecovered, CancellationToken cancellationToken)
         {
             var tenantId = partition.TenantId;
             var acted = this.tenants[tenantId];
+            var handled = new HashSet<Guid>();
+            var isFirstPass = isRecovered;
             try
             {
                 while (true)
@@ -322,6 +328,8 @@ namespace AtlasLedger.Server.Jobs
                     }
 
                     await this.ReconcileAsync(quartz, tenantId, acted, rows, cancellationToken).ConfigureAwait(false);
+                    this.TakeUpRuns(partition, acted, handled, isFirstPass);
+                    isFirstPass = false;
                     await partition.WaitForCommitAsync(seen, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -331,6 +339,58 @@ namespace AtlasLedger.Server.Jobs
             catch (Exception exception)
             {
                 this.LogWatcherFailed(exception, tenantId);
+            }
+        }
+
+        /// <summary>
+        /// Takes up the runs asked for by hand: each Requested row is started or refused, once.  On the first pass after the
+        /// server starts, a run still Requested or Running is from before: it is marked Interrupted, never run again.
+        /// </summary>
+        private void TakeUpRuns(LedgerPartition partition, ConcurrentDictionary<Guid, ScheduleState> acted, HashSet<Guid> handled, bool isFirstPass)
+        {
+            var tenantId = partition.TenantId;
+            var open = new List<(Guid JobRunId, string Job, JobRunStatus Status)>();
+            lock (partition.SyncRoot)
+            {
+                foreach (var run in partition.JobRuns)
+                {
+                    if (run.Status is JobRunStatus.Requested or JobRunStatus.Running)
+                    {
+                        open.Add((run.JobRunId, run.Job, run.Status));
+                    }
+                }
+            }
+
+            handled.IntersectWith(open.Select(run => run.JobRunId));
+            foreach (var (id, key, status) in open)
+            {
+                if (isFirstPass)
+                {
+                    this.runner.Interrupt(tenantId, id);
+                    continue;
+                }
+
+                if (status != JobRunStatus.Requested || !handled.Add(id))
+                {
+                    continue;
+                }
+
+                var schedules = acted.Values.Where(state => state.Job == key).ToArray();
+                switch (this.registry.Find(key))
+                {
+                    case null:
+                        this.runner.Refuse(tenantId, id, $"No job has the key \"{key}\". The jobs are: {this.registry.Keys}.");
+                        break;
+                    case { Kind: JobKind.Service }:
+                        this.runner.Refuse(tenantId, id, $"{key} is a service: turn it on (its schedule's Status On) rather than run it.");
+                        break;
+                    case { } when schedules.Length > 0 && schedules.All(state => state.Status == JobStatus.Off):
+                        this.runner.Refuse(tenantId, id, $"{key} is off: every schedule of it is Off.");
+                        break;
+                    case { } job:
+                        this.runner.StartRequested(tenantId, job, id);
+                        break;
+                }
             }
         }
 
@@ -420,7 +480,7 @@ namespace AtlasLedger.Server.Jobs
 
             if (shouldRun)
             {
-                this.runner.StartService(tenantId, job, id);   // on, or set inside its window: running now
+                this.runner.StartService(tenantId, job, id, row.Status == JobStatus.On ? JobRunReason.Schedule : JobRunReason.Window);   // on, or set inside its window: running now
             }
         }
 
@@ -596,7 +656,7 @@ namespace AtlasLedger.Server.Jobs
                         this.runner.StartTask(tenantId, job, scheduleId);
                         break;
                     case Start:
-                        this.runner.StartService(tenantId, job, scheduleId);
+                        this.runner.StartService(tenantId, job, scheduleId, JobRunReason.Window);
                         break;
                     case Stop:
                         this.runner.Stop(tenantId, key, scheduleId);

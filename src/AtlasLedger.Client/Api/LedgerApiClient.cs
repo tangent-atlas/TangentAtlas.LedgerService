@@ -129,15 +129,43 @@ namespace AtlasLedger.Client.Api
             ?? throw new InvalidOperationException("The server returned no jobs.");
 
         /// <summary>
-        /// Runs a task now, whatever its schedules say, and waits for it.
+        /// Gets one row of a table, by its key.
+        /// </summary>
+        /// <typeparam name="T">The table's DTO.</typeparam>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="table">The table.</param>
+        /// <param name="key">The row's key, as it appears in its route.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The row.</returns>
+        public async Task<T> GetAsync<T>(Guid tenantId, string table, string key, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<T>(HttpMethod.Get, $"{TablePath(tenantId, table)}/{Uri.EscapeDataString(key)}", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"The server returned no {table} {key}.");
+
+        /// <summary>
+        /// Asks for a task to run now, by inserting a JobRun row as Requested, and waits until it has ended or been refused.
+        /// The run stays in the tenant's log, with its outcome.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
         /// <param name="job">The task's key.</param>
-        /// <param name="cancellationToken">Cancels the request (not the run).</param>
-        /// <returns>What it did.  The server answers 404 for an unknown job, 409 for a service or one already running.</returns>
-        public async Task<JobRun> RunJobAsync(Guid tenantId, string job, CancellationToken cancellationToken = default) =>
-            await this.SendAsync<JobRun>(HttpMethod.Post, $"v1/tenants/{tenantId}/jobs/{Uri.EscapeDataString(job)}/run", null, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The server returned nothing.");
+        /// <param name="timeout">How long to wait for it to end.</param>
+        /// <param name="cancellationToken">Cancels the wait (not the run).</param>
+        /// <returns>The run as it ended (or as it stood at the timeout).</returns>
+        public async Task<JobRunDto> RunJobAsync(Guid tenantId, string job, TimeSpan timeout, CancellationToken cancellationToken = default)
+        {
+            var id = Guid.CreateVersion7();
+            await this.InsertAsync(tenantId, "JobRun", new JobRunDto { JobRunId = id, Job = job, Reason = JobRunReason.Hand, Status = JobRunStatus.Requested, RequestedTime = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+            var deadline = DateTimeOffset.UtcNow + timeout;
+            while (true)
+            {
+                var run = await this.GetAsync<JobRunDto>(tenantId, "JobRun", id.ToString(), cancellationToken).ConfigureAwait(false);
+                if (run.Status is not (JobRunStatus.Requested or JobRunStatus.Running) || DateTimeOffset.UtcNow >= deadline)
+                {
+                    return run;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
 
         /// <summary>
         /// Gets the state of a tenant's orders, from the rules' latest snapshot.

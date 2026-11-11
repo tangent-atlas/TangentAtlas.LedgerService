@@ -57,6 +57,54 @@ namespace AtlasLedger.Model
     }
 
     /// <summary>
+    /// Why a job ran.  Stored as a number: never renumber.
+    /// </summary>
+    public enum JobRunReason
+    {
+        /// <summary>Asked for by hand: a Requested row inserted by a person or a tool.</summary>
+        Hand = 0,
+
+        /// <summary>A schedule's time came (a task), or its row turned a service on.</summary>
+        Schedule = 1,
+
+        /// <summary>A service's window opened, or its row was set inside its window.</summary>
+        Window = 2,
+
+        /// <summary>A service that failed or ended while it should be on, started again.</summary>
+        Restart = 3,
+    }
+
+    /// <summary>
+    /// Where a job's run stands.  Stored as a number: never renumber.
+    /// </summary>
+    public enum JobRunStatus
+    {
+        /// <summary>Asked for by hand, not yet taken up.</summary>
+        Requested = 0,
+
+        /// <summary>Running.</summary>
+        Running = 1,
+
+        /// <summary>A task that ran to the end (its outcome says what it did).</summary>
+        Succeeded = 2,
+
+        /// <summary>A service that was stopped.</summary>
+        Stopped = 3,
+
+        /// <summary>It failed (its outcome says why); a service is started again.</summary>
+        Failed = 4,
+
+        /// <summary>Cancelled: its schedule was turned off, changed or deleted, or the server stopped.</summary>
+        Cancelled = 5,
+
+        /// <summary>Not run: the job is unknown, a service, off, or already running.</summary>
+        Refused = 6,
+
+        /// <summary>The server stopped while it was requested or running: what it did is not confirmed.</summary>
+        Interrupted = 7,
+    }
+
+    /// <summary>
     /// The more specific types of brokerage account.
     /// </summary>
     public enum BrokerageType

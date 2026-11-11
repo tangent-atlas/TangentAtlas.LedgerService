@@ -19,6 +19,8 @@
     "futureType": "AtlasLedger.Model.FutureType",
     "guid": "System.Guid",
     "int": "System.Int32",
+    "jobRunReason": "AtlasLedger.Model.JobRunReason",
+    "jobRunStatus": "AtlasLedger.Model.JobRunStatus",
     "jobStatus": "AtlasLedger.Model.JobStatus",
     "lineEffect": "AtlasLedger.Model.LineEffect",
     "long": "System.Int64",
@@ -311,6 +313,21 @@
       },
       "references": {
         "BrokerOrder": { "columns": ["BrokerOrderId"] }
+      }
+    },
+    "JobRun": {
+      "description": "One run of a job for this tenant: the log of what ran, when, why and how it ended. A run by hand is asked for by inserting a row with Status Requested (the caller supplies the key and RequestedTime); the scheduler takes it up after the commit, and refuses it if the job is unknown, a service, off (every schedule of it Off) or already running. The server records scheduled runs, a service's starts and stops, and every outcome. A run still Requested or Running when the server starts is marked Interrupted: what it did is not confirmed. JobScheduleId is the schedule that started it (no reference: a schedule can be deleted, its runs stay).",
+      "key": ["JobRunId"],
+      "columns": {
+        "EndTime": "time?",
+        "Job": { "maxLength": 64, "type": "string" },
+        "JobRunId": "guid",
+        "JobScheduleId": "guid?",
+        "Outcome": { "maxLength": 512, "type": "string?" },
+        "Reason": "jobRunReason",
+        "RequestedTime": "time",
+        "StartTime": "time?",
+        "Status": "jobRunStatus"
       }
     },
     "JobSchedule": {

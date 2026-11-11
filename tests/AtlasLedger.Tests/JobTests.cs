@@ -10,7 +10,6 @@ namespace AtlasLedger.Tests
     using System;
     using System.IO;
     using System.Linq;
-    using System.Net;
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
@@ -22,6 +21,7 @@ namespace AtlasLedger.Tests
     using Quartz;
     using server::AtlasLedger.Server;
     using server::AtlasLedger.Server.Jobs;
+    using server::AtlasLedger.Server.Persistence;
     using Xunit;
     using Commands = client::AtlasLedger.Client.Commands;
 
@@ -121,7 +121,8 @@ namespace AtlasLedger.Tests
             Assert.All(orders.Orders, order => Assert.Equal(OrderOrigin.Rebalance, order.Origin));
             var jobs = await OrderRoutingTests.WaitForAsync(
                 () => tool.GetJobsAsync(tenantId, cancellationToken),
-                found => found.Jobs.Single(job => job.Job == "GenerateOrders").LastOutcome?.StartsWith("0 order(s)", StringComparison.Ordinal) == true);
+                found => found.Jobs.Single(job => job.Job == "GenerateOrders").Last?.Outcome?.StartsWith("0 order(s)", StringComparison.Ordinal) == true);
+            Assert.Contains(jobs.Runs, run => run is { Job: "GenerateOrders", Reason: JobRunReason.Schedule, Status: JobRunStatus.Succeeded } && run.Outcome!.StartsWith("2 order(s)", StringComparison.Ordinal));
             Assert.Equal(2, (await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken)).Count);
             var joe10 = jobs.Schedules.Single(schedule => schedule.JobScheduleId == Joe10Account.GenerateOrdersScheduleId);
             Assert.Null(joe10.Problem);
@@ -153,13 +154,16 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, new LedgerScript().Insert("JobSchedule", Schedule(Guid.NewGuid(), "GenerateOrders", JobStatus.Scheduled, "* * * * * ?")), cancellationToken);
             await OrderRoutingTests.WaitForAsync(
                 () => tool.GetJobsAsync(tenantId, cancellationToken),
-                found => found.Jobs.Single(job => job.Job == "GenerateOrders").LastOutcome == "Skipped: trading is switched off.");
+                found => found.Jobs.Single(job => job.Job == "GenerateOrders").Last?.Outcome == "Skipped: trading is switched off.");
             Assert.Empty(await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken));
 
-            // By hand: the same task, the same switch.  A key no job has is 404.
-            Assert.Equal("Skipped: trading is switched off.", (await tool.RunJobAsync(tenantId, "GenerateOrders", cancellationToken)).Outcome);
-            var unknown = await Assert.ThrowsAsync<LedgerApiException>(() => tool.RunJobAsync(tenantId, "SendNewsletter", cancellationToken));
-            Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+            // By hand: the same task, the same switch, and the run in the log.  A key no job has is refused.
+            var byHand = await tool.RunJobAsync(tenantId, "GenerateOrders", TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Equal((JobRunStatus.Succeeded, JobRunReason.Hand, "Skipped: trading is switched off."), (byHand.Status, byHand.Reason, byHand.Outcome));
+            Assert.NotNull(byHand.StartTime);
+            var unknown = await tool.RunJobAsync(tenantId, "SendNewsletter", TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Equal(JobRunStatus.Refused, unknown.Status);
+            Assert.StartsWith("No job has the key", unknown.Outcome, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -176,14 +180,18 @@ namespace AtlasLedger.Tests
 
             // It starts within a second of the commit, and runs until it is stopped; meanwhile it can't be run by hand.
             await SlowTask.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-            var busy = await Assert.ThrowsAsync<LedgerApiException>(() => tool.RunJobAsync(tenantId, "Slow", cancellationToken));
-            Assert.Equal(HttpStatusCode.Conflict, busy.StatusCode);
+            var busy = await tool.RunJobAsync(tenantId, "Slow", TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Equal((JobRunStatus.Refused, "Slow is already running."), (busy.Status, busy.Outcome));
 
             // Turned off: the run in progress is cancelled at once, and it is not scheduled again.
             await SetAsync(tool, tenantId, "Slow", JobStatus.Off, cancellationToken);
             await SlowTask.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-            var jobs = await OrderRoutingTests.WaitForAsync(() => tool.GetJobsAsync(tenantId, cancellationToken), found => found.Jobs.Single(job => job.Job == "Slow") is { IsRunning: false, LastOutcome: "Cancelled." });
+            var jobs = await OrderRoutingTests.WaitForAsync(() => tool.GetJobsAsync(tenantId, cancellationToken), found => found.Jobs.Single(job => job.Job == "Slow") is { Running: null, Last.Status: JobRunStatus.Cancelled });
             Assert.Equal((JobStatus.Off, (DateTimeOffset?)null), (jobs.Schedules.Single().Status, jobs.Schedules.Single().NextStart));
+
+            // Off means off: not by hand either.
+            var off = await tool.RunJobAsync(tenantId, "Slow", TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Equal((JobRunStatus.Refused, "Slow is off: every schedule of it is Off."), (off.Status, off.Outcome));
 
             // Scheduled again: it runs again; deleted: that run is cancelled too, and the schedule is gone.
             SlowTask.Reset();
@@ -211,15 +219,18 @@ namespace AtlasLedger.Tests
             await OrderRoutingTests.WaitForAsync(() => Task.FromResult(EchoService.Starts), starts => starts >= 2);
             var jobs = await tool.GetJobsAsync(tenantId, cancellationToken);
             var echo = jobs.Jobs.Single(job => job.Job == "Echo");
-            Assert.Equal(("Service", true, jobs.Schedules.Single().JobScheduleId), (echo.Kind, echo.IsRunning, echo.StartedBy!.Value));
+            Assert.Equal(("Service", jobs.Schedules.Single().JobScheduleId), (echo.Kind, echo.Running!.JobScheduleId!.Value));
+            Assert.Contains(jobs.Runs, run => run is { Job: "Echo", Status: JobRunStatus.Failed, Reason: JobRunReason.Schedule });   // the first start, in the log
+            Assert.Equal(JobRunReason.Restart, echo.Running.Reason);
 
             // A service isn't run by hand.
-            var notATask = await Assert.ThrowsAsync<LedgerApiException>(() => tool.RunJobAsync(tenantId, "Echo", cancellationToken));
-            Assert.Equal(HttpStatusCode.Conflict, notATask.StatusCode);
+            var notATask = await tool.RunJobAsync(tenantId, "Echo", TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Equal(JobRunStatus.Refused, notATask.Status);
+            Assert.Contains("is a service", notATask.Outcome, StringComparison.Ordinal);
 
             // Off: it stops.
             await SetAsync(tool, tenantId, "Echo", JobStatus.Off, cancellationToken);
-            await OrderRoutingTests.WaitForAsync(() => tool.GetJobsAsync(tenantId, cancellationToken), found => found.Jobs.Single(job => job.Job == "Echo") is { IsRunning: false, LastOutcome: "Stopped." });
+            await OrderRoutingTests.WaitForAsync(() => tool.GetJobsAsync(tenantId, cancellationToken), found => found.Jobs.Single(job => job.Job == "Echo") is { Running: null, Last.Status: JobRunStatus.Stopped });
 
             // Scheduled without a stop: refused.  With one, on at even seconds and off at odd ones: it starts and stops.
             var row = (await tool.ListAsync<JobScheduleDto>(tenantId, "JobSchedule", cancellationToken)).Single();
@@ -232,6 +243,30 @@ namespace AtlasLedger.Tests
             jobs = await tool.GetJobsAsync(tenantId, cancellationToken);
             Assert.Null(jobs.Schedules.Single().Problem);
             Assert.NotNull(jobs.Schedules.Single().NextStop);
+        }
+
+        [Fact]
+        public async Task ARunInFlightWhenTheServerStoppedIsMarkedInterrupted()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var database = new InMemoryLedgerDatabase();
+            var tenantId = Guid.NewGuid();
+            var running = Guid.NewGuid();
+            await using (var first = ServerFixture.With(Quiet, services => services.AddSingleton<ILedgerDatabase>(database)))
+            {
+                await first.InitializeAsync();
+                var tool = new LedgerApiClient(first.HttpClient, DevelopmentCallers.Tool);
+
+                // As a run would stand if the server died mid-run.
+                await tool.InsertAsync(tenantId, "JobRun", new JobRunDto { JobRunId = running, Job = "GenerateOrders", Reason = JobRunReason.Schedule, Status = JobRunStatus.Running, RequestedTime = DateTimeOffset.UtcNow, StartTime = DateTimeOffset.UtcNow }, cancellationToken);
+            }
+
+            await using var second = ServerFixture.With(Quiet, services => services.AddSingleton<ILedgerDatabase>(database));
+            await second.InitializeAsync();
+            var again = new LedgerApiClient(second.HttpClient, DevelopmentCallers.Tool);
+            var run = await OrderRoutingTests.WaitForAsync(() => again.GetAsync<JobRunDto>(tenantId, "JobRun", running.ToString(), cancellationToken), found => found.Status != JobRunStatus.Running);
+            Assert.Equal(JobRunStatus.Interrupted, run.Status);
+            Assert.Contains("not confirmed", run.Outcome, StringComparison.Ordinal);
         }
 
         [Fact]

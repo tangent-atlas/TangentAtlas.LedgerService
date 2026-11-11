@@ -484,6 +484,50 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Institution", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.JobRun", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("JobRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("EndTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("Job")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("JobScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("Reason")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("RequestedTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("StartTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("TenantId", "JobRunId")
+                        .HasName("PK_JobRun");
+
+                    b.ToTable("JobRun", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.JobSchedule", b =>
                 {
                     b.Property<Guid>("TenantId")

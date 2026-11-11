@@ -9,64 +9,57 @@ namespace AtlasLedger.Server.Jobs
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using Microsoft.AspNetCore.Authorization;
-    using Microsoft.AspNetCore.Http;
     using Microsoft.AspNetCore.Mvc;
 
     /// <summary>
-    /// A job the server has, and what it is doing for the tenant.
+    /// A job the server has, and what it is doing for the tenant, from the tenant's JobRun log.
     /// </summary>
     /// <param name="Job">Its key.</param>
     /// <param name="Kind">Task or service.</param>
     /// <param name="MarketDaysOnly">Whether its schedules skip market holidays.</param>
-    /// <param name="IsRunning">Whether it is running now.</param>
-    /// <param name="RunningSince">When the run in progress started.</param>
-    /// <param name="StartedBy">The schedule that started it, or null if it was run by hand.</param>
-    /// <param name="LastRun">When its last run ended, since the server started.</param>
-    /// <param name="LastOutcome">What that run did.</param>
-    public sealed record JobDto(string Job, JobKind Kind, bool MarketDaysOnly, bool IsRunning, DateTimeOffset? RunningSince, Guid? StartedBy, DateTimeOffset? LastRun, string? LastOutcome);
+    /// <param name="Running">The run in progress, if any.</param>
+    /// <param name="Last">The latest run that has ended, if any.</param>
+    public sealed record JobDto(string Job, JobKind Kind, bool MarketDaysOnly, JobRunDto? Running, JobRunDto? Last);
 
     /// <summary>
     /// A tenant's jobs.
     /// </summary>
     /// <param name="Jobs">Every job the server has, and what it is doing for the tenant.</param>
     /// <param name="Schedules">The tenant's schedule rows as the scheduler holds them.</param>
-    public sealed record JobsDto(IReadOnlyList<JobDto> Jobs, IReadOnlyList<ScheduleState> Schedules);
+    /// <param name="Runs">The tenant's latest runs, newest first.</param>
+    public sealed record JobsDto(IReadOnlyList<JobDto> Jobs, IReadOnlyList<ScheduleState> Schedules, IReadOnlyList<JobRunDto> Runs);
 
     /// <summary>
-    /// What a task run by hand did.
-    /// </summary>
-    /// <param name="Job">The task.</param>
-    /// <param name="Outcome">What it did.</param>
-    public sealed record JobRunDto(string Job, string Outcome);
-
-    /// <summary>
-    /// Serves a tenant's jobs: what each is doing and where each schedule stands, and runs a task by hand.  The schedules
-    /// themselves are the tenant's JobSchedule rows, read and written through their table: turning a job on or off is a
-    /// change to its row.
+    /// Serves a tenant's jobs: what each is doing, where each schedule stands, and the latest runs.  Schedules and runs are
+    /// rows (JobSchedule, JobRun), written through their tables: turning a job on or off is a change to its schedule; a run
+    /// by hand is a JobRun row inserted as Requested.
     /// </summary>
     [ApiController]
     [Authorize]
     [Route("v1/tenants/{tenantId:guid}/jobs")]
     public sealed class JobsController : ControllerBase
     {
-        private readonly JobRegistry registry;
+        private const int LatestRuns = 25;
 
-        private readonly JobRunner runner;
+        private readonly Ledger ledger;
+
+        private readonly JobRegistry registry;
 
         private readonly JobScheduler scheduler;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="JobsController"/> class.
         /// </summary>
+        /// <param name="ledger">The ledger, for the runs.</param>
         /// <param name="registry">The jobs.</param>
-        /// <param name="runner">Runs them.</param>
         /// <param name="scheduler">Acts on the schedules.</param>
-        public JobsController(JobRegistry registry, JobRunner runner, JobScheduler scheduler)
+        public JobsController(Ledger ledger, JobRegistry registry, JobScheduler scheduler)
         {
+            this.ledger = ledger;
             this.registry = registry;
-            this.runner = runner;
             this.scheduler = scheduler;
         }
 
@@ -75,37 +68,33 @@ namespace AtlasLedger.Server.Jobs
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
         /// <param name="cancellationToken">Cancels the request.</param>
-        /// <returns>Every job and the tenant's schedules.</returns>
+        /// <returns>Every job, the tenant's schedules, and its latest runs.</returns>
         [HttpGet]
-        [Authorize(Policy = LedgerAccessPolicies.JobScheduleRead)]
+        [Authorize(Policy = LedgerAccessPolicies.JobRunRead)]
         public async Task<ActionResult<JobsDto>> GetAsync(Guid tenantId, CancellationToken cancellationToken)
         {
-            var jobs = this.runner.ActivityOf(tenantId).Select(activity =>
+            JobRunDto[] runs = [];
+            if (this.ledger.FindPartition(tenantId) is { } partition)
             {
-                var job = this.registry.Find(activity.Job)!;
-                return new JobDto(job.Key, job.Kind, job.MarketDaysOnly, activity.IsRunning, activity.RunningSince, activity.StartedBy, activity.LastRun, activity.LastOutcome);
-            }).ToArray();
-            return this.Ok(new JobsDto(jobs, await this.scheduler.SchedulesOfAsync(tenantId, cancellationToken).ConfigureAwait(false)));
-        }
+                lock (partition.SyncRoot)
+                {
+                    runs = partition.JobRuns.Select(run => run.ToDto()).ToArray();
+                }
+            }
 
-        /// <summary>
-        /// Runs a task now, whatever its schedules say, and waits for it.
-        /// </summary>
-        /// <param name="tenantId">The tenant.</param>
-        /// <param name="job">The task's key.</param>
-        /// <returns>What it did; 404 if no job has the key; 409 if it is a service or already running.</returns>
-        [HttpPost("{job}/run")]
-        [Authorize(Policy = LedgerAccessPolicies.JobScheduleWrite)]
-        public async Task<ActionResult<JobRunDto>> RunAsync(Guid tenantId, string job)
-        {
-            var (result, outcome) = await this.runner.RunNowAsync(tenantId, job).ConfigureAwait(false);
-            return result switch
+            static DateTimeOffset Latest(JobRunDto run) => run.EndTime ?? run.StartTime ?? run.RequestedTime;
+            var jobs = this.registry.All.OrderBy(job => job.Key, StringComparer.Ordinal).Select(job =>
             {
-                RunRequest.Ran => this.Ok(new JobRunDto(job, outcome!)),
-                RunRequest.UnknownJob => this.Problem(statusCode: StatusCodes.Status404NotFound, title: "No such job.", detail: $"No job has the key \"{job}\". The jobs are: {this.registry.Keys}."),
-                RunRequest.NotATask => this.Problem(statusCode: StatusCodes.Status409Conflict, title: "Not a task.", detail: $"{job} is a service: turn it on (its schedule's Status On) rather than run it."),
-                _ => this.Problem(statusCode: StatusCodes.Status409Conflict, title: "Already running.", detail: $"{job} is already running for this tenant."),
-            };
+                var mine = runs.Where(run => run.Job == job.Key).ToArray();
+                return new JobDto(
+                    job.Key,
+                    job.Kind,
+                    job.MarketDaysOnly,
+                    mine.Where(run => run.Status == JobRunStatus.Running).MaxBy(run => run.StartTime),
+                    mine.Where(run => run.Status is not (JobRunStatus.Running or JobRunStatus.Requested)).MaxBy(Latest));
+            }).ToArray();
+            var latest = runs.OrderByDescending(Latest).ThenByDescending(run => run.JobRunId).Take(LatestRuns).ToArray();
+            return this.Ok(new JobsDto(jobs, await this.scheduler.SchedulesOfAsync(tenantId, cancellationToken).ConfigureAwait(false), latest));
         }
     }
 }

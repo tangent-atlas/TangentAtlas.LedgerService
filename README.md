@@ -106,16 +106,24 @@ The scheduler is driven by the ledger's commits, not a timer: it waits on each t
 engine uses) and after each commit compares the tenant's rows with what it has acted on, so a change takes effect at
 once.  Turning a row off, changing it or deleting it stops what it started: a task's run in progress is cancelled (its
 cancellation token fires; it stops at its next safe point, and a ledger transaction is never cut in half), and a service
-is stopped.  At most one run of a job per tenant at a time, however it was started.  Nothing about runs is persisted.
+is stopped.  At most one run of a job per tenant at a time, however it was started.
+
+Every run is recorded in the tenant's `JobRun` log: the job, why it ran (`Hand`, `Schedule`, `Window`, `Restart`), when it
+was requested, started and ended, its status (`Requested`, `Running`, `Succeeded`, `Stopped`, `Failed`, `Cancelled`,
+`Refused`, `Interrupted`) and its outcome.  A run by hand is a `JobRun` row inserted as `Requested` (the caller supplies
+its key); the scheduler takes it up after the commit and runs it once, or refuses it, with the reason, if the job is
+unknown, a service, off (every schedule of it `Off`) or already running.  Each start of a service is its own run, so a
+failure and the restart after it are both in the log.  A run still `Requested` or `Running` when the server starts is
+marked `Interrupted`, never run again.  Known gap: a task's work and the row recording how it ended are separate
+commits, so a crash between them leaves the work done and the run `Interrupted`.
 
 ```
-ledger-operator jobs <tenant>                            # every job: running or not, its last outcome; every schedule
-ledger-operator jobs run <tenant> GenerateOrders         # run a task now, whatever its schedules say
+ledger-operator jobs <tenant>                            # every job, every schedule, and the latest runs
+ledger-operator jobs run <tenant> GenerateOrders         # run a task now (unless it is off); recorded in JobRun
 ledger-operator jobs set <tenant> <job> off|on|scheduled # set the status of every schedule of the job
 ```
 
-The API is `v1/tenants/{id}/jobs` and `POST v1/tenants/{id}/jobs/{job}/run`; schedules are changed through the
-`JobSchedule` table.
+The API is `v1/tenants/{id}/jobs`; schedules and runs are written through the `JobSchedule` and `JobRun` tables.
 
 | Job | Kind | Market days | Does |
 | --- | --- | --- | --- |

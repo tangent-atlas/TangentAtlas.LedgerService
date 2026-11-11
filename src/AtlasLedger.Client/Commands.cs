@@ -151,16 +151,16 @@ namespace AtlasLedger.Client
             ArgumentNullException.ThrowIfNull(output);
             var jobs = await api.GetJobsAsync(tenantId, cancellationToken).ConfigureAwait(false);
             static string Time(DateTimeOffset? time) => time is { } value ? value.ToLocalTime().ToString("ddd yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture) : "-";
+            static string Run(JobRunDto run) =>
+                $"{run.Status} {Time(run.EndTime ?? run.StartTime ?? run.RequestedTime)} ({run.Reason}){(run.Outcome is { } outcome ? $": {outcome}" : string.Empty)}";
             output.WriteLine($"Jobs of {tenantId}");
             foreach (var job in jobs.Jobs)
             {
-                var doing = job.IsRunning
-                    ? $"running since {Time(job.RunningSince)}{(job.StartedBy is null ? " (by hand)" : string.Empty)}"
-                    : "not running";
+                var doing = job.Running is { } running ? $"running since {Time(running.StartTime)} ({running.Reason})" : "not running";
                 output.WriteLine($"  {job.Job,-24} {job.Kind,-8} {doing}");
-                if (job.LastOutcome is { } outcome)
+                if (job.Last is { } last)
                 {
-                    output.WriteLine($"  {string.Empty,-24} last {Time(job.LastRun)}: {outcome}");
+                    output.WriteLine($"  {string.Empty,-24} last: {Run(last)}");
                 }
             }
 
@@ -185,23 +185,34 @@ namespace AtlasLedger.Client
                         : $"  next run {Time(schedule.NextStart)}");
                 }
             }
+
+            if (jobs.Runs.Count > 0)
+            {
+                output.WriteLine();
+                output.WriteLine("Latest runs");
+                foreach (var run in jobs.Runs)
+                {
+                    output.WriteLine($"  {run.Job,-24} {Run(run)}");
+                }
+            }
         }
 
         /// <summary>
-        /// Runs a task now, whatever its schedules say, and shows what it did.
+        /// Runs a task now, whatever its schedules say (unless it is off), and shows what it did.  The run is recorded in the
+        /// tenant's JobRun log.
         /// </summary>
         /// <param name="api">The API.</param>
         /// <param name="tenantId">The tenant.</param>
         /// <param name="job">The task's key.</param>
         /// <param name="output">Where to write.</param>
         /// <param name="cancellationToken">Cancels the command.</param>
-        /// <returns>A task that completes when the task has run.</returns>
+        /// <returns>A task that completes when the task has run, or been refused.</returns>
         public static async Task RunJobAsync(LedgerApiClient api, Guid tenantId, string job, TextWriter output, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(api);
             ArgumentNullException.ThrowIfNull(output);
-            var run = await api.RunJobAsync(tenantId, job, cancellationToken).ConfigureAwait(false);
-            output.WriteLine($"{run.Job}: {run.Outcome}");
+            var run = await api.RunJobAsync(tenantId, job, TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"{run.Job}: {run.Status}{(run.Outcome is { } outcome ? $": {outcome}" : string.Empty)}");
         }
 
         /// <summary>

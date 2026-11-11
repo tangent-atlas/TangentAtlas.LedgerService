@@ -98,25 +98,16 @@ namespace AtlasLedger.Server.Holdings
         }
 
         /// <summary>
-        /// The price to use for an asset, in its quote currency: an override in force, else the market's latest price (for a
-        /// currency, its constant from the initial prices), else the price of its last purchase or sale.
+        /// The price to use for an asset, in its quote currency: the market's latest price (for a currency, its constant from
+        /// the initial prices), else the price of its last purchase or sale.
         /// </summary>
         /// <param name="asset">The asset.</param>
-        /// <param name="overrides">The asset's price overrides in force now.</param>
         /// <param name="market">The latest market price, if there is one.</param>
         /// <param name="exchanges">The posted lines of purchases and sales of the asset, in any account of the tenant.</param>
         /// <returns>The price, or null if nothing has priced the asset yet.</returns>
-        public static EffectivePrice? Price(AssetFact asset, IEnumerable<PriceOverrideFact> overrides, PriceFact? market, IEnumerable<PostedLine> exchanges)
+        public static EffectivePrice? Price(AssetFact asset, PriceFact? market, IEnumerable<PostedLine> exchanges)
         {
             ArgumentNullException.ThrowIfNull(asset);
-            var priceOverride = overrides
-                .OrderByDescending(item => (item.EffectiveTime, item.SourceSequence ?? long.MinValue, item.RowVersion))
-                .FirstOrDefault();
-            if (priceOverride is not null)
-            {
-                return new EffectivePrice(asset.AssetId, priceOverride.Price, asset.QuoteCurrency, priceOverride.EffectiveTime, PriceSource.Override);
-            }
-
             if (market is not null && market.Last > 0m)
             {
                 return new EffectivePrice(asset.AssetId, market.Last, asset.QuoteCurrency, market.AsOf, PriceSource.Market);

@@ -90,26 +90,6 @@ namespace AtlasLedger.Server.Holdings
     }
 
     /// <summary>
-    /// A price override is in force from its effective time until it expires.
-    /// </summary>
-    [Name("Holdings.PriceOverrideInForce")]
-    public sealed class PriceOverrideInForceRule : Rule
-    {
-        /// <inheritdoc/>
-        public override void Define()
-        {
-            ClockFact clock = default!;
-            PriceOverrideFact item = default!;
-
-            this.When()
-                .Match(() => clock)
-                .Match(() => item, candidate => HoldingFold.IsInForce(candidate.EffectiveTime, candidate.ExpiresTime, clock.Now));
-            this.Then()
-                .Yield(_ => new PriceOverrideInForce(item));
-        }
-    }
-
-    /// <summary>
     /// A rate between two currencies: the latest price of one in the other, from the price table (a currency in itself is
     /// 1, from the initial prices; between currencies, from the feed).  Nothing is inverted or chained: a rate is used only
     /// as published.
@@ -130,9 +110,9 @@ namespace AtlasLedger.Server.Holdings
     }
 
     /// <summary>
-    /// The price of an asset, cash included, in its quote currency: an override in force, else the latest price published
-    /// for any of its symbols in that currency (a ticker's from the market feed; a currency's from the initial prices), else
-    /// the price of its last purchase or sale in any of the tenant's accounts.
+    /// The price of an asset, cash included, in its quote currency: the latest price published for any of its symbols in
+    /// that currency (a ticker's from the market feed; a currency's from the initial prices), else the price of its last
+    /// purchase or sale in any of the tenant's accounts.
     /// </summary>
     [Name("Holdings.Price")]
     public sealed class PriceRule : Rule
@@ -143,7 +123,6 @@ namespace AtlasLedger.Server.Holdings
             AssetFact asset = default!;
             IEnumerable<SymbolFact> symbols = default!;
             IEnumerable<PriceFact> markets = default!;
-            IEnumerable<PriceOverrideInForce> overrides = default!;
             IEnumerable<PostedLine> exchanges = default!;
 
             this.When()
@@ -154,17 +133,13 @@ namespace AtlasLedger.Server.Holdings
                 .Query(() => markets, query => query
                     .Match<PriceFact>(item => item.Currency == asset.QuoteCurrency, item => symbols.Any(symbol => symbol.Scheme == item.Scheme && symbol.Code == item.Code))
                     .Collect())
-                .Query(() => overrides, query => query
-                    .Match<PriceOverrideInForce>(item => item.Override.AssetId == asset.AssetId)
-                    .Collect())
                 .Query(() => exchanges, query => query
                     .Match<PostedLine>(item => item.Line.AssetId == asset.AssetId, item => HoldingFold.Exchanges.Contains(item.Transaction.Kind))
                     .Collect())
-                .Having(() => markets.Any(market => market.Last > 0m) || overrides.Any() || exchanges.Any());
+                .Having(() => markets.Any(market => market.Last > 0m) || exchanges.Any());
             this.Then()
                 .Yield(_ => HoldingFold.Price(
                     asset,
-                    overrides.Select(item => item.Override),
                     markets.Where(market => market.Last > 0m).OrderByDescending(market => market.AsOf).FirstOrDefault(),
                     exchanges)!);
         }

@@ -18,7 +18,8 @@ namespace AtlasLedger.Server.Orders
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
     /// <param name="Orders">Every order's state, by order ID.</param>
-    public sealed record OrdersDto(DateTimeOffset AsOf, IReadOnlyList<OrderState> Orders);
+    /// <param name="Proposals">Every account's proposed allocations: what its model calls for now, not yet ordered.</param>
+    public sealed record OrdersDto(DateTimeOffset AsOf, IReadOnlyList<OrderState> Orders, IReadOnlyList<ProposedAllocations> Proposals);
 
     /// <summary>
     /// Serves the state of a tenant's orders: the rules' published snapshot, never the ledger's tables (the orders, broker
@@ -31,13 +32,32 @@ namespace AtlasLedger.Server.Orders
     {
         private readonly HoldingsStore store;
 
+        private readonly OrderGenerator generator;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="OrdersController"/> class.
         /// </summary>
         /// <param name="store">The rules' snapshots.</param>
-        public OrdersController(HoldingsStore store)
+        /// <param name="generator">The order generator.</param>
+        public OrdersController(HoldingsStore store, OrderGenerator generator)
         {
             this.store = store;
+            this.generator = generator;
+        }
+
+        /// <summary>
+        /// Turns the tenant's proposed allocations into orders now, as the scheduled run would.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <returns>What was written, or 409 with the reason nothing could be.</returns>
+        [HttpPost("generate")]
+        [Authorize(Policy = LedgerAccessPolicies.OrderWrite)]
+        public ActionResult<GeneratedOrders> Generate(Guid tenantId)
+        {
+            var result = this.generator.Generate(tenantId);
+            return result.Reason is { } reason
+                ? this.Problem(statusCode: StatusCodes.Status409Conflict, title: "No orders written.", detail: reason)
+                : this.Ok(result);
         }
 
         /// <summary>
@@ -57,7 +77,7 @@ namespace AtlasLedger.Server.Orders
                     detail: "The rules engine hasn't run for this tenant since it was switched on. Switch it on (services on rules) and try again.");
             }
 
-            return this.Ok(new OrdersDto(snapshot.AsOf, snapshot.Orders.OrderBy(order => order.OrderId).ToArray()));
+            return this.Ok(new OrdersDto(snapshot.AsOf, snapshot.Orders.OrderBy(order => order.OrderId).ToArray(), snapshot.Proposals.OrderBy(proposal => proposal.AccountId).ToArray()));
         }
     }
 }

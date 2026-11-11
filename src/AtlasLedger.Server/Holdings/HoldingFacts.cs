@@ -16,9 +16,6 @@ namespace AtlasLedger.Server.Holdings
         /// <summary>The market's latest price.</summary>
         Market,
 
-        /// <summary>An operator's override, in force now.</summary>
-        Override,
-
         /// <summary>No market price yet: the price of the last purchase or sale.</summary>
         LastTrade,
     }
@@ -88,12 +85,6 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="AccountId">The account.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     public sealed record AccountFlow(Guid AccountId, decimal NetContributions);
-
-    /// <summary>
-    /// A price override that is in force now.
-    /// </summary>
-    /// <param name="Override">The override.</param>
-    public sealed record PriceOverrideInForce(PriceOverrideFact Override);
 
     /// <summary>
     /// The time, for rules that need it (overrides expire).  One per session: every clock fact equals every other, so the

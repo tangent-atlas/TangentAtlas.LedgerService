@@ -109,6 +109,16 @@ namespace AtlasLedger.Client.Api
             await this.SendAsync<List<Guid>>(HttpMethod.Get, "v1/me/tenants", null, cancellationToken).ConfigureAwait(false) ?? new List<Guid>();
 
         /// <summary>
+        /// Turns a tenant's proposed allocations into orders now, as the scheduled run would.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What was written.  The server answers 409, with the reason, when nothing could be.</returns>
+        public async Task<GeneratedOrders> GenerateOrdersAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<GeneratedOrders>(HttpMethod.Post, $"v1/tenants/{tenantId}/orders/generate", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned nothing.");
+
+        /// <summary>
         /// Gets the state of a tenant's orders, from the rules' latest snapshot.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>

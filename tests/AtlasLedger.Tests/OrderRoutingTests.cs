@@ -53,7 +53,7 @@ namespace AtlasLedger.Tests
         ];
 
         [Fact]
-        public async Task TheAccountIsRebalancedOnceADayThroughTheBroker()
+        public async Task TheGeneratorOrdersWhatTheModelProposesAndNothingTwice()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
             await using var server = ServerFixture.With(Trading);
@@ -64,36 +64,72 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Plan(EventSource.Simulator, timeOfDay: 0, weekdaysOnly: false), cancellationToken);
 
-            // The rebalance buys both companies with half the account; the simulated broker fills each at once, $1 in fees.
+            // The rules propose buying both companies with half the account, continuously; nothing is ordered yet.
+            var proposed = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
+            Assert.All(proposed.Proposals.Single().Trades, trade => Assert.Equal(OrderSide.Buy, trade.Side));
+            Assert.Empty(proposed.Orders);
+
+            // The generator writes them as orders, one broker order per account; the simulated broker fills each, $1 in fees.
+            var generated = await tool.GenerateOrdersAsync(tenantId, cancellationToken);
+            Assert.Equal((2, 2), (generated.Orders, generated.BrokerOrders));
             var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.Count == 2 && found.Orders.All(order => order.Status == "Filled"));
             Assert.All(orders.Orders, order => Assert.Equal((OrderSide.Buy, OrderOrigin.Rebalance, 1m), (order.Side, order.Origin, order.Fees)));
             var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count == 3);
             var account = holdings.Accounts.Single();
-            Assert.Equal((1_000_000m, Rebalancing.TradingDay(DateTimeOffset.UtcNow), 2), (account.NetContributions, account.LastRebalance!.Value, account.LastRebalanceOrders!.Value));
-            Assert.Equal((0.5m, "Joe 10"), (account.TargetCash!.Value, account.ModelName));
+            Assert.Equal((1_000_000m, "Joe 10", 0.5m), (account.NetContributions, account.ModelName, account.TargetCash!.Value));
             foreach (var holding in holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity))
             {
                 // Bought at the price of the moment, in whole shares: each within a point of its target.
                 Assert.InRange(holding.Weight!.Value, holding.TargetWeight!.Value - 0.01m, holding.TargetWeight!.Value + 0.01m);
             }
 
-            // The fees are in the cost, and on the bookings as one amount.
             var bookings = (await tool.ListAsync<TransactionDto>(tenantId, "Transaction", cancellationToken)).Where(transaction => transaction.Source == EventSource.Rules).ToArray();
             Assert.Equal(2, bookings.Length);
             Assert.All(bookings, booking => Assert.Equal(1m, booking.Fees));
 
-            using (var printed = new StringWriter())
+            // Filled, the account is where its model wants it (any drift since is inside the band): running again orders nothing.
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.Single().Trades.Count == 0);
+            Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+            Assert.Equal(2, (await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken)).Count);
+            using var printed = new StringWriter();
+            await client::AtlasLedger.Client.Commands.HoldingsAsync(tool, tenantId, printed, cancellationToken);
+            Assert.Contains("Paid in 1,000,000.00", printed.ToString(), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task OrdersWrittenBeforeTheRulesSeeThemAreNotWrittenAgain()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(["--Services:StartOn=rules,market-feed", "--MarketFeed:TickInterval=00:00:00.100", "--MarketFeed:BadPrintInterval=1.00:00:00"]);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
+
+            // The broker is off, so the orders stay open; asked again at once, the generator either waits for the rules to
+            // see its orders, or sees them and finds nothing more to order.  Either way, two orders in all.
+            Assert.Equal(2, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+            for (var attempt = 0; attempt < 20; attempt++)
             {
-                await client::AtlasLedger.Client.Commands.HoldingsAsync(tool, tenantId, printed, cancellationToken);
-                Assert.Contains("Paid in 1,000,000.00", printed.ToString(), StringComparison.Ordinal);
+                try
+                {
+                    Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+                }
+                catch (LedgerApiException exception) when (exception.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    // Not seen yet: try again.
+                }
+
+                await Task.Delay(50, cancellationToken);
             }
 
-            // Once a day: the rules keep running as prices move, and nothing more is ordered.
-            await Task.Delay(1_000, cancellationToken);
-            Assert.Single(await tool.ListAsync<RebalanceDto>(tenantId, "Rebalance", cancellationToken));
             Assert.Equal(2, (await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken)).Count);
+            Assert.All((await tool.GetOrdersAsync(tenantId, cancellationToken)).Orders, order => Assert.Equal("Working", order.Status));
         }
 
         [Fact]
@@ -107,16 +143,16 @@ namespace AtlasLedger.Tests
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             var account = (await tool.ListAsync<AccountDto>(tenantId, "Account", cancellationToken)).Single();
-            await tool.ApplyAsync(tenantId, new LedgerScript().Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = account.AccountType, Currency = account.Currency, ModelId = null, RowVersion = account.RowVersion }), cancellationToken);
+            await tool.ApplyAsync(tenantId, new LedgerScript().Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountRole = account.AccountRole, AccountType = account.AccountType, Currency = account.Currency, InstitutionId = account.InstitutionId, ExternalAccountId = account.ExternalAccountId, ModelId = null, RowVersion = account.RowVersion }), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Plan(EventSource.Simulator, timeOfDay: 0, weekdaysOnly: false), cancellationToken);
 
-            // The plan, the weights and the prices are all there; without a model the account is left alone.
+            // The weights and the prices are all there; without a model nothing is proposed, so nothing is ordered.
             var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count == 1);
-            await Task.Delay(1_500, cancellationToken);
-            Assert.Empty(await tool.ListAsync<RebalanceDto>(tenantId, "Rebalance", cancellationToken));
-            Assert.Equal((null, null), (holdings.Accounts.Single().ModelId, holdings.Accounts.Single().TargetCash));
+            await Task.Delay(1_000, cancellationToken);
+            Assert.Empty((await tool.GetOrdersAsync(tenantId, cancellationToken)).Proposals);
+            Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+            Assert.Equal((null, null, null), (holdings.Accounts.Single().ModelId, holdings.Accounts.Single().TargetCash, holdings.Accounts.Single().ProposedTrades));
         }
 
         [Fact]
@@ -144,7 +180,7 @@ namespace AtlasLedger.Tests
                 await tool.ApplyAsync(tenantId, new LedgerScript()
                     .Insert("Order", new OrderDto { OrderId = orderId, AssetId = Joe10Account.AssetIdOf("AAA"), Side = OrderSide.Buy, Origin = OrderOrigin.Manual, EnteredTime = now })
                     .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = quantity })
-                    .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, Broker = EventSource.Simulator, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now }), cancellationToken);
+                    .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now }), cancellationToken);
             }
 
             // Each fills for its own quantity: the broker saw two orders, not one sent twice.
@@ -177,7 +213,7 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, new LedgerScript()
                 .Insert("Order", new OrderDto { OrderId = orderId, AssetId = Joe10Account.AssetIdOf("AAA"), Side = OrderSide.Buy, Origin = OrderOrigin.Manual, EnteredTime = now })
                 .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = 10m })
-                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, Broker = EventSource.Simulator, Quantity = 10m, OrderType = OrderType.Limit, LimitPrice = 0.01m, TimeInForce = TimeInForce.GoodTillCancelled, EnteredTime = now }), cancellationToken);
+                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = 10m, OrderType = OrderType.Limit, LimitPrice = 0.01m, TimeInForce = TimeInForce.GoodTillCancelled, EnteredTime = now }), cancellationToken);
             await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.SingleOrDefault()?.BrokerOrders.Single().Status == "Working");
 
             await tool.InsertAsync(tenantId, "CancelRequest", new CancelRequestDto { CancelRequestId = Guid.NewGuid(), BrokerOrderId = brokerOrderId, EnteredTime = DateTimeOffset.UtcNow, Reason = "Test." }, cancellationToken);
@@ -196,7 +232,7 @@ namespace AtlasLedger.Tests
             var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
             var tenantId = Guid.NewGuid();
             var state = ReadState();
-            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state, EventSource.Schwab), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
 
             // As after a restart: the broker filled the order, and our ledger never heard back.
@@ -206,8 +242,8 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, new LedgerScript()
                 .Insert("Order", new OrderDto { OrderId = orderId, AssetId = Joe10Account.AssetIdOf("AAA"), Side = OrderSide.Buy, Origin = OrderOrigin.Manual, EnteredTime = now })
                 .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = 20m })
-                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = known, OrderId = orderId, Broker = EventSource.Schwab, Quantity = 10m, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now })
-                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = fresh, OrderId = orderId, Broker = EventSource.Schwab, Quantity = 10m, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now }), cancellationToken);
+                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = known, OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = 10m, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now })
+                .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = fresh, OrderId = orderId, AccountId = Joe10Account.AccountId, Quantity = 10m, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = now }), cancellationToken);
 
             var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.SingleOrDefault()?.Status == "Filled");
             Assert.Equal([fresh], broker.Placed);   // the order the broker had was recorded, not sent again

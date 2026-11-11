@@ -40,9 +40,9 @@ namespace AtlasLedger.Client.Api
     /// <param name="ModelId">The account's model.</param>
     /// <param name="ModelName">The model's name.</param>
     /// <param name="TargetCash">The share the model's weights leave in cash.</param>
-    /// <param name="LastRebalance">The last trading day the account was rebalanced.</param>
-    /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
-    public sealed record AccountSummary(Guid AccountId, string Currency, decimal? MarketValue, decimal Cash, decimal NetContributions, decimal? Gain, Guid? ModelId, string? ModelName, decimal? TargetCash, DateOnly? LastRebalance, int? LastRebalanceOrders);
+    /// <param name="ProposedTrades">How many trades its model calls for now, if it has a model.</param>
+    /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
+    public sealed record AccountSummary(Guid AccountId, string Currency, decimal? MarketValue, decimal Cash, decimal NetContributions, decimal? Gain, Guid? ModelId, string? ModelName, decimal? TargetCash, int? ProposedTrades, bool IsWaiting);
 
     /// <summary>
     /// The price of one unit of a currency in another.

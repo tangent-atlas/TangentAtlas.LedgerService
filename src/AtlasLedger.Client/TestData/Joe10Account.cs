@@ -118,22 +118,29 @@ namespace AtlasLedger.Client.TestData
         /// </summary>
         public static readonly Guid ModelId = KeyFor("model");
 
+        /// <summary>
+        /// The institution the account is held at: the simulated broker.
+        /// </summary>
+        public static readonly Guid InstitutionId = KeyFor("institution/simulator");
+
         private const string ExternalAccountNumber = "JOE10-TEST";
 
         /// <summary>
         /// Builds the reference script: rows that say how things are.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="broker">The broker the account is held at (its institution's connection): the simulator unless a test says otherwise.</param>
         /// <returns>The script.</returns>
-        public static LedgerScript Reference(Joe10State state)
+        public static LedgerScript Reference(Joe10State state, EventSource broker = EventSource.Simulator)
         {
             ArgumentNullException.ThrowIfNull(state);
             var script = new LedgerScript()
-                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10" })
+                .Insert("Institution", new InstitutionDto { InstitutionId = InstitutionId, Name = broker == EventSource.Simulator ? "Simulated broker" : broker.ToString(), Source = broker })
+                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10", Band = 0.005m })
                 .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = ModelId })
+                .Insert("Account", new AccountDto { AccountId = AccountId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber, ModelId = ModelId })
+                .Insert("Brokerage", new BrokerageDto { AccountId = AccountId, BrokerageType = BrokerageType.Taxable })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
-                .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber })
                 .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
                 .Insert("Asset", new AssetDto { AssetId = DollarId, AssetType = AssetType.Cash, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
                 .Insert("Cash", new CashDto { AssetId = DollarId, CashType = CashType.Currency, CurrencyCode = CurrencyCode.UnitedStatesDollar })
@@ -221,7 +228,7 @@ namespace AtlasLedger.Client.TestData
                     var quantity = brokerQuantities[part];
                     var brokerOrderId = KeyFor($"broker-order/{purchase.Ticker}/{part}");
                     script
-                        .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, Broker = EventSource.Simulator, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = placed })
+                        .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, AccountId = AccountId, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = placed })
                         .Insert("ExecutionReport", new ExecutionReportDto { ExecutionReportId = KeyFor($"report/{purchase.Ticker}/{part}/accepted"), BrokerOrderId = brokerOrderId, ReportType = ExecutionReportType.Accepted, ReportTime = placed.AddMinutes(1), Source = EventSource.Simulator, SourceId = $"joe10-{purchase.Ticker}-{part}-accepted" });
                     var fillFirst = isSplit ? Math.Floor(quantity / 2m) : quantity;
                     var fills = isSplit ? new[] { fillFirst, quantity - fillFirst } : new[] { quantity };
@@ -248,23 +255,12 @@ namespace AtlasLedger.Client.TestData
 
         /// <summary>
         /// Builds the opening script for an account the rules rebalance: the deposit only.  The first rebalance buys the
-        /// Joe 10 with it (load the plan and the weights too).
+        /// Joe 10 with it (load the weights too).
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <param name="deposit">The dollars paid in.</param>
         /// <returns>The script.</returns>
         public static LedgerScript Opening(Joe10State state, decimal deposit) => Deposit(state, deposit);
-
-        /// <summary>
-        /// Builds the plan script: how the account is rebalanced.  Once a trading day at 3:45 pm in New York, weekdays
-        /// only; a trade under half a percent of the account is skipped (the Joe 10's band); orders go to the broker named.
-        /// </summary>
-        /// <param name="broker">The broker (the simulator, or Schwab once it is connected).</param>
-        /// <param name="timeOfDay">Minutes after midnight in New York (default 945: 3:45 pm).</param>
-        /// <param name="weekdaysOnly">False to rebalance every day (for tests).</param>
-        /// <returns>The script.</returns>
-        public static LedgerScript Plan(EventSource broker = EventSource.Simulator, int timeOfDay = (15 * 60) + 45, bool weekdaysOnly = true) =>
-            new LedgerScript().Insert("RebalanceSetting", new RebalanceSettingDto { AccountId = AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = broker, WeekdaysOnly = weekdaysOnly });
 
         /// <summary>
         /// Builds a weights script: the Joe 10's weights at a close (each company's weight times the share in stocks) as the

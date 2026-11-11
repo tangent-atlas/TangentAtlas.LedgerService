@@ -1,8 +1,10 @@
 {
   "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
   "datatypes": {
+    "accountRole": "AtlasLedger.Model.AccountRole",
     "accountType": "AtlasLedger.Model.AccountType",
     "bool": "System.Boolean",
+    "brokerageType": "AtlasLedger.Model.BrokerageType",
     "assetType": "AtlasLedger.Model.AssetType",
     "cashType": "AtlasLedger.Model.CashType",
     "cryptoType": "AtlasLedger.Model.CryptoType",
@@ -39,32 +41,40 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
-      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: a value says the account is to be rebalanced to that model's weights; null says it is not rebalanced.",
+      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type; AccountRole is its place in an adviser's tree of accounts. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry); both are empty for an account held nowhere, such as a group. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: a value says the account is to be rebalanced to that model's weights; null says it is not rebalanced.",
       "columns": {
         "AccountId": "guid",
+        "AccountRole": "accountRole",
         "AccountType": "accountType",
         "Currency": { "maxLength": 3, "type": "string" },
+        "ExternalAccountId": { "maxLength": 64, "type": "string?" },
+        "InstitutionId": "guid?",
         "ModelId": "guid?"
       },
       "key": ["AccountId"],
       "references": {
         "Node": { "columns": ["AccountId"] },
+        "Institution": { "columns": ["InstitutionId"] },
         "Model": { "columns": ["ModelId"] }
       }
     },
-    "AccountConnection": {
-      "description": "Links an account to the same account at its source: the broker's account number, or the aggregator's account ID.",
-      "key": ["AccountConnectionId"],
+    "Brokerage": {
+      "description": "A brokerage account: an account of type Brokerage, with its more specific type (taxable, or an IRA).",
+      "key": ["AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "BrokerageType": "brokerageType"
+      },
       "references": {
         "Account": { "columns": ["AccountId"] }
-      },
-      "unique": {
-        "External": { "columns": ["Source", "ExternalAccountId"] }
-      },
+      }
+    },
+    "Institution": {
+      "description": "An institution that holds accounts: a broker, a bank, a card issuer. Source is the connection the system reaches it through (Schwab's API, the aggregator, the simulator): for a broker, which adapter its orders go to. What is particular to one account (its identifier there) is on the account.",
+      "key": ["InstitutionId"],
       "columns": {
-        "AccountConnectionId": "guid",
-        "AccountId": "guid",
-        "ExternalAccountId": { "maxLength": 64, "type": "string" },
+        "InstitutionId": "guid",
+        "Name": { "maxLength": 64, "type": "string" },
         "Source": "eventSource"
       }
     },
@@ -255,29 +265,6 @@
       "key": ["Scheme", "Code", "Currency"],
       "persistence": "Ephemeral"
     },
-    "PriceOverride": {
-      "description": "An event: the operator sets an asset's price from its effective time until it expires, because a source has it wrong.",
-      "writeMode": "AppendOnly",
-      "key": ["PriceOverrideId"],
-      "references": {
-        "Asset": { "columns": ["AssetId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
-      "columns": {
-        "AssetId": "guid",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "ExpiresTime": "time",
-        "Price": "price",
-        "PriceOverrideId": "guid",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?"
-      }
-    },
     "Symbol": {
       "columns": {
         "Code": { "maxLength": 32, "type": "string" },
@@ -290,9 +277,10 @@
       }
     },
     "Model": {
-      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value). Many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold: a model with no weights is all cash.",
+      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value), and Band, the smallest trade worth making as a fraction of the account's value. Many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold: a model with no weights is all cash.",
       "key": ["ModelId"],
       "columns": {
+        "Band": "rate",
         "ModelId": "guid",
         "Name": { "maxLength": 64, "type": "string" }
       }
@@ -308,34 +296,6 @@
       "references": {
         "Model": { "columns": ["ModelId"] },
         "Asset": { "columns": ["AssetId"] }
-      }
-    },
-    "RebalanceSetting": {
-      "description": "How an account is rebalanced: once a trading day, at TimeOfDay (minutes after midnight in New York) or later, on weekdays only unless WeekdaysOnly is false; a trade smaller than Band (a fraction of the account's value) is skipped; orders go to Broker. No setting, no rebalancing.",
-      "key": ["AccountId"],
-      "columns": {
-        "AccountId": "guid",
-        "Band": "rate",
-        "Broker": "eventSource",
-        "TimeOfDay": "int",
-        "WeekdaysOnly": "bool"
-      },
-      "references": {
-        "Account": { "columns": ["AccountId"] }
-      }
-    },
-    "Rebalance": {
-      "description": "A rebalance the rules decided: one per account and trading day, recorded with the orders it created (OrderCount, possibly none), so the account is rebalanced once that day however often the rules run.",
-      "writeMode": "AppendOnly",
-      "key": ["AccountId", "TradingDay"],
-      "columns": {
-        "AccountId": "guid",
-        "EnteredTime": "time",
-        "OrderCount": "int",
-        "TradingDay": "date"
-      },
-      "references": {
-        "Account": { "columns": ["AccountId"] }
       }
     },
     "CancelRequest": {
@@ -383,11 +343,11 @@
       }
     },
     "BrokerOrder": {
-      "description": "An order as sent to a broker for execution: part or all of an order (an order may be split into several). BrokerOrderId is the ID the broker is given, so a retried send is the same order. Recorded once and never changed; its status comes from the broker's execution reports.",
+      "description": "An order as sent to a broker for execution, in one account: AccountId, the brokerage account it is placed in (its institution says which broker; the account says which account there). An order may be split into several, at least one per account it allocates to. The broker is given an ID derived from the tenant and BrokerOrderId, so a retried send is the same order. Recorded once and never changed; its status comes from the broker's execution reports.",
       "writeMode": "AppendOnly",
       "key": ["BrokerOrderId"],
       "columns": {
-        "Broker": "eventSource",
+        "AccountId": "guid",
         "BrokerOrderId": "guid",
         "EnteredTime": "time",
         "LimitPrice": "price?",
@@ -397,6 +357,7 @@
         "TimeInForce": "timeInForce"
       },
       "references": {
+        "Account": { "columns": ["AccountId"] },
         "Order": { "columns": ["OrderId"] }
       }
     },

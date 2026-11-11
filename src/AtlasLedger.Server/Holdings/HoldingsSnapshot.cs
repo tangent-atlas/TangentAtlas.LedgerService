@@ -26,7 +26,7 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Accounts">Every account (for its model).</param>
     /// <param name="Models">Every model.</param>
     /// <param name="Weights">Every model's weights.</param>
-    /// <param name="Rebalances">Every rebalance recorded.</param>
+    /// <param name="Proposals">Every account's proposed allocations.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,
@@ -38,7 +38,7 @@ namespace AtlasLedger.Server.Holdings
         IReadOnlyList<AccountFact> Accounts,
         IReadOnlyList<ModelFact> Models,
         IReadOnlyList<WeightFact> Weights,
-        IReadOnlyList<RebalanceFact> Rebalances);
+        IReadOnlyList<Orders.ProposedAllocations> Proposals);
 
     /// <summary>
     /// The latest snapshot of each tenant.  In memory only: derived state is never persisted, and it is rebuilt from the
@@ -154,7 +154,7 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<AccountFact>().ToArray(),
                     session.Query<ModelFact>().ToArray(),
                     session.Query<WeightFact>().ToArray(),
-                    session.Query<RebalanceFact>().ToArray()));
+                    session.Query<Orders.ProposedAllocations>().ToArray()));
                 return fired;
             }
         }

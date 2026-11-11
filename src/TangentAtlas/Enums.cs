@@ -5,9 +5,9 @@
 namespace AtlasLedger.Model
 {
     /// <summary>
-    /// The kinds of account.
+    /// An account's place in an adviser's tree of accounts.
     /// </summary>
-    public enum AccountType
+    public enum AccountRole
     {
         /// <summary>An account that groups other accounts.</summary>
         GroupAccount,
@@ -17,6 +17,43 @@ namespace AtlasLedger.Model
 
         /// <summary>An account whose members are weighted.</summary>
         WeightedAccount,
+    }
+
+    /// <summary>
+    /// The kinds of account: the first level of the account hierarchy.  Each has an extension table with its more
+    /// specific type (only Brokerage so far).
+    /// </summary>
+    public enum AccountType
+    {
+        /// <summary>An account at a broker that holds securities and cash: the only kind that is traded.</summary>
+        Brokerage,
+
+        /// <summary>An employer's retirement plan (401(k), 403(b), 457): shown, never acted on.</summary>
+        RetirementPlan,
+
+        /// <summary>A bank account: checking, savings, money market.</summary>
+        Deposit,
+
+        /// <summary>A credit card.</summary>
+        CreditCard,
+
+        /// <summary>A loan: mortgage, auto, student.</summary>
+        Loan,
+    }
+
+    /// <summary>
+    /// The more specific types of brokerage account.
+    /// </summary>
+    public enum BrokerageType
+    {
+        /// <summary>An ordinary taxable account.</summary>
+        Taxable,
+
+        /// <summary>A traditional IRA.</summary>
+        TraditionalIra,
+
+        /// <summary>A Roth IRA.</summary>
+        RothIra,
     }
 
     /// <summary>

@@ -87,7 +87,6 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Symbol"], cut.ChangedSymbols, cut.DeletedSymbols, dto => $"{dto.Scheme}/{dto.Code}");
                 Apply(tables["User"], cut.ChangedUsers, cut.DeletedUsers, dto => dto.UserId.ToString());
                 Apply(tables["Member"], cut.ChangedMembers, cut.DeletedMembers, dto => dto.UserId.ToString());
-                Apply(tables["AccountConnection"], cut.ChangedAccountConnections, cut.DeletedAccountConnections, dto => dto.AccountConnectionId.ToString());
                 Apply(tables["Asset"], cut.ChangedAssets, cut.DeletedAssets, dto => dto.AssetId.ToString());
                 Apply(tables["Cash"], cut.ChangedCashes, cut.DeletedCashes, dto => dto.AssetId.ToString());
                 Apply(tables["Crypto"], cut.ChangedCryptos, cut.DeletedCryptos, dto => dto.AssetId.ToString());
@@ -96,11 +95,10 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Fund"], cut.ChangedFunds, cut.DeletedFunds, dto => dto.AssetId.ToString());
                 Apply(tables["Future"], cut.ChangedFutures, cut.DeletedFutures, dto => dto.AssetId.ToString());
                 Apply(tables["Option"], cut.ChangedOptions, cut.DeletedOptions, dto => dto.AssetId.ToString());
-                Apply(tables["PriceOverride"], cut.ChangedPriceOverrides, cut.DeletedPriceOverrides, dto => dto.PriceOverrideId.ToString());
+                Apply(tables["Institution"], cut.ChangedInstitutions, cut.DeletedInstitutions, dto => dto.InstitutionId.ToString());
+                Apply(tables["Brokerage"], cut.ChangedBrokerages, cut.DeletedBrokerages, dto => dto.AccountId.ToString());
                 Apply(tables["Model"], cut.ChangedModels, cut.DeletedModels, dto => dto.ModelId.ToString());
                 Apply(tables["Weight"], cut.ChangedWeights, cut.DeletedWeights, dto => $"{dto.ModelId}/{dto.AssetId}");
-                Apply(tables["RebalanceSetting"], cut.ChangedRebalanceSettings, cut.DeletedRebalanceSettings, dto => dto.AccountId.ToString());
-                Apply(tables["Rebalance"], cut.ChangedRebalances, cut.DeletedRebalances, dto => $"{dto.AccountId}/{dto.TradingDay:yyyy-MM-dd}");
                 Apply(tables["CancelRequest"], cut.ChangedCancelRequests, cut.DeletedCancelRequests, dto => dto.CancelRequestId.ToString());
                 Apply(tables["Order"], cut.ChangedOrders, cut.DeletedOrders, dto => dto.OrderId.ToString());
                 Apply(tables["Allocation"], cut.ChangedAllocations, cut.DeletedAllocations, dto => $"{dto.OrderId}/{dto.AccountId}");

@@ -23,7 +23,7 @@ namespace AtlasLedger.Tests
     {
         private static readonly Guid Account = Guid.Parse("00000000-0000-0000-0000-00000000000a");
 
-        private static readonly AccountFact Holder = new AccountFact(new AccountDto { AccountId = Account, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
+        private static readonly AccountFact Holder = new AccountFact(new AccountDto { AccountId = Account, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
 
         private static readonly AssetFact Stock = AssetOf(Guid.Parse("00000000-0000-0000-0000-00000000000b"), AssetType.Equity, ValueFactor.One, ValueFactor.One);
 
@@ -123,21 +123,15 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
-        public void PricesComeFromAnOverrideThenTheMarketThenTheLastExchange()
+        public void PricesComeFromTheMarketThenTheLastExchange()
         {
             var exchanges = Buy(1, 10m, Morning).Concat(Buy(1, 11m, Morning.AddHours(1))).Where(line => line.Line.AssetId == Stock.AssetId).ToArray();
             var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 12m, AsOf = Morning.AddHours(2) });
             var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 0m, AsOf = Morning.AddHours(2) });
-            var priceOverride = new PriceOverrideFact(new PriceOverrideDto
-            {
-                PriceOverrideId = Guid.NewGuid(), AssetId = Stock.AssetId, Price = 13m, ExpiresTime = Morning.AddDays(1),
-                EffectiveTime = Morning, EnteredTime = Morning, Source = EventSource.Operator, SourceId = "fix-1", Reason = "Feed wrong", RowVersion = Next(),
-            });
 
-            Assert.Equal((13m, PriceSource.Override), Pair(HoldingFold.Price(Stock, [priceOverride], market, exchanges)));
-            Assert.Equal((12m, PriceSource.Market), Pair(HoldingFold.Price(Stock, [], market, exchanges)));
-            Assert.Equal((11m, PriceSource.LastTrade), Pair(HoldingFold.Price(Stock, [], badPrint, exchanges)));
-            Assert.Null(HoldingFold.Price(Stock, [], null, []));
+            Assert.Equal((12m, PriceSource.Market), Pair(HoldingFold.Price(Stock, market, exchanges)));
+            Assert.Equal((11m, PriceSource.LastTrade), Pair(HoldingFold.Price(Stock, badPrint, exchanges)));
+            Assert.Null(HoldingFold.Price(Stock, null, []));
         }
 
         [Fact]

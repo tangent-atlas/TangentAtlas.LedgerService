@@ -32,10 +32,9 @@ namespace AtlasLedger.TestData
                                      and a fill at the last close (the largest split into two broker orders,
                                      each filled in two parts); the rules book the fills as purchases.  Load
                                      the history or the trading script, not both.
-              joe10-opening.json     the deposit only, for an account the rules rebalance: with the plan and
-                                     the weights, the first rebalance buys the Joe 10 itself
-              joe10-plan.json        how the account is rebalanced: daily at 3:45 pm New York, weekdays, a
-                                     band of 0.5% of the account, orders to the simulated broker
+              joe10-opening.json     the deposit only, for an account the rules rebalance: with the
+                                     the weights, the rules propose buying the Joe 10, and the order
+                                     generator (3:45 pm New York, or ledger-operator trade) orders it
               joe10-weights.json     the close's weights (each company's weight times the share in stocks) as
                                      the Joe 10 model's weights: load it once, then each day replace them with
                                      ledger-operator weights <tenant> joe10-weights.json
@@ -101,13 +100,11 @@ namespace AtlasLedger.TestData
             var historyPath = Path.Combine(folder, "joe10-history.json");
             var tradingPath = Path.Combine(folder, "joe10-trading.json");
             var openingPath = Path.Combine(folder, "joe10-opening.json");
-            var planPath = Path.Combine(folder, "joe10-plan.json");
             var weightsPath = Path.Combine(folder, "joe10-weights.json");
             await WriteAsync(Joe10Account.Reference(state), referencePath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.History(state, deposit), historyPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Trading(state, deposit), tradingPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Opening(state, deposit), openingPath).ConfigureAwait(false);
-            await WriteAsync(Joe10Account.Plan(), planPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Weights(state), weightsPath).ConfigureAwait(false);
 
             var english = CultureInfo.GetCultureInfo("en-US");
@@ -120,7 +117,7 @@ namespace AtlasLedger.TestData
             }
 
             Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
-            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath}, {planPath} and {weightsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
+            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath} and {weightsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }
 

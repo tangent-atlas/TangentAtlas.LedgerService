@@ -121,6 +121,22 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Turns a tenant's proposed allocations into orders now, as the scheduled run would.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the orders are written.</returns>
+        public static async Task TradeAsync(LedgerApiClient api, Guid tenantId, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var result = await api.GenerateOrdersAsync(tenantId, cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"Wrote {result.Orders} order(s) and {result.BrokerOrders} broker order(s) for {tenantId}; {result.Waiting} account(s) waiting for prices.");
+        }
+
+        /// <summary>
         /// Shows the state of a tenant's orders: each order with its allocations and broker orders.
         /// </summary>
         /// <param name="api">The API.</param>
@@ -137,6 +153,18 @@ namespace AtlasLedger.Client
             string Name(Guid id) => nodes.TryGetValue(id, out var node) ? node.DisplayName : id.ToString()[..8];
             var english = CultureInfo.GetCultureInfo("en-US");
             output.WriteLine($"Orders of {tenantId}, as the rules derived them at {orders.AsOf.ToString("u", CultureInfo.InvariantCulture)}");
+            foreach (var proposal in orders.Proposals)
+            {
+                output.WriteLine();
+                output.WriteLine(proposal.IsWaiting
+                    ? $"Proposed for {Name(proposal.AccountId)}: waiting for current prices"
+                    : $"Proposed for {Name(proposal.AccountId)}: {proposal.Trades.Count} trade(s)");
+                foreach (var trade in proposal.Trades)
+                {
+                    output.WriteLine(string.Format(english, "  {0} {1:#,0.######} {2}", trade.Side, trade.Quantity, Name(trade.AssetId)));
+                }
+            }
+
             foreach (var order in orders.Orders)
             {
                 output.WriteLine();
@@ -219,12 +247,12 @@ namespace AtlasLedger.Client
                 {
                     output.WriteLine(string.Format(
                         english,
-                        "  Paid in {0:#,0.00}, gain {1}; model {2}, {3} in cash; last rebalanced {4}",
+                        "  Paid in {0:#,0.00}, gain {1}; model {2}, {3} in cash; {4}",
                         summary.NetContributions,
                         summary.Gain is { } gain ? gain.ToString("#,0.00", english) : "-",
                         summary.ModelName ?? "none",
                         summary.TargetCash is { } cash ? cash.ToString("P1", english) : "-",
-                        summary.LastRebalance is { } day ? $"{day:yyyy-MM-dd} ({summary.LastRebalanceOrders} order(s))" : "never"));
+                        summary.IsWaiting ? "waiting for current prices" : summary.ProposedTrades is { } count ? $"{count} trade(s) proposed" : "not rebalanced"));
                 }
             }
         }

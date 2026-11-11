@@ -65,9 +65,10 @@ namespace AtlasLedger.Tests
             Assert.True(byDefault[ServiceSwitchboard.Rules].IsOnUntilTurnedOff);
             Assert.False(byDefault[ServiceSwitchboard.MarketFeed].IsOn);
             Assert.False(byDefault[ServiceSwitchboard.Broker].IsOn);   // nothing is sent to a broker unless asked for
+            Assert.False(byDefault[ServiceSwitchboard.Trading].IsOn);  // nor ordered on a schedule
             Assert.True(server::AtlasLedger.Server.Switches.ServiceState.From(byDefault[ServiceSwitchboard.Rules]) is { IsOn: true, OnUntil: null });
 
-            var both = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = " rules , market-feed,broker " }));
+            var both = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = " rules , market-feed,broker,trading " }));
             Assert.All(both.All, service => Assert.True(service.IsOnUntilTurnedOff));
 
             var none = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = string.Empty }));
@@ -98,7 +99,7 @@ namespace AtlasLedger.Tests
             var advisor = new LedgerApiClient(fixture.HttpClient, DevelopmentCallers.Advisor);
 
             var services = await tool.GetServicesAsync(cancellationToken);
-            Assert.Equal(new[] { ServiceSwitchboard.Broker, ServiceSwitchboard.MarketFeed, ServiceSwitchboard.Rules }, services.Select(service => service.Name));
+            Assert.Equal(new[] { ServiceSwitchboard.Broker, ServiceSwitchboard.MarketFeed, ServiceSwitchboard.Rules, ServiceSwitchboard.Trading }, services.Select(service => service.Name));
             Assert.All(services, service => Assert.False(service.IsOn));
 
             Assert.Equal(HttpStatusCode.NotFound, (await Assert.ThrowsAsync<LedgerApiException>(() => advisor.GetServicesAsync(cancellationToken))).StatusCode);
@@ -137,7 +138,7 @@ namespace AtlasLedger.Tests
             var nodeId = Guid.NewGuid();
             var accountWithoutCustodian = new LedgerScript()
                 .Insert("Node", new NodeDto { NodeId = nodeId, DisplayName = "Jones IRA", FullName = "Jones IRA", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = nodeId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
+                .Insert("Account", new AccountDto { AccountId = nodeId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar });
             await tool.ApplyAsync(tenant, accountWithoutCustodian, cancellationToken);
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);

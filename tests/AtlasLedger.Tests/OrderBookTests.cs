@@ -134,7 +134,7 @@ namespace AtlasLedger.Tests
             new AllocationFact(new AllocationDto { OrderId = Buy.OrderId, AccountId = accountId, Quantity = quantity });
 
         private static BrokerOrderFact BrokerOrder(decimal quantity) =>
-            new BrokerOrderFact(new BrokerOrderDto { BrokerOrderId = Guid.NewGuid(), OrderId = Buy.OrderId, Broker = EventSource.Simulator, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = Close, RowVersion = Next() });
+            new BrokerOrderFact(new BrokerOrderDto { BrokerOrderId = Guid.NewGuid(), OrderId = Buy.OrderId, AccountId = AccountA, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = Close, RowVersion = Next() });
 
         private static ExecutionReportFact Fill(decimal quantity, decimal price = 100m, decimal fees = 0m, BrokerOrderFact? brokerOrder = null) =>
             new ExecutionReportFact(new ExecutionReportDto

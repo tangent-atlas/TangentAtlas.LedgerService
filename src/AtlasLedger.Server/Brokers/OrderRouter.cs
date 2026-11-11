@@ -169,8 +169,6 @@ namespace AtlasLedger.Server.Brokers
                 var reportsByOrder = partition.ExecutionReports.ToLookup(report => report.BrokerOrderId);
                 var cancels = partition.CancelRequests.ToLookup(cancel => cancel.BrokerOrderId);
                 var tickers = partition.Symbols.Where(symbol => symbol.Scheme == SymbolScheme.Ticker).GroupBy(symbol => symbol.NodeId).ToDictionary(group => group.Key, group => group.First().Code);
-                var custodians = partition.Symbols.Where(symbol => symbol.Scheme == SymbolScheme.Custodian).GroupBy(symbol => symbol.NodeId).ToDictionary(group => group.Key, group => group.First().Code);
-                var allocations = partition.Allocations.ToLookup(allocation => allocation.OrderId);
                 foreach (var brokerOrder in partition.BrokerOrders)
                 {
                     var reports = reportsByOrder[brokerOrder.BrokerOrderId].ToArray();
@@ -189,12 +187,24 @@ namespace AtlasLedger.Server.Brokers
                         continue;
                     }
 
-                    var accounts = allocations[order.OrderId].Select(allocation => allocation.AccountId).Distinct().ToArray();
-                    var brokerAccount = accounts.Length == 1 ? custodians.GetValueOrDefault(accounts[0]) : null;
+                    // The broker is the institution's; the account at the broker is the account's own identifier there.
+                    var account = partition.FindAccount(brokerOrder.AccountId)!;
+                    if (account.InstitutionId is not { } institutionId || partition.FindInstitution(institutionId) is not { } institution)
+                    {
+                        refused.Add((brokerOrder.BrokerOrderId, "The account isn't held at an institution, so there is no broker to send it to."));
+                        continue;
+                    }
+
+                    if (account.ExternalAccountId is not { } brokerAccount)
+                    {
+                        refused.Add((brokerOrder.BrokerOrderId, $"The account has no identifier at {institution.Name}."));
+                        continue;
+                    }
+
                     var cancelRequests = cancels[brokerOrder.BrokerOrderId].ToArray();
                     work.Add(new Work(
                         new BrokerOrderRequest(partition.TenantId, brokerOrder.BrokerOrderId, BrokerOrderRequest.ClientOrderIdFor(partition.TenantId, brokerOrder.BrokerOrderId), order.Side, ticker, asset.QuoteCurrency, brokerOrder.Quantity, brokerOrder.OrderType, brokerOrder.LimitPrice, brokerOrder.TimeInForce, brokerAccount),
-                        brokerOrder.Broker,
+                        institution.Source,
                         Math.Max(brokerOrder.RowVersion, cancelRequests.Select(cancel => cancel.RowVersion).DefaultIfEmpty().Max()),
                         reports.Length == 0,
                         cancelRequests.Length > 0,

@@ -16,6 +16,7 @@ namespace AtlasLedger.Server
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
     using AtlasLedger.Server.Brokers;
+    using AtlasLedger.Server.Orders;
     using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
     using Bellerophon.Runtime;
@@ -139,6 +140,11 @@ namespace AtlasLedger.Server
             builder.Services.Configure<BrokerOptions>(configuration.GetSection(BrokerOptions.SectionName));
             builder.Services.AddSingleton<IBroker, SimulatedBroker>();
             builder.Services.AddHostedService<OrderRouter>();
+
+            // The order generator: turns the rules' proposed allocations into orders on a schedule (its switch) or on demand.
+            builder.Services.Configure<TradingOptions>(configuration.GetSection(TradingOptions.SectionName));
+            builder.Services.AddSingleton<OrderGenerator>();
+            builder.Services.AddHostedService(services => services.GetRequiredService<OrderGenerator>());
 
             // Callers: bearer tokens from the identity provider (Microsoft Entra External ID) when one is configured;
             // otherwise development sign-in, in the Development environment only.  With neither, the server does not start:

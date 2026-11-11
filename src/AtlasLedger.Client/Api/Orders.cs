@@ -62,9 +62,36 @@ namespace AtlasLedger.Client.Api
         IReadOnlyList<BrokerOrderState> BrokerOrders);
 
     /// <summary>
+    /// One trade an account's model calls for now.
+    /// </summary>
+    /// <param name="AssetId">The asset.</param>
+    /// <param name="Side">Buy or sell.</param>
+    /// <param name="Quantity">How many units.</param>
+    public sealed record PlannedTrade(Guid AssetId, OrderSide Side, decimal Quantity);
+
+    /// <summary>
+    /// An account's proposed allocations: what its model calls for now, not yet ordered.
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="ModelId">Its model.</param>
+    /// <param name="Trades">The trades.</param>
+    /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
+    public sealed record ProposedAllocations(Guid AccountId, Guid ModelId, IReadOnlyList<PlannedTrade> Trades, bool IsWaiting);
+
+    /// <summary>
+    /// What one run of the order generator wrote.
+    /// </summary>
+    /// <param name="Orders">Orders written.</param>
+    /// <param name="BrokerOrders">Broker orders written, one per account in each order.</param>
+    /// <param name="Waiting">Accounts left out because a price was missing or stale.</param>
+    /// <param name="Reason">Why nothing was written, when nothing could be.</param>
+    public sealed record GeneratedOrders(int Orders, int BrokerOrders, int Waiting, string? Reason);
+
+    /// <summary>
     /// A tenant's orders as the rules last worked them out.
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
     /// <param name="Orders">Every order's state.</param>
-    public sealed record TenantOrders(DateTimeOffset AsOf, IReadOnlyList<OrderState> Orders);
+    /// <param name="Proposals">Every account's proposed allocations.</param>
+    public sealed record TenantOrders(DateTimeOffset AsOf, IReadOnlyList<OrderState> Orders, IReadOnlyList<ProposedAllocations> Proposals);
 }

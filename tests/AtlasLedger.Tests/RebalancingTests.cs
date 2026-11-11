@@ -24,7 +24,7 @@ namespace AtlasLedger.Tests
         // 3:50 pm in New York on Monday, November 9, 2026 (standard time).
         private static readonly DateTimeOffset Monday = new DateTimeOffset(2026, 11, 9, 20, 50, 0, TimeSpan.Zero);
 
-        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
+        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
 
         private static readonly AssetFact Dollar = Asset(AssetType.Cash);
 
@@ -35,14 +35,13 @@ namespace AtlasLedger.Tests
         private static readonly IReadOnlyDictionary<(string From, string To), decimal> Rates = new Dictionary<(string From, string To), decimal> { [("USD", "USD")] = 1m };
 
         [Fact]
-        public void ARebalanceIsDueAtItsTimeOnWeekdays()
+        public void TheTradingDayAndTheOrderGeneratorsScheduleAreInNewYork()
         {
-            var setting = Setting(timeOfDay: (15 * 60) + 45, weekdaysOnly: true);
-            Assert.True(Rebalancing.IsDue(Monday, setting));
-            Assert.False(Rebalancing.IsDue(Monday.AddMinutes(-10), setting));   // 3:40 pm
-            Assert.False(Rebalancing.IsDue(Monday.AddDays(-2), setting));       // Saturday
-            Assert.True(Rebalancing.IsDue(Monday.AddDays(-2), Setting(timeOfDay: 0, weekdaysOnly: false)));
             Assert.Equal(new DateOnly(2026, 11, 9), Rebalancing.TradingDay(Monday.AddHours(3)));   // 11:50 pm in New York, still Monday
+            var quarterTo4 = new TimeOnly(15, 45);
+            Assert.Equal(new DateTimeOffset(2026, 11, 10, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday, quarterTo4));   // 3:50 pm Monday: next is Tuesday
+            Assert.Equal(new DateTimeOffset(2026, 11, 9, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday.AddHours(-1), quarterTo4));   // 2:50 pm: today
+            Assert.Equal(new DateTimeOffset(2026, 11, 16, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday.AddDays(4), quarterTo4));   // Friday after: Monday
         }
 
         [Fact]
@@ -111,7 +110,6 @@ namespace AtlasLedger.Tests
             Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal>()));   // no price
             Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, asOf: Monday.AddDays(-1)));   // yesterday's
             Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, source: PriceSource.LastTrade));
-            Assert.NotNull(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, source: PriceSource.Override, asOf: Monday.AddDays(-1)));   // an override in force is current
         }
 
         private static IReadOnlyList<PlannedTrade>? Plan(
@@ -147,8 +145,5 @@ namespace AtlasLedger.Tests
 
         private static WeightFact Weight(Guid modelId, AssetFact asset, decimal fraction) =>
             new WeightFact(new WeightDto { ModelId = modelId, AssetId = asset.AssetId, Fraction = fraction });
-
-        private static RebalanceSettingFact Setting(int timeOfDay, bool weekdaysOnly) =>
-            new RebalanceSettingFact(new RebalanceSettingDto { AccountId = Account.AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = EventSource.Simulator, WeekdaysOnly = weekdaysOnly });
     }
 }

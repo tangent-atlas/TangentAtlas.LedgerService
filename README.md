@@ -59,9 +59,12 @@ through the API stays on for four hours unless told otherwise (at most 24).  No 
 compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
 on rebuilds them from the log.
 
-The `broker` service is the order router: it sends broker orders to their brokers and records what they report.
-Nothing is sent to a broker while it is off, and it starts off unless `Services:StartOn` names it.  To run an account
-that rebalances itself every day against the simulated broker: `Services__StartOn=rules,market-feed,broker`.
+The rules propose, continuously, the trades each account's model calls for; nothing is ordered until the `trading`
+service (the order generator, at 3:45 pm New York each weekday, `Trading:TimeOfDay`) or an operator
+(`ledger-operator trade <tenant>`) turns the proposals into orders.  The `broker` service is the order router: it sends
+broker orders to their brokers and records what they report; nothing is sent to a broker while it is off.  Both start
+off unless `Services:StartOn` names them.  To run an account that trades itself every weekday against the simulated
+broker: `Services__StartOn=rules,market-feed,trading,broker`.
 
 ```
 dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when

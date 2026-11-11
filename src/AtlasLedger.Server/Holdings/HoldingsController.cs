@@ -59,8 +59,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="ModelId">The account's model; null when it is not rebalanced.</param>
     /// <param name="ModelName">The model's name.</param>
     /// <param name="TargetCash">The share the model's weights leave in cash, if it has a model.</param>
-    /// <param name="LastRebalance">The last trading day the account was rebalanced, if ever.</param>
-    /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
+    /// <param name="ProposedTrades">How many trades its model calls for now, if it has a model.</param>
+    /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
     public sealed record AccountSummaryDto(
         Guid AccountId,
         string Currency,
@@ -71,8 +71,8 @@ namespace AtlasLedger.Server.Holdings
         Guid? ModelId,
         string? ModelName,
         decimal? TargetCash,
-        DateOnly? LastRebalance,
-        int? LastRebalanceOrders);
+        int? ProposedTrades,
+        bool IsWaiting);
 
     /// <summary>
     /// A tenant's holdings and prices at the end of the last rules cycle.
@@ -181,7 +181,7 @@ namespace AtlasLedger.Server.Holdings
                     var total = totals[accountId];
                     var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : null;
                     var targets = weights[accountId];
-                    var last = snapshot.Rebalances.Where(rebalance => rebalance.AccountId == accountId).OrderByDescending(rebalance => rebalance.TradingDay).FirstOrDefault();
+                    var proposal = snapshot.Proposals.FirstOrDefault(item => item.AccountId == accountId);
                     return new AccountSummaryDto(
                         accountId,
                         currency,
@@ -192,8 +192,8 @@ namespace AtlasLedger.Server.Holdings
                         modelId,
                         modelId is { } id && models.TryGetValue(id, out var model) ? model.Name : null,
                         modelId is null ? null : 1m - targets.Values.Sum(),
-                        last?.TradingDay,
-                        last?.OrderCount);
+                        proposal?.Trades.Count,
+                        proposal?.IsWaiting ?? false);
                 })
                 .ToArray();
 

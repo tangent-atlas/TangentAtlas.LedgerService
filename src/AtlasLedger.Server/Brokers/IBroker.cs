@@ -27,7 +27,7 @@ namespace AtlasLedger.Server.Brokers
     /// <param name="OrderType">Market or limit.</param>
     /// <param name="LimitPrice">The limit, for a limit order.</param>
     /// <param name="TimeInForce">How long it stays working.</param>
-    /// <param name="BrokerAccount">The account at the broker (its custodian account number), when the order is for one account.</param>
+    /// <param name="BrokerAccount">The account at the broker the order is placed in: the account's identifier there.</param>
     public sealed record BrokerOrderRequest(
         Guid TenantId,
         Guid BrokerOrderId,
@@ -39,7 +39,7 @@ namespace AtlasLedger.Server.Brokers
         OrderType OrderType,
         decimal? LimitPrice,
         TimeInForce TimeInForce,
-        string? BrokerAccount)
+        string BrokerAccount)
     {
         /// <summary>
         /// The ID a broker is given for a broker order: unique across tenants, since tenants share nothing and may use the

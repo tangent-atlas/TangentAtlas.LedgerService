@@ -50,7 +50,7 @@ namespace AtlasLedger.Persistence.Tests
                 var node = NewNode("Account" + index);
                 node.Description = index % 2 == 0 ? null : "Described " + index;
                 keys.Accounts.Add(transaction.InsertNode(node).NodeId);
-                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = (AccountType)(index % 3), Currency = "USD", ModelId = index == 0 ? model.ModelId : null });
+                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountRole = (AccountRole)(index % 3), AccountType = AccountType.Brokerage, Currency = "USD", ModelId = index == 0 ? model.ModelId : null });
                 transaction.InsertSymbol(new Symbol { Scheme = "Custodian", Code = "C" + index.ToString(CultureInfo.InvariantCulture), NodeId = node.NodeId });
             }
 

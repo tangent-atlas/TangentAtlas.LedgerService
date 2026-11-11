@@ -204,7 +204,7 @@ namespace AtlasLedger.Persistence.Tests
                 for (var index = 0; index < 5_000; index++)
                 {
                     var node = transaction.InsertNode(Model.NewNode("N" + index));
-                    transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = AccountType.ManagedAccount, Currency = "USD" });
+                    transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = "USD" });
                 }
 
                 transaction.Commit();

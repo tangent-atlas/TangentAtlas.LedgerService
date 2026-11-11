@@ -7,19 +7,27 @@ namespace AtlasLedger.Server.Orders
     using System;
     using System.Collections.Generic;
     using System.Linq;
-    using System.Security.Cryptography;
-    using System.Text;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Holdings;
 
     /// <summary>
-    /// One trade a rebalance wants: whole units of one asset, bought or sold.
+    /// One trade an account's model calls for now: whole units of one asset, bought or sold.
     /// </summary>
     /// <param name="AssetId">The asset.</param>
     /// <param name="Side">Buy or sell.</param>
     /// <param name="Quantity">How many units.</param>
     public sealed record PlannedTrade(Guid AssetId, OrderSide Side, decimal Quantity);
+
+    /// <summary>
+    /// An account's proposed allocations: the trades its model calls for now.  Derived from the model, the holdings, the
+    /// prices and the open orders, and kept current by the rules; never saved.  The order generator turns them into orders.
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="ModelId">Its model.</param>
+    /// <param name="Trades">The trades, none when the account is where its model wants it.</param>
+    /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
+    public sealed record ProposedAllocations(Guid AccountId, Guid ModelId, IReadOnlyList<PlannedTrade> Trades, bool IsWaiting);
 
     /// <summary>
     /// The arithmetic of a rebalance, as plain functions: the rule calls them, the tests call them directly.
@@ -29,8 +37,8 @@ namespace AtlasLedger.Server.Orders
     /// Each asset's target is its weight in the account's model times that value, in whole units rounded down; an asset
     /// held but not in the model has a target of none.  What is held and what open orders will still bring or take is subtracted, and a
     /// trade smaller than the band (a fraction of the account's value) is skipped.  Cash is what is left: it is never
-    /// traded for itself.  A rebalance waits until every asset it needs has a current price (the market's today, or an
-    /// operator's override in force); it never trades on a stale price.
+    /// traded for itself.  A rebalance waits until every asset it needs has a current price (the market's, today); it never
+    /// proposes a trade on a stale price.
     /// </remarks>
     public static class Rebalancing
     {
@@ -52,21 +60,6 @@ namespace AtlasLedger.Server.Orders
         {
             var midnight = day.ToDateTime(TimeOnly.MinValue);
             return new DateTimeOffset(midnight, Exchange.GetUtcOffset(midnight));
-        }
-
-        /// <summary>
-        /// Whether an account's rebalance is due at a time: on or after its time of day in New York, on a weekday unless the
-        /// setting says every day.  (Market holidays are not known yet: on one, the broker refuses or holds the orders.)
-        /// </summary>
-        /// <param name="now">The time.</param>
-        /// <param name="setting">The account's setting.</param>
-        /// <returns>True if due.</returns>
-        public static bool IsDue(DateTimeOffset now, RebalanceSettingFact setting)
-        {
-            ArgumentNullException.ThrowIfNull(setting);
-            var local = TimeZoneInfo.ConvertTime(now, Exchange);
-            var isWeekday = local.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday);
-            return (isWeekday || !setting.WeekdaysOnly) && (local.Hour * 60) + local.Minute >= setting.TimeOfDay;
         }
 
         /// <summary>
@@ -187,24 +180,7 @@ namespace AtlasLedger.Server.Orders
                 .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
         }
 
-        /// <summary>
-        /// The key of a rebalance's order or broker order for an asset: the same account, day and asset always give the same
-        /// key (a name-based UUID, version 8, SHA-256).
-        /// </summary>
-        /// <param name="accountId">The account.</param>
-        /// <param name="day">The trading day.</param>
-        /// <param name="assetId">The asset.</param>
-        /// <param name="what">"order" or "broker-order".</param>
-        /// <returns>The key.</returns>
-        public static Guid KeyFor(Guid accountId, DateOnly day, Guid assetId, string what)
-        {
-            var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"tangent-atlas/rebalance/{accountId:N}/{day:yyyy-MM-dd}/{assetId:N}/{what}"));
-            hash[6] = (byte)((hash[6] & 0x0F) | 0x80);
-            hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
-            return new Guid(hash.AsSpan(0, 16), bigEndian: true);
-        }
-
         private static bool IsCurrent(EffectivePrice price, DateTimeOffset notBefore) =>
-            price.Source == PriceSource.Override || (price.Source == PriceSource.Market && price.AsOf >= notBefore);
+            price.Source == PriceSource.Market && price.AsOf >= notBefore;
     }
 }

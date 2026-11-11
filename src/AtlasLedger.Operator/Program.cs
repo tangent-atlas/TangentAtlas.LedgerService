@@ -37,7 +37,9 @@ namespace AtlasLedger.Operator
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
                                               the rules engine must be on.
-              orders <tenant>                 Show each order's state: its allocations, broker orders and fills.
+              orders <tenant>                 Show what each account's model proposes, and each order's state: its
+                                              allocations, broker orders and fills.
+              trade <tenant>                  Turn the proposals into orders now, as the scheduled run would.
               weights <tenant> <script.json>  Replace the weights of each model the script names with the script's
                                               Weight rows: changes, removes and adds rows to match, in one batch.
               services                        Show the server's optional services (market feed, rules engine).
@@ -106,6 +108,9 @@ namespace AtlasLedger.Operator
                         return await Commands.WaitForAlertAsync(api, Guid.Parse(positional[1]), rule, waitFor is not null, timeout, output, token).ConfigureAwait(false) ? 0 : 1;
                     case "alerts" when positional.Count == 2:
                         await Commands.AlertsAsync(api, Guid.Parse(positional[1]), watch, output, token).ConfigureAwait(false);
+                        return 0;
+                    case "trade" when positional.Count == 2:
+                        await Commands.TradeAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
                         return 0;
                     case "orders" when positional.Count == 2:
                         await Commands.OrdersAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

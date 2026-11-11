@@ -126,96 +126,64 @@ namespace AtlasLedger.Server.Orders
     }
 
     /// <summary>
-    /// Rebalances an account that has a model (an account without one is never rebalanced) once a trading day: when its time has come and it has no rebalance for the day yet, it plans
-    /// the trades (<see cref="Rebalancing.Plan"/>) and records, in one transaction, the rebalance and an order, an
-    /// allocation and a market broker order for each trade.  The next cycle sees the rebalance as a fact, so the account is
-    /// rebalanced once that day.  It fires after every other rule (lowest priority), so it sees the holdings, prices and
-    /// order states of this cycle, not the last.
+    /// An account's proposed allocations: the trades its model calls for now (<see cref="Rebalancing.Plan"/>), kept current
+    /// as prices, holdings and orders change.  Derived and never saved: nothing is ordered until the order generator turns
+    /// them into orders.  It fires after every other rule (lowest priority), so it sees the holdings, prices and order states
+    /// of this cycle, not the last.
     /// </summary>
-    [Name("Orders.Rebalance")]
+    [Name("Orders.Propose")]
     [Priority(-100)]
-    public sealed class RebalanceRule : Rule
+    public sealed class ProposeRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
-            RebalanceSettingFact setting = default!;
-            ClockFact clock = default!;
             AccountFact account = default!;
+            ModelFact model = default!;
+            ClockFact clock = default!;
             IEnumerable<WeightFact> weights = default!;
             IEnumerable<PositionState> positions = default!;
             IEnumerable<AssetFact> assets = default!;
             IEnumerable<EffectivePrice> prices = default!;
             IEnumerable<CurrencyRate> rates = default!;
             IEnumerable<OrderState> orders = default!;
-            LedgerRuleActions actions = default!;
-            this.Dependency().Resolve(() => actions);
 
             this.When()
-                .Match(() => setting)
-                .Match(() => clock, candidate => Rebalancing.IsDue(candidate.Now, setting))
-                .Match(() => account, candidate => candidate.AccountId == setting.AccountId, candidate => candidate.ModelId != null)
-                .Not<RebalanceFact>(item => item.AccountId == setting.AccountId, item => item.TradingDay == Rebalancing.TradingDay(clock.Now))
-                .Query(() => weights, query => query.Match<WeightFact>(item => item.ModelId == account.ModelId).Collect())
-                .Query(() => positions, query => query.Match<PositionState>(item => item.AccountId == setting.AccountId).Collect())
+                .Match(() => account, candidate => candidate.ModelId != null)
+                .Match(() => model, candidate => candidate.ModelId == account.ModelId)
+                .Match(() => clock)
+                .Query(() => weights, query => query.Match<WeightFact>(item => item.ModelId == model.ModelId).Collect())
+                .Query(() => positions, query => query.Match<PositionState>(item => item.AccountId == account.AccountId).Collect())
                 .Query(() => assets, query => query.Match<AssetFact>().Collect())
                 .Query(() => prices, query => query.Match<EffectivePrice>().Collect())
                 .Query(() => rates, query => query.Match<CurrencyRate>().Collect())
                 .Query(() => orders, query => query.Match<OrderState>().Collect());
             this.Then()
-                .Do(_ => Rebalance(actions, setting, clock, account, weights, positions, assets, prices, rates, orders));
+                .Yield(_ => Propose(account, model, clock, weights, positions, assets, prices, rates, orders));
         }
 
-        private static void Rebalance(
-            LedgerRuleActions actions,
-            RebalanceSettingFact setting,
-            ClockFact clock,
+        private static ProposedAllocations Propose(
             AccountFact account,
-            IEnumerable<WeightFact> modelWeights,
+            ModelFact model,
+            ClockFact clock,
+            IEnumerable<WeightFact> weights,
             IEnumerable<PositionState> positions,
             IEnumerable<AssetFact> assets,
             IEnumerable<EffectivePrice> prices,
             IEnumerable<CurrencyRate> rates,
             IEnumerable<OrderState> orders)
         {
-            var day = Rebalancing.TradingDay(clock.Now);
-            var weights = Rebalancing.WeightsOf(modelWeights, account.ModelId!.Value);
             var plan = Rebalancing.Plan(
                 account,
-                weights,
+                Rebalancing.WeightsOf(weights, model.ModelId),
                 positions,
                 assets.ToDictionary(asset => asset.AssetId),
                 prices.ToDictionary(price => price.AssetId),
                 rates.ToDictionary(rate => (rate.FromCurrency, rate.ToCurrency), rate => rate.Rate),
                 Rebalancing.OpenQuantities(account.AccountId, orders),
-                setting.Band,
-                Rebalancing.StartOf(day));
-            if (plan is null)
-            {
-                return;   // a price is missing or stale: the next price will bring the rule back
-            }
-
-            var now = clock.Now;
-            actions.Add(ledger =>
-            {
-                ledger.InsertRebalance(new Rebalance { AccountId = account.AccountId, TradingDay = day, EnteredTime = now, OrderCount = plan.Count });
-                foreach (var trade in plan)
-                {
-                    var orderId = Rebalancing.KeyFor(account.AccountId, day, trade.AssetId, "order");
-                    ledger.InsertOrder(new Order { OrderId = orderId, AssetId = trade.AssetId, Side = trade.Side, Origin = OrderOrigin.Rebalance, EnteredTime = now });
-                    ledger.InsertAllocation(new Allocation { OrderId = orderId, AccountId = account.AccountId, Quantity = trade.Quantity });
-                    ledger.InsertBrokerOrder(new BrokerOrder
-                    {
-                        BrokerOrderId = Rebalancing.KeyFor(account.AccountId, day, trade.AssetId, "broker-order"),
-                        OrderId = orderId,
-                        Broker = setting.Broker,
-                        Quantity = trade.Quantity,
-                        OrderType = OrderType.Market,
-                        TimeInForce = TimeInForce.Day,
-                        EnteredTime = now,
-                    });
-                }
-            });
+                model.Band,
+                Rebalancing.StartOf(Rebalancing.TradingDay(clock.Now)));
+            return new ProposedAllocations(account.AccountId, model.ModelId, plan ?? Array.Empty<PlannedTrade>(), plan is null);
         }
     }
 }

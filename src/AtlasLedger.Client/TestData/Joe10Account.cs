@@ -137,19 +137,7 @@ namespace AtlasLedger.Client.TestData
         {
             ArgumentNullException.ThrowIfNull(state);
             var entered = state.Close;
-            var depositId = KeyFor("deposit");
-            var script = new LedgerScript()
-                .Insert("Transaction", new TransactionDto
-                {
-                    TransactionId = depositId,
-                    Kind = TransactionKind.Deposit,
-                    Source = EventSource.Simulator,
-                    SourceId = "joe10-deposit",
-                    EffectiveTime = state.Close.AddHours(-6.5),
-                    EnteredTime = entered,
-                    Reason = "The Joe 10 test account's opening deposit.",
-                })
-                .Insert("TransactionLine", new TransactionLineDto { TransactionId = depositId, LineNumber = 1, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = deposit, Amount = deposit });
+            var script = Deposit(state, deposit);
             var sequence = 0L;
             foreach (var purchase in Purchases(state, deposit))
             {
@@ -172,6 +160,83 @@ namespace AtlasLedger.Client.TestData
             }
 
             return script;
+        }
+
+        /// <summary>
+        /// Builds the trading script: the same deposit and the same purchases as <see cref="History"/>, but as the trading
+        /// events that lead to them, for the rules to turn into holdings.  Each purchase is an order (origin Rebalance) with
+        /// one allocation, to the account; a broker order; the broker's acceptance; and a fill at the last close, without
+        /// fees.  The largest purchase is split into two broker orders, each filled in two parts, so the script also
+        /// exercises splitting and partial fills.  The rules book each fill as a purchase, so the holdings come out the
+        /// same as from the history script.  Load one or the other, not both.
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="deposit">The dollars paid in.</param>
+        /// <returns>The script.</returns>
+        public static LedgerScript Trading(Joe10State state, decimal deposit)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            var script = Deposit(state, deposit);
+            var placed = state.Close.AddMinutes(-30);
+            var purchases = Purchases(state, deposit);
+            var largest = purchases.OrderByDescending(purchase => purchase.Shares * purchase.Price).First().Ticker;
+            foreach (var purchase in purchases)
+            {
+                var orderId = KeyFor($"order/{purchase.Ticker}");
+                script
+                    .Insert("Order", new OrderDto { OrderId = orderId, AssetId = AssetIdOf(purchase.Ticker), Side = OrderSide.Buy, Origin = OrderOrigin.Rebalance, EnteredTime = placed })
+                    .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = AccountId, Quantity = purchase.Shares });
+
+                // The largest purchase in two broker orders, each filled in two parts; the rest in one, filled at once.
+                var isSplit = purchase.Ticker == largest && purchase.Shares >= 4m;
+                var first = isSplit ? Math.Floor(purchase.Shares / 2m) : purchase.Shares;
+                var brokerQuantities = isSplit ? new[] { first, purchase.Shares - first } : new[] { purchase.Shares };
+                for (var part = 0; part < brokerQuantities.Length; part++)
+                {
+                    var quantity = brokerQuantities[part];
+                    var brokerOrderId = KeyFor($"broker-order/{purchase.Ticker}/{part}");
+                    script
+                        .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, Broker = EventSource.Simulator, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = placed })
+                        .Insert("ExecutionReport", new ExecutionReportDto { ExecutionReportId = KeyFor($"report/{purchase.Ticker}/{part}/accepted"), BrokerOrderId = brokerOrderId, ReportType = ExecutionReportType.Accepted, ReportTime = placed.AddMinutes(1), Source = EventSource.Simulator, SourceId = $"joe10-{purchase.Ticker}-{part}-accepted" });
+                    var fillFirst = isSplit ? Math.Floor(quantity / 2m) : quantity;
+                    var fills = isSplit ? new[] { fillFirst, quantity - fillFirst } : new[] { quantity };
+                    for (var number = 0; number < fills.Length; number++)
+                    {
+                        script.Insert("ExecutionReport", new ExecutionReportDto
+                        {
+                            ExecutionReportId = KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"),
+                            BrokerOrderId = brokerOrderId,
+                            ReportType = ExecutionReportType.Fill,
+                            Quantity = fills[number],
+                            Price = purchase.Price,
+                            Fees = 0m,
+                            ReportTime = state.Close,
+                            Source = EventSource.Simulator,
+                            SourceId = $"joe10-{purchase.Ticker}-{part}-fill-{number}",
+                        });
+                    }
+                }
+            }
+
+            return script;
+        }
+
+        private static LedgerScript Deposit(Joe10State state, decimal deposit)
+        {
+            var entered = state.Close;
+            var depositId = KeyFor("deposit");
+            return new LedgerScript()
+                .Insert("Transaction", new TransactionDto
+                {
+                    TransactionId = depositId,
+                    Kind = TransactionKind.Deposit,
+                    Source = EventSource.Simulator,
+                    SourceId = "joe10-deposit",
+                    EffectiveTime = state.Close.AddHours(-6.5),
+                    EnteredTime = entered,
+                    Reason = "The Joe 10 test account's opening deposit.",
+                })
+                .Insert("TransactionLine", new TransactionLineDto { TransactionId = depositId, LineNumber = 1, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = deposit, Amount = deposit });
         }
 
         /// <summary>

@@ -13,6 +13,7 @@ namespace AtlasLedger.Tests
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
+    using client::AtlasLedger.Client;
     using client::AtlasLedger.Client.Api;
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Client.TestData;
@@ -126,6 +127,53 @@ namespace AtlasLedger.Tests
             holdings = await WaitForAsync(tool, tenantId, found => Quantity(found, Joe10Account.AssetIdOf("AAA")) == 2_500m, cancellationToken);
             Assert.True(holdings.Holdings.Single(holding => holding.AssetId == Joe10Account.AssetIdOf("AAA")).IsOverridden);
             Assert.Equal(6_000m, Quantity(holdings, Joe10Account.AssetIdOf("BBB")));
+        }
+
+        [Fact]
+        public async Task TradingThroughOrdersReachesTheSameHoldingsAsBookingThePurchases()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var (direct, viaOrders) = (Guid.NewGuid(), Guid.NewGuid());
+            var state = ReadState();
+            await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
+            foreach (var tenantId in new[] { direct, viaOrders })
+            {
+                await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            }
+
+            await tool.ApplyAsync(direct, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await tool.ApplyAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
+
+            // The rules book the fills as purchases (AAA's in two broker orders, each filled in two parts: four bookings).
+            var expected = await WaitForAsync(tool, direct, found => found.Holdings.Count == 3, cancellationToken);
+            var holdings = await WaitForAsync(tool, viaOrders, found => found.Holdings.Count == 3 && Quantity(found, Joe10Account.DollarId) == 500_020m, cancellationToken);
+            Assert.Equal(
+                expected.Holdings.Select(holding => (holding.AssetId, holding.Quantity, holding.CostBasis, holding.MarketValue)),
+                holdings.Holdings.Select(holding => (holding.AssetId, holding.Quantity, holding.CostBasis, holding.MarketValue)));
+            Assert.Equal(1_000_000m, holdings.Holdings.Sum(holding => holding.MarketValue!.Value));
+
+            var orders = await tool.GetOrdersAsync(viaOrders, cancellationToken);
+            Assert.Equal(2, orders.Orders.Count);
+            Assert.All(orders.Orders, order => Assert.Equal(("Filled", 0m, 0m), (order.Status, order.Unplaced, order.Unallocated)));
+            var aaa = orders.Orders.Single(order => order.AssetId == Joe10Account.AssetIdOf("AAA"));
+            Assert.Equal(["Filled", "Filled"], aaa.BrokerOrders.Select(brokerOrder => brokerOrder.Status));
+            Assert.Equal((3_000m, 0m), (aaa.Allocations.Single().Filled, aaa.Allocations.Single().Remaining));
+            using (var printed = new StringWriter())
+            {
+                await Commands.OrdersAsync(tool, viaOrders, printed, cancellationToken);
+                Assert.Contains("Buy 3,000 AAA  Filled  filled 3,000, placed 3,000, unplaced 0  (Rebalance)", printed.ToString(), StringComparison.Ordinal);
+            }
+
+            var bookings = (await tool.ListAsync<TransactionDto>(viaOrders, "Transaction", cancellationToken)).Where(transaction => transaction.Source == EventSource.Rules).ToArray();
+            Assert.Equal(5, bookings.Length);
+            Assert.All(bookings, booking => Assert.NotNull(booking.ExecutionReportId));
+
+            // Loading the trading events again changes nothing: every row is the same row, and no fill is booked twice.
+            await tool.ApplyAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
+            await Task.Delay(500, cancellationToken);
+            Assert.Equal(5, (await tool.ListAsync<TransactionDto>(viaOrders, "Transaction", cancellationToken)).Count(transaction => transaction.Source == EventSource.Rules));
+            Assert.Equal(3_000m, Quantity(await tool.GetHoldingsAsync(viaOrders, cancellationToken), Joe10Account.AssetIdOf("AAA")));
         }
 
         [Fact]

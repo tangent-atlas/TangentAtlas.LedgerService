@@ -27,6 +27,11 @@ namespace AtlasLedger.TestData
                                      companies) with their names (rows)
               joe10-history.json     a deposit of dollars, then one purchase per company at the last close,
                                      each an exchange of dollars for shares in two balanced lines (transactions)
+              joe10-trading.json     the same deposit and purchases as the trading events behind them: per
+                                     company an order, its allocation, a broker order, the broker's acceptance
+                                     and a fill at the last close (the largest split into two broker orders,
+                                     each filled in two parts); the rules book the fills as purchases.  Load
+                                     the history or the trading script, not both.
 
               --state <joe10.json>   The forward test's state file (tangent-atlas/forward-test, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
@@ -37,10 +42,11 @@ namespace AtlasLedger.TestData
             files out of public repositories.
 
             Then, against a local server (development sign-in):
-              ledger-operator services on
+              (the rules engine starts on; otherwise: ledger-operator services on rules)
               script-loader <tenant> joe10-reference.json
-              script-loader <tenant> joe10-history.json
+              script-loader <tenant> joe10-history.json      (or joe10-trading.json)
               ledger-operator holdings <tenant>
+              ledger-operator orders <tenant>                (after the trading script)
 
             Exit codes: 0 written; 2 the command line or the state file is wrong.
             """;
@@ -83,8 +89,10 @@ namespace AtlasLedger.TestData
             Directory.CreateDirectory(folder);
             var referencePath = Path.Combine(folder, "joe10-reference.json");
             var historyPath = Path.Combine(folder, "joe10-history.json");
+            var tradingPath = Path.Combine(folder, "joe10-trading.json");
             await WriteAsync(Joe10Account.Reference(state), referencePath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.History(state, deposit), historyPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Trading(state, deposit), tradingPath).ConfigureAwait(false);
 
             var english = CultureInfo.GetCultureInfo("en-US");
             var purchases = Joe10Account.Purchases(state, deposit);
@@ -96,7 +104,7 @@ namespace AtlasLedger.TestData
             }
 
             Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
-            Console.WriteLine($"Wrote {referencePath} and {historyPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
+            Console.WriteLine($"Wrote {referencePath}, {historyPath} and {tradingPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }
 

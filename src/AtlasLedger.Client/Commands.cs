@@ -57,6 +57,58 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Shows the state of a tenant's orders: each order with its allocations and broker orders.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the orders are shown.</returns>
+        public static async Task OrdersAsync(LedgerApiClient api, Guid tenantId, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var orders = await api.GetOrdersAsync(tenantId, cancellationToken).ConfigureAwait(false);
+            var nodes = (await api.ListAsync<NodeDto>(tenantId, "Node", cancellationToken).ConfigureAwait(false)).ToDictionary(node => node.NodeId);
+            string Name(Guid id) => nodes.TryGetValue(id, out var node) ? node.DisplayName : id.ToString()[..8];
+            var english = CultureInfo.GetCultureInfo("en-US");
+            output.WriteLine($"Orders of {tenantId}, as the rules derived them at {orders.AsOf.ToString("u", CultureInfo.InvariantCulture)}");
+            foreach (var order in orders.Orders)
+            {
+                output.WriteLine();
+                output.WriteLine(string.Format(
+                    english,
+                    "{0} {1:#,0.######} {2}  {3}  filled {4:#,0.######}, placed {5:#,0.######}, unplaced {6:#,0.######}  ({7}){8}",
+                    order.Side,
+                    order.Quantity,
+                    Name(order.AssetId),
+                    order.Status,
+                    order.Filled,
+                    order.Placed,
+                    order.Unplaced,
+                    order.Origin,
+                    order.Unallocated > 0m ? string.Format(english, "  unallocated {0:#,0.######}", order.Unallocated) : string.Empty));
+                foreach (var allocation in order.Allocations)
+                {
+                    output.WriteLine(string.Format(english, "  for {0,-24} {1,14:#,0.######} filled {2,14:#,0.######}", Name(allocation.AccountId), allocation.Quantity, allocation.Filled));
+                }
+
+                foreach (var brokerOrder in order.BrokerOrders)
+                {
+                    output.WriteLine(string.Format(
+                        english,
+                        "  broker order {0}  {1,14:#,0.######} {2,-15} filled {3,14:#,0.######} at {4}, fees {5:#,0.00}",
+                        brokerOrder.BrokerOrderId.ToString()[..8],
+                        brokerOrder.Quantity,
+                        brokerOrder.Status,
+                        brokerOrder.Filled,
+                        brokerOrder.AveragePrice is { } price ? price.ToString("#,0.00####", english) : "-",
+                        brokerOrder.Fees));
+                }
+            }
+        }
+
+        /// <summary>
         /// Shows what a tenant's transactions add up to: each account's holdings (cash among them, as an asset like any
         /// other), valued at their effective prices.
         /// </summary>

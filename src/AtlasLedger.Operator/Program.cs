@@ -36,7 +36,8 @@ namespace AtlasLedger.Operator
               mirror <tenant>                 Copy a tenant locally and show its accounts, symbols, and alerts.
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
-                                              compliance must be on.
+                                              the rules engine must be on.
+              orders <tenant>                 Show each order's state: its allocations, broker orders and fills.
               services                        Show the server's optional services (market feed, rules engine).
               services on [name...] [--for <hours>]
                                               Turn services on (all, if none named) for a while (default 4 hours;
@@ -103,6 +104,9 @@ namespace AtlasLedger.Operator
                         return await Commands.WaitForAlertAsync(api, Guid.Parse(positional[1]), rule, waitFor is not null, timeout, output, token).ConfigureAwait(false) ? 0 : 1;
                     case "alerts" when positional.Count == 2:
                         await Commands.AlertsAsync(api, Guid.Parse(positional[1]), watch, output, token).ConfigureAwait(false);
+                        return 0;
+                    case "orders" when positional.Count == 2:
+                        await Commands.OrdersAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
                         return 0;
                     case "holdings" when positional.Count == 2:
                         await Commands.HoldingsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

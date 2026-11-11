@@ -9,6 +9,7 @@
     "email": { "maxLength": 128, "type": "System.String" },
     "equityType": "AtlasLedger.Model.EquityType",
     "eventSource": "AtlasLedger.Model.EventSource",
+    "executionReportType": "AtlasLedger.Model.ExecutionReportType",
     "exerciseStyle": "AtlasLedger.Model.ExerciseStyle",
     "fixedIncomeType": "AtlasLedger.Model.FixedIncomeType",
     "fundType": "AtlasLedger.Model.FundType",
@@ -21,11 +22,15 @@
     "nodeStatus": "AtlasLedger.Model.NodeStatus",
     "nodeType": "AtlasLedger.Model.NodeType",
     "optionRight": "AtlasLedger.Model.OptionRight",
+    "orderOrigin": "AtlasLedger.Model.OrderOrigin",
+    "orderSide": "AtlasLedger.Model.OrderSide",
+    "orderType": "AtlasLedger.Model.OrderType",
     "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
     "quantity": { "precision": 19, "scale": 6, "type": "System.Decimal" },
     "rate": { "precision": 9, "scale": 6, "type": "System.Decimal" },
     "string": "System.String",
     "time": "System.DateTimeOffset",
+    "timeInForce": "AtlasLedger.Model.TimeInForce",
     "transactionKind": "AtlasLedger.Model.TransactionKind",
     "userType": "AtlasLedger.Model.UserType"
   },
@@ -281,6 +286,77 @@
         "Node": { "columns": ["NodeId"] }
       }
     },
+    "Order": {
+      "description": "An order: an intention to buy or sell one asset, for one or more accounts (its allocations). Recorded once and never changed; its status is derived from its broker orders and their execution reports. Origin says what created it (with RuleName for a rule).",
+      "writeMode": "AppendOnly",
+      "key": ["OrderId"],
+      "columns": {
+        "AssetId": "guid",
+        "EnteredTime": "time",
+        "OrderId": "guid",
+        "Origin": "orderOrigin",
+        "RuleName": { "maxLength": 64, "type": "string?" },
+        "Side": "orderSide"
+      },
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      }
+    },
+    "Allocation": {
+      "description": "One account's share of an order: the quantity of the order's asset it is to buy or sell. The order's quantity is the sum of its allocations. Fills are booked to the allocations in proportion to what each still needs, in whole units, by a published deterministic rule.",
+      "writeMode": "AppendOnly",
+      "key": ["OrderId", "AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "OrderId": "guid",
+        "Quantity": "quantity"
+      },
+      "references": {
+        "Order": { "columns": ["OrderId"] },
+        "Account": { "columns": ["AccountId"] }
+      }
+    },
+    "BrokerOrder": {
+      "description": "An order as sent to a broker for execution: part or all of an order (an order may be split into several). BrokerOrderId is the ID the broker is given, so a retried send is the same order. Recorded once and never changed; its status comes from the broker's execution reports.",
+      "writeMode": "AppendOnly",
+      "key": ["BrokerOrderId"],
+      "columns": {
+        "Broker": "eventSource",
+        "BrokerOrderId": "guid",
+        "EnteredTime": "time",
+        "LimitPrice": "price?",
+        "OrderId": "guid",
+        "OrderType": "orderType",
+        "Quantity": "quantity",
+        "TimeInForce": "timeInForce"
+      },
+      "references": {
+        "Order": { "columns": ["OrderId"] }
+      }
+    },
+    "ExecutionReport": {
+      "description": "What a broker reported about a broker order: accepted, a fill (a quantity at a price, with fees), cancelled, rejected or expired. Recorded once, idempotently on the broker's own ID for the report (Source, SourceId), and never changed. The rules book each fill to the order's accounts as Buy or Sell transactions.",
+      "writeMode": "AppendOnly",
+      "key": ["ExecutionReportId"],
+      "unique": {
+        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+      },
+      "columns": {
+        "BrokerOrderId": "guid",
+        "ExecutionReportId": "guid",
+        "Fees": "money?",
+        "Price": "price?",
+        "Quantity": "quantity?",
+        "ReportTime": "time",
+        "ReportType": "executionReportType",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 64, "type": "string" },
+        "Text": { "maxLength": 256, "type": "string?" }
+      },
+      "references": {
+        "BrokerOrder": { "columns": ["BrokerOrderId"] }
+      }
+    },
     "Transaction": {
       "description": "An event: something that happened at a time, recorded once and never changed (a mistake is corrected by another transaction). One atomic unit: its lines are inserted with it, in the same batch. An exchange (a purchase or a sale) gives one asset for another, so its lines balance. A temporary entry (an override) carries ExpiresTime and is in force from its effective time until then.",
       "writeMode": "AppendOnly",
@@ -292,12 +368,18 @@
         "EffectiveTime": "time",
         "EnteredTime": "time",
         "ExpiresTime": "time?",
+        "ExecutionReportId": "guid?",
         "Kind": "transactionKind",
+        "OrderId": "guid?",
         "Reason": { "maxLength": 256, "type": "string?" },
         "Source": "eventSource",
         "SourceId": { "maxLength": 64, "type": "string" },
         "SourceSequence": "long?",
         "TransactionId": "guid"
+      },
+      "references": {
+        "Order": { "columns": ["OrderId"] },
+        "ExecutionReport": { "columns": ["ExecutionReportId"] }
       }
     },
     "TransactionLine": {

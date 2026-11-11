@@ -97,6 +97,10 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Future"], cut.ChangedFutures, cut.DeletedFutures, dto => dto.AssetId.ToString());
                 Apply(tables["Option"], cut.ChangedOptions, cut.DeletedOptions, dto => dto.AssetId.ToString());
                 Apply(tables["PriceOverride"], cut.ChangedPriceOverrides, cut.DeletedPriceOverrides, dto => dto.PriceOverrideId.ToString());
+                Apply(tables["Order"], cut.ChangedOrders, cut.DeletedOrders, dto => dto.OrderId.ToString());
+                Apply(tables["Allocation"], cut.ChangedAllocations, cut.DeletedAllocations, dto => $"{dto.OrderId}/{dto.AccountId}");
+                Apply(tables["BrokerOrder"], cut.ChangedBrokerOrders, cut.DeletedBrokerOrders, dto => dto.BrokerOrderId.ToString());
+                Apply(tables["ExecutionReport"], cut.ChangedExecutionReports, cut.DeletedExecutionReports, dto => dto.ExecutionReportId.ToString());
                 Apply(tables["Transaction"], cut.ChangedTransactions, cut.DeletedTransactions, dto => dto.TransactionId.ToString());
                 Apply(tables["TransactionLine"], cut.ChangedTransactionLines, cut.DeletedTransactionLines, dto => $"{dto.TransactionId}/{dto.LineNumber}");
                 this.watermarks[cut.TenantId] = Math.Max(cut.Sequence, this.watermarks.GetValueOrDefault(cut.TenantId));

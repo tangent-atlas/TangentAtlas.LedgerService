@@ -86,11 +86,12 @@ namespace AtlasLedger.Server.Holdings
                     continue;
                 }
 
-                // Given: cost leaves at the average.  Giving more than is held (a record out of step with the broker's)
-                // leaves no cost behind rather than a negative one.
+                // Given: cost leaves at the average, kept to the ledger's money precision (four places) so the division leaves
+                // no residue.  Giving more than is held (a record out of step with the broker's) leaves no cost behind rather
+                // than a negative one.
                 var held = quantity;
                 quantity += line.Quantity;
-                cost = held > 0m && quantity > 0m ? cost * (quantity / held) : 0m;
+                cost = held > 0m && quantity > 0m ? Math.Round(cost * quantity / held, 4, MidpointRounding.ToEven) : 0m;
             }
 
             return new PositionState(account.AccountId, asset.AssetId, asset.AssetType, account.Currency, asset.QuoteCurrency, asset.QuantityFactor, asset.PriceFactor, quantity, isCostKnown ? cost : null, isOverridden, last, count);

@@ -63,6 +63,10 @@ namespace AtlasLedger.Client.Mirror
                         "Future" => await api.ListAsync<FutureDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Option" => await api.ListAsync<OptionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "PriceOverride" => await api.ListAsync<PriceOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Order" => await api.ListAsync<OrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Allocation" => await api.ListAsync<AllocationDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "BrokerOrder" => await api.ListAsync<BrokerOrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "ExecutionReport" => await api.ListAsync<ExecutionReportDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Transaction" => await api.ListAsync<TransactionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "TransactionLine" => await api.ListAsync<TransactionLineDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         _ => throw new InvalidOperationException($"The mirror does not know the table {table}; update it with the model."),
@@ -99,6 +103,10 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<FutureDto> futures: foreach (var dto in futures) { transaction.ApplyFuture(dto); } break;
                     case IReadOnlyList<OptionDto> options: foreach (var dto in options) { transaction.ApplyOption(dto); } break;
                     case IReadOnlyList<PriceOverrideDto> priceOverrides: foreach (var dto in priceOverrides) { transaction.ApplyPriceOverride(dto); } break;
+                    case IReadOnlyList<OrderDto> orders: foreach (var dto in orders) { transaction.ApplyOrder(dto); } break;
+                    case IReadOnlyList<AllocationDto> allocations: foreach (var dto in allocations) { transaction.ApplyAllocation(dto); } break;
+                    case IReadOnlyList<BrokerOrderDto> brokerOrders: foreach (var dto in brokerOrders) { transaction.ApplyBrokerOrder(dto); } break;
+                    case IReadOnlyList<ExecutionReportDto> executionReports: foreach (var dto in executionReports) { transaction.ApplyExecutionReport(dto); } break;
                     case IReadOnlyList<TransactionDto> transactions: foreach (var dto in transactions) { transaction.ApplyTransaction(dto); } break;
                     case IReadOnlyList<TransactionLineDto> transactionLines: foreach (var dto in transactionLines) { transaction.ApplyTransactionLine(dto); } break;
                 }

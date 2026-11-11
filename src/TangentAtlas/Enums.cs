@@ -81,6 +81,78 @@ namespace AtlasLedger.Model
     }
 
     /// <summary>
+    /// Which way an order trades.
+    /// </summary>
+    public enum OrderSide
+    {
+        /// <summary>Buys the asset: the accounts receive it and give cash.</summary>
+        Buy,
+
+        /// <summary>Sells the asset: the accounts give it and receive cash.</summary>
+        Sell,
+    }
+
+    /// <summary>
+    /// What created an order: filled in automatically, never typed.
+    /// </summary>
+    public enum OrderOrigin
+    {
+        /// <summary>A rebalance: the accounts brought back to their targets.</summary>
+        Rebalance,
+
+        /// <summary>A rule other than a rebalance (the rule's name is recorded with the order).</summary>
+        Rule,
+
+        /// <summary>An operator, by hand.</summary>
+        Manual,
+    }
+
+    /// <summary>
+    /// How a broker order is to be priced.
+    /// </summary>
+    public enum OrderType
+    {
+        /// <summary>At the market's price.</summary>
+        Market,
+
+        /// <summary>At the limit price or better.</summary>
+        Limit,
+    }
+
+    /// <summary>
+    /// How long a broker order stays working.
+    /// </summary>
+    public enum TimeInForce
+    {
+        /// <summary>Until the close of the day it was placed.</summary>
+        Day,
+
+        /// <summary>Until it is filled or cancelled.</summary>
+        GoodTillCancelled,
+    }
+
+    /// <summary>
+    /// What a broker reports about a broker order.
+    /// </summary>
+    public enum ExecutionReportType
+    {
+        /// <summary>The broker accepted the order: it is working.</summary>
+        Accepted,
+
+        /// <summary>Some or all of the order was executed: a quantity at a price, with fees.</summary>
+        Fill,
+
+        /// <summary>The order was cancelled; what was filled stays filled.</summary>
+        Cancelled,
+
+        /// <summary>The broker refused the order.</summary>
+        Rejected,
+
+        /// <summary>The order's time ran out; what was filled stays filled.</summary>
+        Expired,
+    }
+
+    /// <summary>
     /// The kinds of asset: the first level of the asset hierarchy. Each has an extension table holding what is particular to it.
     /// </summary>
     public enum AssetType

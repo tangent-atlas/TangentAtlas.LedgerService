@@ -33,11 +33,6 @@ namespace AtlasLedger.Server.Jobs
         public const string SectionName = "Jobs";
 
         /// <summary>
-        /// Gets or sets how often the scheduler compares the tenants' schedules with what it has scheduled.
-        /// </summary>
-        public TimeSpan ReconcileInterval { get; set; } = TimeSpan.FromSeconds(5);
-
-        /// <summary>
         /// Gets or sets a value indicating whether jobs marked for market days skip the NYSE's holidays (tests turn it off,
         /// so they run on any day).
         /// </summary>
@@ -51,6 +46,9 @@ namespace AtlasLedger.Server.Jobs
     {
         /// <summary>Scheduled: it will run at its next time.</summary>
         Scheduled,
+
+        /// <summary>Not scheduled: the row's IsEnabled is off.</summary>
+        Disabled,
 
         /// <summary>Not scheduled: no job has its key.</summary>
         UnknownJob,
@@ -98,14 +96,16 @@ namespace AtlasLedger.Server.Jobs
             this.states.Where(item => item.Key.TenantId == tenantId).Select(item => item.Value).OrderBy(state => state.Job, StringComparer.Ordinal).ThenBy(state => state.JobScheduleId).ToArray();
 
         /// <summary>
-        /// Sets a schedule's state.
+        /// Sets a schedule's state, keeping its last run.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
         /// <param name="state">The state.</param>
         public void Set(Guid tenantId, JobState state)
         {
             ArgumentNullException.ThrowIfNull(state);
-            this.states[(tenantId, state.JobScheduleId)] = state;
+
+            // A schedule changed or turned off keeps what its last run did: that run may have been the one just cancelled.
+            this.states.AddOrUpdate((tenantId, state.JobScheduleId), state, (_, previous) => state with { LastRun = previous.LastRun, LastOutcome = previous.LastOutcome });
         }
 
         /// <summary>
@@ -134,11 +134,12 @@ namespace AtlasLedger.Server.Jobs
     }
 
     /// <summary>
-    /// Runs every tenant's scheduled jobs, with Quartz.NET (in memory): each JobSchedule row is a cron trigger for the job
-    /// its key names, run for that tenant.  It starts after the tenants are recovered, and every few seconds compares each
-    /// tenant's rows with what it has scheduled: a new row is scheduled, a changed one rescheduled, a deleted one
-    /// unscheduled.  A missed run (the server down at its time) is skipped, not made up.  Jobs marked for market days skip
-    /// the NYSE's holidays.
+    /// Runs every tenant's scheduled jobs, with Quartz.NET (in memory): each enabled JobSchedule row is a cron trigger for
+    /// the job its key names, run for that tenant.  It starts after the tenants are recovered and watches each tenant's
+    /// commits (the same signal the rules engine waits on, outside the tenant's lock): after every commit it compares the
+    /// tenant's rows with what it has scheduled.  A new or changed row is (re)scheduled at once; a row turned off or deleted
+    /// is unscheduled, and a run of it in progress is cancelled.  A missed run (the server down at its time) is skipped, not
+    /// made up.  Jobs marked for market days skip the NYSE's holidays.
     /// </summary>
     public sealed partial class JobScheduler : BackgroundService
     {
@@ -158,7 +159,10 @@ namespace AtlasLedger.Server.Jobs
 
         private readonly ILogger<JobScheduler> logger;
 
-        private readonly Dictionary<(Guid TenantId, Guid JobScheduleId), (string Job, string CronSchedule, string TimeZone)> scheduled = new Dictionary<(Guid TenantId, Guid JobScheduleId), (string Job, string CronSchedule, string TimeZone)>();
+        // Each tenant's schedules as last acted on; a tenant's entry is touched only by its own watcher.
+        private readonly ConcurrentDictionary<Guid, Dictionary<Guid, Schedule>> tenants = new ConcurrentDictionary<Guid, Dictionary<Guid, Schedule>>();
+
+        private CancellationToken stopping;
 
         private IScheduler? scheduler;
 
@@ -231,58 +235,125 @@ namespace AtlasLedger.Server.Jobs
 
                 await this.scheduler.Start(stoppingToken).ConfigureAwait(false);
                 this.LogStarted(this.registry.All.Count, string.Join(", ", this.registry.All.Select(job => job.Key).Order(StringComparer.Ordinal)));
-                using var timer = new PeriodicTimer(this.options.ReconcileInterval);
-                do
+                this.stopping = stoppingToken;
+                this.ledger.PartitionCreated += this.OnPartitionCreated;
+                try
                 {
-                    await this.ReconcileAsync(this.scheduler, stoppingToken).ConfigureAwait(false);
+                    foreach (var partition in this.ledger.Partitions.ToArray())
+                    {
+                        this.Watch(partition);
+                    }
+
+                    await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
                 }
-                while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+                finally
+                {
+                    this.ledger.PartitionCreated -= this.OnPartitionCreated;
+                }
             }
             catch (OperationCanceledException)
             {
             }
         }
 
-        private async Task ReconcileAsync(IScheduler quartz, CancellationToken cancellationToken)
+        private void OnPartitionCreated(object? sender, LedgerPartition partition) => this.Watch(partition);
+
+        private void Watch(LedgerPartition partition)
         {
-            var wanted = new Dictionary<(Guid TenantId, Guid JobScheduleId), (string Job, string CronSchedule, string TimeZone)>();
-            foreach (var partition in this.ledger.Partitions.ToArray())
+            if (this.scheduler is { } quartz && this.tenants.TryAdd(partition.TenantId, new Dictionary<Guid, Schedule>()))
             {
-                if (partition.IsFaulted)
-                {
-                    continue;
-                }
-
-                lock (partition.SyncRoot)
-                {
-                    foreach (var row in partition.JobSchedules)
-                    {
-                        wanted[(partition.TenantId, row.JobScheduleId)] = (row.Job, row.CronSchedule, row.TimeZone);
-                    }
-                }
-            }
-
-            foreach (var key in this.scheduled.Keys.Where(key => !wanted.ContainsKey(key)).ToArray())
-            {
-                await quartz.DeleteJob(JobKeyOf(key), cancellationToken).ConfigureAwait(false);
-                this.scheduled.Remove(key);
-                this.status.Remove(key.TenantId, key.JobScheduleId);
-                this.LogUnscheduled(key.TenantId, key.JobScheduleId);
-            }
-
-            foreach (var (key, schedule) in wanted.Where(item => !this.scheduled.TryGetValue(item.Key, out var current) || current != item.Value))
-            {
-                this.scheduled[key] = schedule;
-                await this.ScheduleAsync(quartz, key, schedule, cancellationToken).ConfigureAwait(false);
+                _ = Task.Run(() => this.WatchAsync(quartz, partition, this.stopping), this.stopping);
             }
         }
 
-        private async Task ScheduleAsync(IScheduler quartz, (Guid TenantId, Guid JobScheduleId) key, (string Job, string CronSchedule, string TimeZone) schedule, CancellationToken cancellationToken)
+        /// <summary>
+        /// One tenant's watcher: acts on its rows, then waits for its next commit.  The sequence is read before acting, so a
+        /// commit made while acting wakes it again.
+        /// </summary>
+        private async Task WatchAsync(IScheduler quartz, LedgerPartition partition, CancellationToken cancellationToken)
+        {
+            var tenantId = partition.TenantId;
+            var scheduled = this.tenants[tenantId];
+            try
+            {
+                while (true)
+                {
+                    var seen = partition.CommittedSequence;
+                    if (partition.IsFaulted)
+                    {
+                        // The tenant is stopped: so are its jobs.
+                        await this.ReconcileAsync(quartz, tenantId, scheduled, new Dictionary<Guid, Schedule>(), cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+
+                    var wanted = new Dictionary<Guid, Schedule>();
+                    lock (partition.SyncRoot)
+                    {
+                        foreach (var row in partition.JobSchedules)
+                        {
+                            wanted[row.JobScheduleId] = new Schedule(row.Job, row.CronSchedule, row.TimeZone, row.IsEnabled);
+                        }
+                    }
+
+                    await this.ReconcileAsync(quartz, tenantId, scheduled, wanted, cancellationToken).ConfigureAwait(false);
+                    await partition.WaitForCommitAsync(seen, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                this.LogWatcherFailed(exception, tenantId);
+            }
+        }
+
+        private async Task ReconcileAsync(IScheduler quartz, Guid tenantId, Dictionary<Guid, Schedule> scheduled, Dictionary<Guid, Schedule> wanted, CancellationToken cancellationToken)
+        {
+            foreach (var id in scheduled.Keys.Where(id => !wanted.ContainsKey(id)).ToArray())
+            {
+                await StopAsync(quartz, (tenantId, id), cancellationToken).ConfigureAwait(false);
+                scheduled.Remove(id);
+                this.status.Remove(tenantId, id);
+                this.LogUnscheduled(tenantId, id);
+            }
+
+            foreach (var (id, schedule) in wanted.Where(item => !scheduled.TryGetValue(item.Key, out var current) || current != item.Value))
+            {
+                var isNew = !scheduled.ContainsKey(id);
+                scheduled[id] = schedule;
+                if (!isNew)
+                {
+                    await StopAsync(quartz, (tenantId, id), cancellationToken).ConfigureAwait(false);   // changed: what's running ran on the old row
+                }
+
+                await this.ScheduleAsync(quartz, (tenantId, id), schedule, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Unschedules a schedule and cancels a run of it in progress: the run's cancellation token fires, and the job stops
+        /// at its next safe point (a ledger transaction is never cut in half).
+        /// </summary>
+        private static async Task StopAsync(IScheduler quartz, (Guid TenantId, Guid JobScheduleId) key, CancellationToken cancellationToken)
         {
             var jobKey = JobKeyOf(key);
+            await quartz.Interrupt(jobKey, cancellationToken).ConfigureAwait(false);
             await quartz.DeleteJob(jobKey, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task ScheduleAsync(IScheduler quartz, (Guid TenantId, Guid JobScheduleId) key, Schedule schedule, CancellationToken cancellationToken)
+        {
+            var jobKey = JobKeyOf(key);
             JobState State(JobScheduleStatus status, string? message, DateTimeOffset? next) =>
                 new JobState(key.JobScheduleId, schedule.Job, schedule.CronSchedule, schedule.TimeZone, status, message, next, null, null);
+
+            if (!schedule.IsEnabled)
+            {
+                this.status.Set(key.TenantId, State(JobScheduleStatus.Disabled, null, null));
+                this.LogDisabled(key.TenantId, key.JobScheduleId, schedule.Job);
+                return;
+            }
 
             if (this.registry.Find(schedule.Job) is not { } job)
             {
@@ -334,6 +405,8 @@ namespace AtlasLedger.Server.Jobs
             this.LogScheduled(key.TenantId, job.Key, schedule.CronSchedule, schedule.TimeZone, first);
         }
 
+        private sealed record Schedule(string Job, string CronSchedule, string TimeZone, bool IsEnabled);
+
         private static JobKey JobKeyOf((Guid TenantId, Guid JobScheduleId) key) => new JobKey(key.JobScheduleId.ToString("N"), key.TenantId.ToString("N"));
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Jobs: scheduler started with {Count} job(s): {Jobs}.")]
@@ -347,6 +420,12 @@ namespace AtlasLedger.Server.Jobs
 
         [LoggerMessage(Level = LogLevel.Warning, Message = "Jobs, tenant {TenantId}: schedule {JobScheduleId} not scheduled: {Message}")]
         private partial void LogNotScheduled(Guid tenantId, Guid jobScheduleId, string message);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Jobs, tenant {TenantId}: {Job} (schedule {JobScheduleId}) turned off.")]
+        private partial void LogDisabled(Guid tenantId, Guid jobScheduleId, string job);
+
+        [LoggerMessage(Level = LogLevel.Error, Message = "Jobs, tenant {TenantId}: the scheduler stopped watching this tenant's schedules.")]
+        private partial void LogWatcherFailed(Exception exception, Guid tenantId);
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Jobs, tenant {TenantId}: schedule {JobScheduleId} removed.")]
         private partial void LogUnscheduled(Guid tenantId, Guid jobScheduleId);
@@ -429,7 +508,13 @@ namespace AtlasLedger.Server.Jobs
                 outcome = await instance.RunAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
                 this.LogRan(tenantId, key, outcome);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+            {
+                // Its schedule was turned off, changed or deleted, or the server is stopping.
+                outcome = "Cancelled.";
+                this.LogCancelled(tenantId, key);
+            }
+            catch (Exception exception)
             {
                 outcome = $"Failed: {exception.Message}";
                 this.LogFailed(exception, tenantId, key);
@@ -440,6 +525,9 @@ namespace AtlasLedger.Server.Jobs
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Jobs, tenant {TenantId}: {Job} ran: {Outcome}")]
         private partial void LogRan(Guid tenantId, string job, string outcome);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Jobs, tenant {TenantId}: {Job} cancelled.")]
+        private partial void LogCancelled(Guid tenantId, string job);
 
         [LoggerMessage(Level = LogLevel.Error, Message = "Jobs, tenant {TenantId}: {Job} failed.")]
         private partial void LogFailed(Exception exception, Guid tenantId, string job);

@@ -16,6 +16,7 @@ namespace AtlasLedger.Tests
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Client.TestData;
     using client::AtlasLedger.Model;
+    using Microsoft.Extensions.DependencyInjection;
     using Quartz;
     using Quartz.Spi;
     using server::AtlasLedger.Server;
@@ -69,7 +70,6 @@ namespace AtlasLedger.Tests
                 "--MarketFeed:TickInterval=00:00:00.100",
                 "--MarketFeed:BadPrintInterval=1.00:00:00",
                 "--Broker:PollInterval=00:00:00.100",
-                "--Jobs:ReconcileInterval=00:00:00.100",
                 "--Jobs:MarketHolidays=false",
             ]);
             await server.InitializeAsync();
@@ -86,9 +86,9 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(
                 tenantId,
                 new LedgerScript()
-                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = everySecond, Job = "GenerateOrders", CronSchedule = "* * * * * ?", TimeZone = "Etc/UTC" })
-                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = Guid.NewGuid(), Job = "SendNewsletter", CronSchedule = "0 0 9 * * ?", TimeZone = "Etc/UTC" })
-                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = Guid.NewGuid(), Job = "GenerateOrders", CronSchedule = "0 0 9 * * ?", TimeZone = "Atlantis/Capital" }),
+                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = everySecond, Job = "GenerateOrders", CronSchedule = "* * * * * ?", TimeZone = "Etc/UTC", IsEnabled = true })
+                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = Guid.NewGuid(), Job = "SendNewsletter", CronSchedule = "0 0 9 * * ?", TimeZone = "Etc/UTC", IsEnabled = true })
+                    .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = Guid.NewGuid(), Job = "GenerateOrders", CronSchedule = "0 0 9 * * ?", TimeZone = "Atlantis/Capital", IsEnabled = true }),
                 cancellationToken);
 
             // The job orders what the model proposes once prices arrive; the broker fills it; later runs find nothing to do.
@@ -118,7 +118,6 @@ namespace AtlasLedger.Tests
                 "--Services:StartOn=rules,market-feed",
                 "--MarketFeed:TickInterval=00:00:00.100",
                 "--MarketFeed:BadPrintInterval=1.00:00:00",
-                "--Jobs:ReconcileInterval=00:00:00.100",
                 "--Jobs:MarketHolidays=false",
             ]);
             await server.InitializeAsync();
@@ -131,11 +130,49 @@ namespace AtlasLedger.Tests
             await OrderRoutingTests.WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
 
             var everySecond = Guid.NewGuid();
-            await tool.ApplyAsync(tenantId, new LedgerScript().Insert("JobSchedule", new JobScheduleDto { JobScheduleId = everySecond, Job = "GenerateOrders", CronSchedule = "* * * * * ?", TimeZone = "Etc/UTC" }), cancellationToken);
+            await tool.ApplyAsync(tenantId, new LedgerScript().Insert("JobSchedule", new JobScheduleDto { JobScheduleId = everySecond, Job = "GenerateOrders", CronSchedule = "* * * * * ?", TimeZone = "Etc/UTC", IsEnabled = true }), cancellationToken);
             await OrderRoutingTests.WaitForAsync(
                 () => tool.GetJobsAsync(tenantId, cancellationToken),
                 found => found.Schedules.SingleOrDefault(schedule => schedule.JobScheduleId == everySecond)?.LastOutcome == "Skipped: trading is switched off.");
             Assert.Empty(await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken));
+        }
+
+        [Fact]
+        public async Task TurningAScheduleOffOrDeletingItCancelsARunInProgress()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            SlowJob.Reset();
+            var registry = JobRegistry.Discover(typeof(AtlasLedgerServer).Assembly);
+            await using var server = ServerFixture.With(
+                ["--Jobs:MarketHolidays=false"],
+                services => services.AddSingleton(new JobRegistry([.. registry.All, new JobDescriptor("Slow", typeof(SlowJob), MarketDaysOnly: false)])));
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var id = Guid.NewGuid();
+            static JobScheduleDto Row(Guid id, bool isEnabled, long rowVersion = 0) =>
+                new JobScheduleDto { JobScheduleId = id, Job = "Slow", CronSchedule = "* * * * * ?", TimeZone = "Etc/UTC", IsEnabled = isEnabled, RowVersion = rowVersion };
+            await tool.ApplyAsync(tenantId, new LedgerScript().Insert("JobSchedule", Row(id, isEnabled: true)), cancellationToken);
+
+            // It starts within a second of the commit, and runs until it is stopped.
+            await SlowJob.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+            // Turned off: the run in progress is cancelled at once, and it is not scheduled again.
+            var current = (await tool.ListAsync<JobScheduleDto>(tenantId, "JobSchedule", cancellationToken)).Single();
+            await tool.ApplyAsync(tenantId, new LedgerScript().Update("JobSchedule", new { JobScheduleId = id }, Row(id, isEnabled: false, current.RowVersion)), cancellationToken);
+            await SlowJob.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            var jobs = await OrderRoutingTests.WaitForAsync(() => tool.GetJobsAsync(tenantId, cancellationToken), found => found.Schedules.SingleOrDefault() is { Status: "Disabled", LastOutcome: "Cancelled." });
+            Assert.Equal(("Disabled", (DateTimeOffset?)null), (jobs.Schedules.Single().Status, jobs.Schedules.Single().NextRun));
+
+            // On again: it runs again; deleted: that run is cancelled too, and the schedule is gone.
+            SlowJob.Reset();
+            current = (await tool.ListAsync<JobScheduleDto>(tenantId, "JobSchedule", cancellationToken)).Single();
+            await tool.ApplyAsync(tenantId, new LedgerScript().Update("JobSchedule", new { JobScheduleId = id }, Row(id, isEnabled: true, current.RowVersion)), cancellationToken);
+            await SlowJob.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            current = (await tool.ListAsync<JobScheduleDto>(tenantId, "JobSchedule", cancellationToken)).Single();
+            await tool.ApplyAsync(tenantId, new LedgerScript().Delete("JobSchedule", new { JobScheduleId = id }, current.RowVersion), cancellationToken);
+            await SlowJob.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            Assert.Empty((await tool.GetJobsAsync(tenantId, cancellationToken)).Schedules);
         }
 
         private static DateTimeOffset FirstRun(DateTimeOffset after, ICalendar? calendar)
@@ -147,6 +184,37 @@ namespace AtlasLedger.Tests
             var first = trigger.ComputeFirstFireTimeUtc(calendar);
             Assert.NotNull(first);
             return TimeZoneInfo.ConvertTime(first.Value, NewYork);
+        }
+
+        /// <summary>
+        /// A job that runs until it is cancelled.
+        /// </summary>
+        private sealed class SlowJob : ITenantJob
+        {
+            public static TaskCompletionSource Started { get; private set; } = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public static TaskCompletionSource Cancelled { get; private set; } = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public static void Reset()
+            {
+                Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            public async Task<string> RunAsync(Guid tenantId, CancellationToken cancellationToken)
+            {
+                Started.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    return "Finished.";
+                }
+                catch (OperationCanceledException)
+                {
+                    Cancelled.TrySetResult();
+                    throw;
+                }
+            }
         }
     }
 }

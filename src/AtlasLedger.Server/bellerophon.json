@@ -313,11 +313,12 @@
       }
     },
     "JobSchedule": {
-      "description": "When a job runs for this tenant: Job is the job's key (the [Job] attribute on its class, such as GenerateOrders), CronSchedule a Quartz cron expression, TimeZone the IANA zone it is read in. A job marked for market days skips the NYSE's holidays. A missed run is skipped, not made up. Deleting the row stops the job for this tenant.",
+      "description": "When a job runs for this tenant: Job is the job's key (the [Job] attribute on its class, such as GenerateOrders), CronSchedule a Quartz cron expression, TimeZone the IANA zone it is read in. A job marked for market days skips the NYSE's holidays. A missed run is skipped, not made up. The scheduler acts on each commit: an inserted or changed row is (re)scheduled at once; turning IsEnabled off or deleting the row unschedules the job and cancels a run in progress.",
       "key": ["JobScheduleId"],
       "columns": {
         "CronSchedule": { "maxLength": 128, "type": "string" },
         "Description": { "maxLength": 256, "type": "string?" },
+        "IsEnabled": "bool",
         "Job": { "maxLength": 64, "type": "string" },
         "JobScheduleId": "guid",
         "TimeZone": { "maxLength": 64, "type": "string" }

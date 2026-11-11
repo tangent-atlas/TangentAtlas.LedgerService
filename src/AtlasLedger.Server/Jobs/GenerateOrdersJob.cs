@@ -41,6 +41,7 @@ namespace AtlasLedger.Server.Jobs
                 return Task.FromResult("Skipped: trading is switched off.");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();   // the last safe point: the orders are written in one transaction
             var result = this.generator.Generate(tenantId);
             return Task.FromResult(result.Reason is { } reason
                 ? $"Nothing written: {reason}"

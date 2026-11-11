@@ -82,15 +82,19 @@ application permission (the operator console, not the script loader) may use it,
 ## Scheduled jobs
 
 Jobs run on Quartz.NET, in memory.  Each tenant's `JobSchedule` rows say what runs when: `Job` names a job by its key,
-`CronSchedule` is a Quartz cron expression (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on weekdays), and `TimeZone`
-is the IANA zone it is read in (`America/New_York`).  A job is a class implementing `ITenantJob` with a `[Job("key")]`
-attribute (`src/AtlasLedger.Server/Jobs`); the server finds them at start-up, and two with one key stop it starting.  The
-scheduler compares the rows with what it has scheduled every few seconds (`Jobs:ReconcileInterval`): add a row to
-schedule a job, change it to reschedule, delete it to stop.  A job marked for market days skips the NYSE's holidays
-(listed through 2028 in `MarketCalendar`; early closings still run).  A run missed while the server was down is skipped,
-not made up.  Nothing about runs is persisted: `ledger-operator jobs <tenant>` (`v1/tenants/{id}/jobs`) shows each
-schedule, why it isn't scheduled if it isn't (an unknown key, a bad expression or zone), its next run, and what its last
-run since start-up did.
+`CronSchedule` is a Quartz cron expression (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on weekdays), `TimeZone` is
+the IANA zone it is read in (`America/New_York`), and `IsEnabled` turns it on or off.  A job is a class implementing
+`ITenantJob` with a `[Job("key")]` attribute (`src/AtlasLedger.Server/Jobs`); the server finds them at start-up, and two
+with one key stop it starting.
+
+The scheduler is driven by the ledger's commits, not a timer: it waits on each tenant's commit signal (the one the rules
+engine uses), and after each commit compares the tenant's rows with what it has scheduled.  An inserted or changed row
+is (re)scheduled at once; a row turned off or deleted is unscheduled, and a run of it in progress is cancelled (its
+cancellation token fires; a job stops at its next safe point, and a ledger transaction is never cut in half).  A job
+marked for market days skips the NYSE's holidays (listed through 2028 in `MarketCalendar`; early closings still run).  A
+run missed while the server was down is skipped, not made up.  Nothing about runs is persisted:
+`ledger-operator jobs <tenant>` (`v1/tenants/{id}/jobs`) shows each schedule, why it isn't scheduled if it isn't
+(turned off, an unknown key, a bad expression or zone), its next run, and what its last run since start-up did.
 
 | Job | Market days | Does |
 | --- | --- | --- |

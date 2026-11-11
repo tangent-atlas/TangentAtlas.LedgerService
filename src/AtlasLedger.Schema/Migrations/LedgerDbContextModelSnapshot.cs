@@ -501,6 +501,9 @@ namespace AtlasLedger.Schema.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Job")
                         .IsRequired()
                         .HasMaxLength(64)

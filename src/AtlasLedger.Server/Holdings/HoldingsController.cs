@@ -30,8 +30,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
     /// account's currency, if there is a price and a rate.</param>
     /// <param name="Weight">Its share of the account's value, if every holding has a value.</param>
-    /// <param name="TargetWeight">Its weight in the account's model, if the model has weights (none for an asset the model
-    /// leaves out; cash is what the weights leave over).</param>
+    /// <param name="TargetWeight">Its weight in the account's model, if the account has a model (none for cash, which is what
+    /// the weights leave over).</param>
     public sealed record HoldingDto(
         Guid AccountId,
         Guid AssetId,
@@ -56,9 +56,9 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Cash">The value of its cash.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     /// <param name="Gain">Market value less net contributions.</param>
-    /// <param name="ModelId">The account's model.</param>
+    /// <param name="ModelId">The account's model; null when it is not rebalanced.</param>
     /// <param name="ModelName">The model's name.</param>
-    /// <param name="TargetCash">The share the model's weights leave in cash, if it has weights.</param>
+    /// <param name="TargetCash">The share the model's weights leave in cash, if it has a model.</param>
     /// <param name="LastRebalance">The last trading day the account was rebalanced, if ever.</param>
     /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
     public sealed record AccountSummaryDto(
@@ -142,7 +142,7 @@ namespace AtlasLedger.Server.Holdings
             var models = snapshot.Models.ToDictionary(model => model.ModelId);
             var weights = accountIds.ToDictionary(
                 accountId => accountId,
-                accountId => accountFacts.TryGetValue(accountId, out var account) ? Rebalancing.WeightsOf(snapshot.Weights, account.ModelId) : new Dictionary<Guid, decimal>());
+                accountId => accountFacts.TryGetValue(accountId, out var account) && account.ModelId is { } modelId ? Rebalancing.WeightsOf(snapshot.Weights, modelId) : new Dictionary<Guid, decimal>());
 
             var holdings = held
                 .OrderBy(position => position.AccountId)
@@ -167,7 +167,7 @@ namespace AtlasLedger.Server.Holdings
                         position.AccountCurrency,
                         value,
                         value is { } worth && total is > 0m ? worth / total.Value : null,
-                        targets.Count == 0 || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
+                        accountFacts.GetValueOrDefault(position.AccountId)?.ModelId is null || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
                 })
                 .ToArray();
 
@@ -179,7 +179,7 @@ namespace AtlasLedger.Server.Holdings
                     var cash = positions.Where(position => position.AssetType == AssetType.Cash).Sum(position => values[(position.AccountId, position.AssetId)] ?? 0m);
                     var contributions = snapshot.Flows.FirstOrDefault(flow => flow.AccountId == accountId)?.NetContributions ?? 0m;
                     var total = totals[accountId];
-                    var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : (Guid?)null;
+                    var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : null;
                     var targets = weights[accountId];
                     var last = snapshot.Rebalances.Where(rebalance => rebalance.AccountId == accountId).OrderByDescending(rebalance => rebalance.TradingDay).FirstOrDefault();
                     return new AccountSummaryDto(
@@ -191,7 +191,7 @@ namespace AtlasLedger.Server.Holdings
                         total - contributions,
                         modelId,
                         modelId is { } id && models.TryGetValue(id, out var model) ? model.Name : null,
-                        targets.Count == 0 ? null : 1m - targets.Values.Sum(),
+                        modelId is null ? null : 1m - targets.Values.Sum(),
                         last?.TradingDay,
                         last?.OrderCount);
                 })

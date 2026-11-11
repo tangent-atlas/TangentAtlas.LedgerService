@@ -38,7 +38,7 @@ namespace AtlasLedger.Schema.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
-                    b.Property<Guid>("ModelId")
+                    b.Property<Guid?>("ModelId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<long>("RowVersion")

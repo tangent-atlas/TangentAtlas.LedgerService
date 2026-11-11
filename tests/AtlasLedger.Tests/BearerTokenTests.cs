@@ -214,10 +214,9 @@ namespace AtlasLedger.Tests
 
         private static LedgerScript Firm() => new LedgerScript()
             .Insert("Node", new NodeDto { NodeId = Guid.Parse("5a000000-0000-0000-0000-000000000001"), DisplayName = "Smith Trust", FullName = "Smith Family Trust", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-            .Insert("Model", new ModelDto { ModelId = Guid.Parse("5a000000-0000-0000-0000-0000000000f0"), Name = "No weights" })
             .Insert("Node", new NodeDto { NodeId = Guid.Parse("5a000000-0000-0000-0000-000000000002"), DisplayName = "Lee 401k", FullName = "Lee Family 401(k) Plan", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-            .Insert("Account", new AccountDto { AccountId = Guid.Parse("5a000000-0000-0000-0000-000000000001"), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.Parse("5a000000-0000-0000-0000-0000000000f0") })
-            .Insert("Account", new AccountDto { AccountId = Guid.Parse("5a000000-0000-0000-0000-000000000002"), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.Parse("5a000000-0000-0000-0000-0000000000f0") })
+            .Insert("Account", new AccountDto { AccountId = Guid.Parse("5a000000-0000-0000-0000-000000000001"), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar })
+            .Insert("Account", new AccountDto { AccountId = Guid.Parse("5a000000-0000-0000-0000-000000000002"), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar })
             .Insert("User", new UserDto { UserId = Guid.Parse("5a000000-0000-0000-0000-0000000000a1"), IdentityIssuer = Authority, IdentitySubject = MemberObjectId });
 
         private static async Task<HttpStatusCode> StatusOf(Func<Task> call)

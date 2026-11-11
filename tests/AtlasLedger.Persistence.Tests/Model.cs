@@ -43,14 +43,14 @@ namespace AtlasLedger.Persistence.Tests
             var keys = new Keys();
             using var transaction = partition.BeginTransaction();
 
-            // Every account has a model (the ledger's table, not this class).
-            var model = transaction.InsertModel(new server::AtlasLedger.Model.Primary.Model { ModelId = Guid.NewGuid(), Name = "No weights" });
+            // A model (the ledger's table, not this class), for the first account: the others are not rebalanced.
+            var model = transaction.InsertModel(new server::AtlasLedger.Model.Primary.Model { ModelId = Guid.NewGuid(), Name = "Model" });
             for (var index = 0; index < 4; index++)
             {
                 var node = NewNode("Account" + index);
                 node.Description = index % 2 == 0 ? null : "Described " + index;
                 keys.Accounts.Add(transaction.InsertNode(node).NodeId);
-                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = (AccountType)(index % 3), Currency = "USD", ModelId = model.ModelId });
+                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = (AccountType)(index % 3), Currency = "USD", ModelId = index == 0 ? model.ModelId : null });
                 transaction.InsertSymbol(new Symbol { Scheme = "Custodian", Code = "C" + index.ToString(CultureInfo.InvariantCulture), NodeId = node.NodeId });
             }
 

@@ -126,7 +126,7 @@ namespace AtlasLedger.Server.Orders
     }
 
     /// <summary>
-    /// Rebalances an account once a trading day: when its time has come and it has no rebalance for the day yet, it plans
+    /// Rebalances an account that has a model (an account without one is never rebalanced) once a trading day: when its time has come and it has no rebalance for the day yet, it plans
     /// the trades (<see cref="Rebalancing.Plan"/>) and records, in one transaction, the rebalance and an order, an
     /// allocation and a market broker order for each trade.  The next cycle sees the rebalance as a fact, so the account is
     /// rebalanced once that day.  It fires after every other rule (lowest priority), so it sees the holdings, prices and
@@ -154,7 +154,7 @@ namespace AtlasLedger.Server.Orders
             this.When()
                 .Match(() => setting)
                 .Match(() => clock, candidate => Rebalancing.IsDue(candidate.Now, setting))
-                .Match(() => account, candidate => candidate.AccountId == setting.AccountId)
+                .Match(() => account, candidate => candidate.AccountId == setting.AccountId, candidate => candidate.ModelId != null)
                 .Not<RebalanceFact>(item => item.AccountId == setting.AccountId, item => item.TradingDay == Rebalancing.TradingDay(clock.Now))
                 .Query(() => weights, query => query.Match<WeightFact>(item => item.ModelId == account.ModelId).Collect())
                 .Query(() => positions, query => query.Match<PositionState>(item => item.AccountId == setting.AccountId).Collect())
@@ -179,12 +179,7 @@ namespace AtlasLedger.Server.Orders
             IEnumerable<OrderState> orders)
         {
             var day = Rebalancing.TradingDay(clock.Now);
-            var weights = Rebalancing.WeightsOf(modelWeights, account.ModelId);
-            if (weights.Count == 0)
-            {
-                return;   // a model with no weights says nothing to do: it never sells the account to cash
-            }
-
+            var weights = Rebalancing.WeightsOf(modelWeights, account.ModelId!.Value);
             var plan = Rebalancing.Plan(
                 account,
                 weights,

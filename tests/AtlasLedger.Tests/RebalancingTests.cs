@@ -82,6 +82,17 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public void AModelWithNoWeightsIsAllCash()
+        {
+            var plan = Plan(
+                new Dictionary<Guid, decimal>(),
+                [Position(Dollar, 700_000m), Position(Alpha, 3_000m)],
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m });
+
+            Assert.Equal([(Alpha.AssetId, OrderSide.Sell, 3_000m)], plan!.Select(trade => (trade.AssetId, trade.Side, trade.Quantity)));
+        }
+
+        [Fact]
         public void OpenOrdersCountAsAlreadyBought()
         {
             var plan = Plan(

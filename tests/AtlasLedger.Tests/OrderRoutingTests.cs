@@ -97,6 +97,29 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public async Task AnAccountWithoutAModelIsNotRebalanced()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(Trading);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            var account = (await tool.ListAsync<AccountDto>(tenantId, "Account", cancellationToken)).Single();
+            await tool.ApplyAsync(tenantId, new LedgerScript().Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = account.AccountType, Currency = account.Currency, ModelId = null, RowVersion = account.RowVersion }), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Plan(EventSource.Simulator, timeOfDay: 0, weekdaysOnly: false), cancellationToken);
+
+            // The plan, the weights and the prices are all there; without a model the account is left alone.
+            var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count == 1);
+            await Task.Delay(1_500, cancellationToken);
+            Assert.Empty(await tool.ListAsync<RebalanceDto>(tenantId, "Rebalance", cancellationToken));
+            Assert.Equal((null, null), (holdings.Accounts.Single().ModelId, holdings.Accounts.Single().TargetCash));
+        }
+
+        [Fact]
         public async Task AnOpenOrderCanBeCancelled()
         {
             var cancellationToken = TestContext.Current.CancellationToken;

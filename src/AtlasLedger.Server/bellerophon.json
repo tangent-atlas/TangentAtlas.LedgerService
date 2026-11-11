@@ -39,12 +39,12 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
-      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: the weights it is to hold (every account has one, perhaps with no weights).",
+      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: a value says the account is to be rebalanced to that model's weights; null says it is not rebalanced.",
       "columns": {
         "AccountId": "guid",
         "AccountType": "accountType",
         "Currency": { "maxLength": 3, "type": "string" },
-        "ModelId": "guid"
+        "ModelId": "guid?"
       },
       "key": ["AccountId"],
       "references": {
@@ -290,7 +290,7 @@
       }
     },
     "Model": {
-      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value). Every account has one, even if it has no weights; many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold.",
+      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value). Many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold: a model with no weights is all cash.",
       "key": ["ModelId"],
       "columns": {
         "ModelId": "guid",

@@ -82,6 +82,14 @@ namespace AtlasLedger.Server.Holdings
     public sealed record CurrencyRate(string FromCurrency, string ToCurrency, decimal Rate);
 
     /// <summary>
+    /// What has been paid into an account less what has been taken out: its deposits less its withdrawals, in the account's
+    /// currency.  Derived; never persisted.  (Opening balances are not counted: they bring holdings, not money paid in.)
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="NetContributions">Deposits less withdrawals.</param>
+    public sealed record AccountFlow(Guid AccountId, decimal NetContributions);
+
+    /// <summary>
     /// A price override that is in force now.
     /// </summary>
     /// <param name="Override">The override.</param>

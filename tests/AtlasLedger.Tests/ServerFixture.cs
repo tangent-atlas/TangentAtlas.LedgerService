@@ -19,7 +19,34 @@ namespace AtlasLedger.Tests
     /// </summary>
     public sealed class ServerFixture : IAsyncLifetime
     {
+        private readonly string[] extraArgs;
+
+        private readonly Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices;
+
         private WebApplication? application;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ServerFixture"/> class, with the test settings.
+        /// </summary>
+        public ServerFixture()
+            : this(Array.Empty<string>(), null)
+        {
+        }
+
+        private ServerFixture(string[] extraArgs, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices)
+        {
+            this.extraArgs = extraArgs;
+            this.configureServices = configureServices;
+        }
+
+        /// <summary>
+        /// Makes a server with more settings and services than the test settings (a fixture for a class has one constructor).
+        /// </summary>
+        /// <param name="extraArgs">Settings that override the test settings (for example <c>--Services:StartOn=rules,broker</c>).</param>
+        /// <param name="configureServices">Changes to the services, after the server's own.</param>
+        /// <returns>The server, not started yet (call <see cref="InitializeAsync"/>).</returns>
+        public static ServerFixture With(string[] extraArgs, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices = null) =>
+            new ServerFixture(extraArgs, configureServices);
 
         /// <summary>
         /// Gets an HTTP client addressed to the server.
@@ -39,7 +66,7 @@ namespace AtlasLedger.Tests
                 "--Logging:LogLevel:Default=None",
                 "--Logging:LogLevel:Microsoft.Hosting.Lifetime=None",
                 "--Logging:LogLevel:AtlasLedger=None",
-            });
+            }.Concat(this.extraArgs).ToArray(), this.configureServices);
             await this.application.StartAsync().ConfigureAwait(false);
             this.HttpClient = new HttpClient { BaseAddress = new Uri(this.application.Urls.First() + "/") };
         }

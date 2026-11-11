@@ -9,6 +9,7 @@ namespace AtlasLedger.Server.Holdings
     using System.Linq;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Orders;
     using Microsoft.AspNetCore.Authorization;
     using Microsoft.AspNetCore.Http;
     using Microsoft.AspNetCore.Mvc;
@@ -28,6 +29,9 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Currency">The account's currency: the cost basis and market value are in it.</param>
     /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
     /// account's currency, if there is a price and a rate.</param>
+    /// <param name="Weight">Its share of the account's value, if every holding has a value.</param>
+    /// <param name="TargetWeight">Its target share in the weights in force today, if the account has targets (none for an
+    /// asset the targets leave out; cash is what the targets leave over).</param>
     public sealed record HoldingDto(
         Guid AccountId,
         Guid AssetId,
@@ -39,7 +43,34 @@ namespace AtlasLedger.Server.Holdings
         string QuoteCurrency,
         PriceSource? PriceSource,
         string Currency,
-        decimal? MarketValue);
+        decimal? MarketValue,
+        decimal? Weight,
+        decimal? TargetWeight);
+
+    /// <summary>
+    /// An account's totals, for the dashboard.
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="Currency">The account's currency: every amount is in it.</param>
+    /// <param name="MarketValue">Every holding's value, cash included; null while a holding has no value.</param>
+    /// <param name="Cash">The value of its cash.</param>
+    /// <param name="NetContributions">Deposits less withdrawals.</param>
+    /// <param name="Gain">Market value less net contributions.</param>
+    /// <param name="TargetsAsOf">The date of the target weights in force today, if any.</param>
+    /// <param name="TargetCash">The share the targets leave in cash.</param>
+    /// <param name="LastRebalance">The last trading day the account was rebalanced, if ever.</param>
+    /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
+    public sealed record AccountSummaryDto(
+        Guid AccountId,
+        string Currency,
+        decimal? MarketValue,
+        decimal Cash,
+        decimal NetContributions,
+        decimal? Gain,
+        DateOnly? TargetsAsOf,
+        decimal? TargetCash,
+        DateOnly? LastRebalance,
+        int? LastRebalanceOrders);
 
     /// <summary>
     /// A tenant's holdings and prices at the end of the last rules cycle.
@@ -49,7 +80,8 @@ namespace AtlasLedger.Server.Holdings
     /// currency.</param>
     /// <param name="Prices">Each priced asset's effective price.</param>
     /// <param name="Rates">Each published rate between currencies.</param>
-    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates);
+    /// <param name="Accounts">Each account's totals.</param>
+    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummaryDto> Accounts);
 
     /// <summary>
     /// Serves what the tenant's transactions add up to: the rules' published snapshot, never the ledger's tables.
@@ -89,14 +121,34 @@ namespace AtlasLedger.Server.Holdings
 
             var prices = snapshot.Prices.ToDictionary(price => price.AssetId);
             var rates = snapshot.Rates.ToDictionary(rate => (rate.FromCurrency, rate.ToCurrency), rate => rate.Rate);
-            var holdings = snapshot.Positions
-                .Where(position => position.Quantity != 0m)
+            var today = Rebalancing.TradingDay(snapshot.AsOf);
+            var held = snapshot.Positions.Where(position => position.Quantity != 0m).ToArray();
+            var values = held.ToDictionary(position => (position.AccountId, position.AssetId), position => HoldingFold.MarketValue(position, prices.GetValueOrDefault(position.AssetId), rates));
+            var accountIds = held.Select(position => position.AccountId)
+                .Concat(snapshot.Flows.Select(flow => flow.AccountId))
+                .Concat(snapshot.Targets.Select(target => target.AccountId))
+                .Distinct()
+                .OrderBy(accountId => accountId)
+                .ToArray();
+            var totals = accountIds.ToDictionary(
+                accountId => accountId,
+                accountId =>
+                {
+                    var accountValues = held.Where(position => position.AccountId == accountId).Select(position => values[(position.AccountId, position.AssetId)]).ToArray();
+                    return accountValues.Any(value => value is null) ? (decimal?)null : accountValues.Sum(value => value!.Value);
+                });
+            var weights = accountIds.ToDictionary(accountId => accountId, accountId => Rebalancing.WeightsInForce(snapshot.Targets.Where(target => target.AccountId == accountId), today));
+
+            var holdings = held
                 .OrderBy(position => position.AccountId)
                 .ThenBy(position => position.AssetType)
                 .ThenBy(position => position.AssetId)
                 .Select(position =>
                 {
                     var price = prices.GetValueOrDefault(position.AssetId);
+                    var value = values[(position.AccountId, position.AssetId)];
+                    var total = totals[position.AccountId];
+                    var targets = weights[position.AccountId];
                     return new HoldingDto(
                         position.AccountId,
                         position.AssetId,
@@ -108,14 +160,43 @@ namespace AtlasLedger.Server.Holdings
                         position.QuoteCurrency,
                         price?.Source,
                         position.AccountCurrency,
-                        HoldingFold.MarketValue(position, price, rates));
+                        value,
+                        value is { } worth && total is > 0m ? worth / total.Value : null,
+                        targets.Count == 0 || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
                 })
                 .ToArray();
+
+            var accounts = accountIds
+                .Select(accountId =>
+                {
+                    var positions = held.Where(position => position.AccountId == accountId).ToArray();
+                    var currency = positions.FirstOrDefault()?.AccountCurrency ?? string.Empty;
+                    var cash = positions.Where(position => position.AssetType == AssetType.Cash).Sum(position => values[(position.AccountId, position.AssetId)] ?? 0m);
+                    var contributions = snapshot.Flows.FirstOrDefault(flow => flow.AccountId == accountId)?.NetContributions ?? 0m;
+                    var total = totals[accountId];
+                    var targetDates = snapshot.Targets.Where(target => target.AccountId == accountId && target.EffectiveDate <= today).Select(target => (DateOnly?)target.EffectiveDate);
+                    var targets = weights[accountId];
+                    var last = snapshot.Rebalances.Where(rebalance => rebalance.AccountId == accountId).OrderByDescending(rebalance => rebalance.TradingDay).FirstOrDefault();
+                    return new AccountSummaryDto(
+                        accountId,
+                        currency,
+                        total,
+                        cash,
+                        contributions,
+                        total - contributions,
+                        targetDates.Max(),
+                        targets.Count == 0 ? null : 1m - targets.Values.Sum(),
+                        last?.TradingDay,
+                        last?.OrderCount);
+                })
+                .ToArray();
+
             return this.Ok(new HoldingsDto(
                 snapshot.AsOf,
                 holdings,
                 snapshot.Prices.OrderBy(price => price.AssetId).ToArray(),
-                snapshot.Rates.OrderBy(rate => rate.FromCurrency, StringComparer.Ordinal).ThenBy(rate => rate.ToCurrency, StringComparer.Ordinal).ToArray()));
+                snapshot.Rates.OrderBy(rate => rate.FromCurrency, StringComparer.Ordinal).ThenBy(rate => rate.ToCurrency, StringComparer.Ordinal).ToArray(),
+                accounts));
         }
     }
 }

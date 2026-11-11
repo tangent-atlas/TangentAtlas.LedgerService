@@ -131,14 +131,14 @@ namespace AtlasLedger.Client
                 output.WriteLine();
                 var currency = account.First().Currency;
                 output.WriteLine($"{(nodes.TryGetValue(account.Key, out var accountNode) ? accountNode.FullName : account.Key.ToString())} (in {currency})");
-                output.WriteLine($"  {"Asset",-10} {"Type",-12} {"Quantity",16} {"Price",16} {"Value",16} {"Weight",7}  Price from");
+                output.WriteLine($"  {"Asset",-10} {"Type",-12} {"Quantity",16} {"Price",16} {"Value",16} {"Weight",7} {"Target",7}  Price from");
                 foreach (var holding in account.OrderByDescending(holding => holding.MarketValue ?? 0m))
                 {
                     var name = nodes.TryGetValue(holding.AssetId, out var assetNode) ? assetNode.DisplayName : holding.AssetId.ToString()[..8];
                     var flag = holding.IsOverridden ? "  (overridden)" : string.Empty;
                     output.WriteLine(string.Format(
                         english,
-                        "  {0,-10} {1,-12} {2,16:#,0.######} {3,16} {4,16} {5,7}  {6}{7}",
+                        "  {0,-10} {1,-12} {2,16:#,0.######} {3,16} {4,16} {5,7} {8,7}  {6}{7}",
                         name,
                         holding.AssetType,
                         holding.Quantity,
@@ -146,10 +146,22 @@ namespace AtlasLedger.Client
                         holding.MarketValue is { } value ? value.ToString("#,0.00", english) : "-",
                         total == 0m || holding.MarketValue is null ? "-" : (holding.MarketValue.Value / total).ToString("P1", english),
                         holding.PriceSource ?? "none",
-                        flag));
+                        flag,
+                        holding.TargetWeight is { } target ? target.ToString("P1", english) : "-"));
                 }
 
                 output.WriteLine(string.Format(english, "  {0,-10} {1,-12} {2,16} {3,16} {4,16:#,0.00}", "Total", string.Empty, string.Empty, string.Empty, total));
+                if (holdings.Accounts.FirstOrDefault(summary => summary.AccountId == account.Key) is { } summary)
+                {
+                    output.WriteLine(string.Format(
+                        english,
+                        "  Paid in {0:#,0.00}, gain {1}; targets of {2}, {3} in cash; last rebalanced {4}",
+                        summary.NetContributions,
+                        summary.Gain is { } gain ? gain.ToString("#,0.00", english) : "-",
+                        summary.TargetsAsOf?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "none",
+                        summary.TargetCash is { } cash ? cash.ToString("P1", english) : "-",
+                        summary.LastRebalance is { } day ? $"{day:yyyy-MM-dd} ({summary.LastRebalanceOrders} order(s))" : "never"));
+                }
             }
         }
 

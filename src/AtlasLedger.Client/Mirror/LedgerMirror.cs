@@ -63,6 +63,10 @@ namespace AtlasLedger.Client.Mirror
                         "Future" => await api.ListAsync<FutureDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Option" => await api.ListAsync<OptionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "PriceOverride" => await api.ListAsync<PriceOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "TargetWeight" => await api.ListAsync<TargetWeightDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "RebalanceSetting" => await api.ListAsync<RebalanceSettingDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Rebalance" => await api.ListAsync<RebalanceDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "CancelRequest" => await api.ListAsync<CancelRequestDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Order" => await api.ListAsync<OrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Allocation" => await api.ListAsync<AllocationDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "BrokerOrder" => await api.ListAsync<BrokerOrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
@@ -103,6 +107,10 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<FutureDto> futures: foreach (var dto in futures) { transaction.ApplyFuture(dto); } break;
                     case IReadOnlyList<OptionDto> options: foreach (var dto in options) { transaction.ApplyOption(dto); } break;
                     case IReadOnlyList<PriceOverrideDto> priceOverrides: foreach (var dto in priceOverrides) { transaction.ApplyPriceOverride(dto); } break;
+                    case IReadOnlyList<TargetWeightDto> targets: foreach (var dto in targets) { transaction.ApplyTargetWeight(dto); } break;
+                    case IReadOnlyList<RebalanceSettingDto> settings: foreach (var dto in settings) { transaction.ApplyRebalanceSetting(dto); } break;
+                    case IReadOnlyList<RebalanceDto> rebalances: foreach (var dto in rebalances) { transaction.ApplyRebalance(dto); } break;
+                    case IReadOnlyList<CancelRequestDto> cancels: foreach (var dto in cancels) { transaction.ApplyCancelRequest(dto); } break;
                     case IReadOnlyList<OrderDto> orders: foreach (var dto in orders) { transaction.ApplyOrder(dto); } break;
                     case IReadOnlyList<AllocationDto> allocations: foreach (var dto in allocations) { transaction.ApplyAllocation(dto); } break;
                     case IReadOnlyList<BrokerOrderDto> brokerOrders: foreach (var dto in brokerOrders) { transaction.ApplyBrokerOrder(dto); } break;

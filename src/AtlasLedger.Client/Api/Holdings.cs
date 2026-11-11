@@ -24,7 +24,24 @@ namespace AtlasLedger.Client.Api
     /// <param name="Currency">The account's currency: the cost basis and market value are in it.</param>
     /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
     /// account's currency, if there is a price and a rate.</param>
-    public sealed record Holding(Guid AccountId, Guid AssetId, AssetType AssetType, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, string QuoteCurrency, string? PriceSource, string Currency, decimal? MarketValue);
+    /// <param name="Weight">Its share of the account's value.</param>
+    /// <param name="TargetWeight">Its target share today, if the account has targets.</param>
+    public sealed record Holding(Guid AccountId, Guid AssetId, AssetType AssetType, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, string QuoteCurrency, string? PriceSource, string Currency, decimal? MarketValue, decimal? Weight, decimal? TargetWeight);
+
+    /// <summary>
+    /// An account's totals, for the dashboard: every amount in the account's currency.
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="Currency">The account's currency.</param>
+    /// <param name="MarketValue">Every holding's value, cash included; null while a holding has no value.</param>
+    /// <param name="Cash">The value of its cash.</param>
+    /// <param name="NetContributions">Deposits less withdrawals.</param>
+    /// <param name="Gain">Market value less net contributions.</param>
+    /// <param name="TargetsAsOf">The date of the target weights in force today.</param>
+    /// <param name="TargetCash">The share the targets leave in cash.</param>
+    /// <param name="LastRebalance">The last trading day the account was rebalanced.</param>
+    /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
+    public sealed record AccountSummary(Guid AccountId, string Currency, decimal? MarketValue, decimal Cash, decimal NetContributions, decimal? Gain, DateOnly? TargetsAsOf, decimal? TargetCash, DateOnly? LastRebalance, int? LastRebalanceOrders);
 
     /// <summary>
     /// The price of one unit of a currency in another.
@@ -40,5 +57,6 @@ namespace AtlasLedger.Client.Api
     /// <param name="AsOf">When the rules last ran.</param>
     /// <param name="Holdings">The holdings with any quantity, each valued in its account's currency.</param>
     /// <param name="Rates">Each published rate between currencies.</param>
-    public sealed record TenantHoldings(DateTimeOffset AsOf, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates);
+    /// <param name="Accounts">Each account's totals.</param>
+    public sealed record TenantHoldings(DateTimeOffset AsOf, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummary> Accounts);
 }

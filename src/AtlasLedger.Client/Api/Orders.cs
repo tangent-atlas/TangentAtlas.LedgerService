@@ -27,7 +27,8 @@ namespace AtlasLedger.Client.Api
     /// <param name="Quantity">The quantity allocated.</param>
     /// <param name="Filled">The quantity filled and booked to the account.</param>
     /// <param name="Remaining">The quantity still to fill.</param>
-    public sealed record AllocationState(Guid AccountId, decimal Quantity, decimal Filled, decimal Remaining);
+    /// <param name="Fees">The fees booked to the account.</param>
+    public sealed record AllocationState(Guid AccountId, decimal Quantity, decimal Filled, decimal Remaining, decimal Fees);
 
     /// <summary>
     /// An order's state, as the rules derived it.
@@ -41,6 +42,7 @@ namespace AtlasLedger.Client.Api
     /// <param name="Unplaced">The quantity not yet at a broker.</param>
     /// <param name="Filled">The quantity filled.</param>
     /// <param name="Unallocated">Filled beyond what the allocations needed.</param>
+    /// <param name="Fees">The fees reported, as one amount.</param>
     /// <param name="Status">New, Working, PartiallyFilled or Filled.</param>
     /// <param name="Allocations">Its allocations' states.</param>
     /// <param name="BrokerOrders">Its broker orders' states.</param>
@@ -54,6 +56,7 @@ namespace AtlasLedger.Client.Api
         decimal Unplaced,
         decimal Filled,
         decimal Unallocated,
+        decimal Fees,
         string Status,
         IReadOnlyList<AllocationState> Allocations,
         IReadOnlyList<BrokerOrderState> BrokerOrders);

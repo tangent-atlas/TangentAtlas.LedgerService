@@ -221,6 +221,46 @@ namespace AtlasLedger.Client.TestData
             return script;
         }
 
+        /// <summary>
+        /// Builds the opening script for an account the rules rebalance: the deposit only.  The first rebalance buys the
+        /// Joe 10 with it (load the plan and the targets too).
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="deposit">The dollars paid in.</param>
+        /// <returns>The script.</returns>
+        public static LedgerScript Opening(Joe10State state, decimal deposit) => Deposit(state, deposit);
+
+        /// <summary>
+        /// Builds the plan script: how the account is rebalanced.  Once a trading day at 3:45 pm in New York, weekdays
+        /// only; a trade under half a percent of the account is skipped (the Joe 10's band); orders go to the broker named.
+        /// </summary>
+        /// <param name="broker">The broker (the simulator, or Schwab once it is connected).</param>
+        /// <param name="timeOfDay">Minutes after midnight in New York (default 945: 3:45 pm).</param>
+        /// <param name="weekdaysOnly">False to rebalance every day (for tests).</param>
+        /// <returns>The script.</returns>
+        public static LedgerScript Plan(EventSource broker = EventSource.Simulator, int timeOfDay = (15 * 60) + 45, bool weekdaysOnly = true) =>
+            new LedgerScript().Insert("RebalanceSetting", new RebalanceSettingDto { AccountId = AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = broker, WeekdaysOnly = weekdaysOnly });
+
+        /// <summary>
+        /// Builds a targets script: the Joe 10's weights at a close (each company's weight times the share in stocks), as
+        /// the account's target weights from that day.  Load one each day, after the forward test has run; the rest stays in
+        /// cash.
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <returns>The script.</returns>
+        public static LedgerScript Targets(Joe10State state)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            var day = DateOnly.FromDateTime(state.Close.UtcDateTime);   // the close is 8 or 9 pm UTC: the same date as in New York
+            var script = new LedgerScript();
+            foreach (var holding in state.Holdings)
+            {
+                script.Insert("TargetWeight", new TargetWeightDto { AccountId = AccountId, EffectiveDate = day, AssetId = AssetIdOf(holding.Ticker), Weight = Math.Round(holding.Weight * state.StockShare, 6, MidpointRounding.ToZero) });
+            }
+
+            return script;
+        }
+
         private static LedgerScript Deposit(Joe10State state, decimal deposit)
         {
             var entered = state.Close;

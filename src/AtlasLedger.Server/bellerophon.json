@@ -2,6 +2,7 @@
   "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
   "datatypes": {
     "accountType": "AtlasLedger.Model.AccountType",
+    "bool": "System.Boolean",
     "assetType": "AtlasLedger.Model.AssetType",
     "cashType": "AtlasLedger.Model.CashType",
     "cryptoType": "AtlasLedger.Model.CryptoType",
@@ -286,6 +287,63 @@
         "Node": { "columns": ["NodeId"] }
       }
     },
+    "TargetWeight": {
+      "description": "The customer's specification of an account: each asset's share of the account's value, as of a date (a published methodology's weights for that day, for instance). Recorded once per date and never changed; the latest date on or before the trading day is the one in force, and an asset it leaves out is to be sold. What the weights don't add up to stays in cash.",
+      "writeMode": "AppendOnly",
+      "key": ["AccountId", "EffectiveDate", "AssetId"],
+      "columns": {
+        "AccountId": "guid",
+        "AssetId": "guid",
+        "EffectiveDate": "date",
+        "Weight": "rate"
+      },
+      "references": {
+        "Account": { "columns": ["AccountId"] },
+        "Asset": { "columns": ["AssetId"] }
+      }
+    },
+    "RebalanceSetting": {
+      "description": "How an account is rebalanced: once a trading day, at TimeOfDay (minutes after midnight in New York) or later, on weekdays only unless WeekdaysOnly is false; a trade smaller than Band (a fraction of the account's value) is skipped; orders go to Broker. No setting, no rebalancing.",
+      "key": ["AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "Band": "rate",
+        "Broker": "eventSource",
+        "TimeOfDay": "int",
+        "WeekdaysOnly": "bool"
+      },
+      "references": {
+        "Account": { "columns": ["AccountId"] }
+      }
+    },
+    "Rebalance": {
+      "description": "A rebalance the rules decided: one per account and trading day, recorded with the orders it created (OrderCount, possibly none), so the account is rebalanced once that day however often the rules run.",
+      "writeMode": "AppendOnly",
+      "key": ["AccountId", "TradingDay"],
+      "columns": {
+        "AccountId": "guid",
+        "EnteredTime": "time",
+        "OrderCount": "int",
+        "TradingDay": "date"
+      },
+      "references": {
+        "Account": { "columns": ["AccountId"] }
+      }
+    },
+    "CancelRequest": {
+      "description": "A request to cancel a broker order. The router sends it while the order is still open at the broker; the broker's report (cancelled, or the fills that beat it) says what happened.",
+      "writeMode": "AppendOnly",
+      "key": ["CancelRequestId"],
+      "columns": {
+        "BrokerOrderId": "guid",
+        "CancelRequestId": "guid",
+        "EnteredTime": "time",
+        "Reason": { "maxLength": 256, "type": "string?" }
+      },
+      "references": {
+        "BrokerOrder": { "columns": ["BrokerOrderId"] }
+      }
+    },
     "Order": {
       "description": "An order: an intention to buy or sell one asset, for one or more accounts (its allocations). Recorded once and never changed; its status is derived from its broker orders and their execution reports. Origin says what created it (with RuleName for a rule).",
       "writeMode": "AppendOnly",
@@ -369,6 +427,7 @@
         "EnteredTime": "time",
         "ExpiresTime": "time?",
         "ExecutionReportId": "guid?",
+        "Fees": "money?",
         "Kind": "transactionKind",
         "OrderId": "guid?",
         "Reason": { "maxLength": 256, "type": "string?" },

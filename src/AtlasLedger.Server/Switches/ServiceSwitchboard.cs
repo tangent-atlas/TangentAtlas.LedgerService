@@ -25,6 +25,11 @@ namespace AtlasLedger.Server.Switches
         /// </summary>
         public const string Rules = "rules";
 
+        /// <summary>
+        /// The order router's name.
+        /// </summary>
+        public const string Broker = "broker";
+
         private readonly Dictionary<string, ServiceSwitch> switches;
 
         /// <summary>
@@ -39,7 +44,8 @@ namespace AtlasLedger.Server.Switches
             this.switches = new[]
             {
                 new ServiceSwitch(MarketFeed, "Prices every held symbol (simulated until a broker feed is connected).", timeProvider),
-                new ServiceSwitch(Rules, "Runs the rules engine for every tenant: derives holdings and prices, and raises and clears alerts.", timeProvider),
+                new ServiceSwitch(Rules, "Runs the rules engine for every tenant: derives holdings, prices and orders, books fills, rebalances, and raises and clears alerts.", timeProvider),
+                new ServiceSwitch(Broker, "Sends broker orders to the brokers and records their reports. Nothing is sent while it is off.", timeProvider),
             }.ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
 
             // The services the settings start on stay on until turned off.  A name that isn't a service stops the server

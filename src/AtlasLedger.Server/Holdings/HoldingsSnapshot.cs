@@ -8,6 +8,7 @@ namespace AtlasLedger.Server.Holdings
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
+    using AtlasLedger.Model.Primary;
     using Bellerophon.Rules;
     using Bellerophon.Rules.NRules;
 
@@ -21,13 +22,19 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Prices">Every priced asset's effective price, in its quote currency.</param>
     /// <param name="Rates">Every published rate between currencies.</param>
     /// <param name="Orders">Every order's state.</param>
+    /// <param name="Flows">Every account's net contributions.</param>
+    /// <param name="Targets">Every account's target weights, of every date.</param>
+    /// <param name="Rebalances">Every rebalance recorded.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,
         IReadOnlyList<PositionState> Positions,
         IReadOnlyList<EffectivePrice> Prices,
         IReadOnlyList<CurrencyRate> Rates,
-        IReadOnlyList<Orders.OrderState> Orders);
+        IReadOnlyList<Orders.OrderState> Orders,
+        IReadOnlyList<AccountFlow> Flows,
+        IReadOnlyList<TargetWeightFact> Targets,
+        IReadOnlyList<RebalanceFact> Rebalances);
 
     /// <summary>
     /// The latest snapshot of each tenant.  In memory only: derived state is never persisted, and it is rebuilt from the
@@ -138,7 +145,10 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<PositionState>().ToArray(),
                     session.Query<EffectivePrice>().ToArray(),
                     session.Query<CurrencyRate>().ToArray(),
-                    session.Query<Orders.OrderState>().ToArray()));
+                    session.Query<Orders.OrderState>().ToArray(),
+                    session.Query<AccountFlow>().ToArray(),
+                    session.Query<TargetWeightFact>().ToArray(),
+                    session.Query<RebalanceFact>().ToArray()));
                 return fired;
             }
         }

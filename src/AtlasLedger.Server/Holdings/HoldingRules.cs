@@ -169,4 +169,24 @@ namespace AtlasLedger.Server.Holdings
                     exchanges)!);
         }
     }
+
+    /// <summary>
+    /// An account's net contributions: its deposits less its withdrawals, from the posted lines grouped by account.
+    /// </summary>
+    [Name("Holdings.AccountFlow")]
+    public sealed class AccountFlowRule : Rule
+    {
+        /// <inheritdoc/>
+        public override void Define()
+        {
+            IGrouping<Guid, PostedLine> lines = default!;
+
+            this.When()
+                .Query(() => lines, query => query
+                    .Match<PostedLine>(item => item.Transaction.Kind == TransactionKind.Deposit || item.Transaction.Kind == TransactionKind.Withdrawal)
+                    .GroupBy(item => item.Line.AccountId));
+            this.Then()
+                .Yield(_ => new AccountFlow(lines.Key, lines.Sum(item => item.Line.Amount ?? 0m)));
+        }
+    }
 }

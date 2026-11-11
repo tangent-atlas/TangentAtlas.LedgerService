@@ -91,6 +91,7 @@ namespace AtlasLedger.Tests
             Assert.Equal((-501m, -501m), (given.Quantity, given.Amount!.Value));
             Assert.True(HoldingFold.IsBalanced([Line(received), Line(given)]));
             Assert.Equal(OrderBook.BookingId(fill.ExecutionReportId, AccountA), transaction.TransactionId);   // the same fill and account, the same key
+            Assert.Equal(1m, transaction.Fees);   // the fees, as one amount
 
             // A sale: 10 shares leave, and $499 arrives.
             var sell = new OrderFact(new OrderDto { OrderId = Guid.NewGuid(), AssetId = Buy.AssetId, Side = OrderSide.Sell, Origin = OrderOrigin.Manual, EnteredTime = Close });

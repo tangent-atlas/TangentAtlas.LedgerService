@@ -76,7 +76,8 @@ namespace AtlasLedger.Server.Orders
     /// <param name="Quantity">The quantity allocated.</param>
     /// <param name="Filled">The quantity filled and booked to the account.</param>
     /// <param name="Remaining">The quantity still to fill.</param>
-    public sealed record AllocationState(Guid AccountId, decimal Quantity, decimal Filled, decimal Remaining);
+    /// <param name="Fees">The fees booked to the account: one amount, whatever the broker's fees are made of.</param>
+    public sealed record AllocationState(Guid AccountId, decimal Quantity, decimal Filled, decimal Remaining, decimal Fees);
 
     /// <summary>
     /// An order's state: its allocations, its broker orders and what has been filled.  Derived; never persisted.
@@ -90,6 +91,7 @@ namespace AtlasLedger.Server.Orders
     /// <param name="Unplaced">The quantity not yet sent to a broker (or sent and cancelled, rejected or expired unfilled).</param>
     /// <param name="Filled">The quantity filled.</param>
     /// <param name="Unallocated">Filled beyond what the allocations needed (the broker filled more than was asked): not booked to any account.</param>
+    /// <param name="Fees">The fees reported across its broker orders: one amount.</param>
     /// <param name="Status">Where it stands.</param>
     /// <param name="Allocations">Its allocations' states, by account.</param>
     /// <param name="BrokerOrders">Its broker orders' states, in the order they were recorded.</param>
@@ -103,6 +105,7 @@ namespace AtlasLedger.Server.Orders
         decimal Unplaced,
         decimal Filled,
         decimal Unallocated,
+        decimal Fees,
         OrderStatus Status,
         IReadOnlyList<AllocationState> Allocations,
         IReadOnlyList<BrokerOrderState> BrokerOrders);
@@ -191,15 +194,15 @@ namespace AtlasLedger.Server.Orders
                 .Select(brokerOrder => BrokerState(brokerOrder, reportList.Where(report => report.BrokerOrderId == brokerOrder.BrokerOrderId)))
                 .ToArray();
             var allocated = AllocateFills(allocationList, reportList);
-            var filledByAccount = allocated
+            var byAccount = allocated
                 .SelectMany(fill => fill.Shares)
                 .GroupBy(share => share.AccountId)
-                .ToDictionary(group => group.Key, group => group.Sum(share => share.Quantity));
+                .ToDictionary(group => group.Key, group => (Quantity: group.Sum(share => share.Quantity), Fees: group.Sum(share => share.Fees)));
             var allocationStates = allocationList
                 .Select(allocation =>
                 {
-                    var filled = filledByAccount.GetValueOrDefault(allocation.AccountId);
-                    return new AllocationState(allocation.AccountId, allocation.Quantity, filled, allocation.Quantity - filled);
+                    var (filled, fees) = byAccount.GetValueOrDefault(allocation.AccountId);
+                    return new AllocationState(allocation.AccountId, allocation.Quantity, filled, allocation.Quantity - filled, fees);
                 })
                 .ToArray();
 
@@ -221,6 +224,7 @@ namespace AtlasLedger.Server.Orders
                 Math.Max(quantity - placed, 0m),
                 filledTotal,
                 allocated.Sum(fill => fill.Unallocated),
+                brokerStates.Sum(state => state.Fees),
                 status,
                 allocationStates,
                 brokerStates);
@@ -265,7 +269,8 @@ namespace AtlasLedger.Server.Orders
         /// <summary>
         /// The Buy or Sell transaction that books one account's share of a fill: an exchange of the asset for cash in the
         /// asset's quote currency, in two balanced lines.  The fees go into the exchange: a purchase's shares cost what
-        /// was paid for them plus fees; a sale's proceeds are what was received less fees.
+        /// was paid for them plus fees; a sale's proceeds are what was received less fees.  The transaction also carries
+        /// the fees as one amount (<see cref="Transaction.Fees"/>), whatever the broker's fees are made of.
         /// </summary>
         /// <param name="order">The order.</param>
         /// <param name="asset">The order's asset.</param>
@@ -294,6 +299,7 @@ namespace AtlasLedger.Server.Orders
                 EnteredTime = fill.ReportTime,
                 OrderId = order.OrderId,
                 ExecutionReportId = fill.ExecutionReportId,
+                Fees = share.Fees,
             };
             var assetLine = new TransactionLine
             {

@@ -15,6 +15,7 @@ namespace AtlasLedger.Server
     using AtlasLedger.Server.Market;
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
+    using AtlasLedger.Server.Brokers;
     using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
     using Bellerophon.Runtime;
@@ -132,6 +133,12 @@ namespace AtlasLedger.Server
             // Market data: simulated until a real feed is connected.  Its switch decides whether it runs.
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));
             builder.Services.AddHostedService<SimulatedMarketFeed>();
+
+            // Brokers: the order router sends broker orders and records the reports, while its switch is on.  The simulated
+            // broker trades against each tenant's own prices; a real broker is another IBroker.
+            builder.Services.Configure<BrokerOptions>(configuration.GetSection(BrokerOptions.SectionName));
+            builder.Services.AddSingleton<IBroker, SimulatedBroker>();
+            builder.Services.AddHostedService<OrderRouter>();
 
             // Callers: bearer tokens from the identity provider (Microsoft Entra External ID) when one is configured;
             // otherwise development sign-in, in the Development environment only.  With neither, the server does not start:

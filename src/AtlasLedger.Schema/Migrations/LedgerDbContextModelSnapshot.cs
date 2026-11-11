@@ -202,6 +202,33 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("BrokerOrder", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.CancelRequest", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CancelRequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BrokerOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("EnteredTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "CancelRequestId")
+                        .HasName("PK_CancelRequest");
+
+                    b.ToTable("CancelRequest", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.Cash", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -636,6 +663,62 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("PriceOverride", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Rebalance", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("TradingDay")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("EnteredTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<int>("OrderCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AccountId", "TradingDay")
+                        .HasName("PK_Rebalance");
+
+                    b.ToTable("Rebalance", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.RebalanceSetting", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Band")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<int>("Broker")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("TimeOfDay")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("WeekdaysOnly")
+                        .HasColumnType("bit");
+
+                    b.HasKey("TenantId", "AccountId")
+                        .HasName("PK_RebalanceSetting");
+
+                    b.ToTable("RebalanceSetting", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.Symbol", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -661,6 +744,33 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Symbol", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.TargetWeight", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("EffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Weight")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.HasKey("TenantId", "AccountId", "EffectiveDate", "AssetId")
+                        .HasName("PK_TargetWeight");
+
+                    b.ToTable("TargetWeight", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.Transaction", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -680,6 +790,10 @@ namespace AtlasLedger.Schema.Migrations
 
                     b.Property<DateTimeOffset?>("ExpiresTime")
                         .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<decimal?>("Fees")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
 
                     b.Property<int>("Kind")
                         .HasColumnType("int");

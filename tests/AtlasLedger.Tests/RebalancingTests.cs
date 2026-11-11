@@ -1,0 +1,142 @@
+// <copyright file="RebalancingTests.cs" company="Tangent Atlas">
+//    Copyright © Tangent Atlas. All rights reserved.
+// </copyright>
+// <author>Donald Airey</author>
+extern alias server;
+
+namespace AtlasLedger.Tests
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using AtlasLedger.Model;
+    using server::AtlasLedger.Model;
+    using server::AtlasLedger.Model.Primary;
+    using server::AtlasLedger.Server.Holdings;
+    using server::AtlasLedger.Server.Orders;
+    using Xunit;
+
+    /// <summary>
+    /// The arithmetic of a rebalance: when it is due, which weights are in force, and the trades it plans.
+    /// </summary>
+    public sealed class RebalancingTests
+    {
+        // 3:50 pm in New York on Monday, November 9, 2026 (standard time).
+        private static readonly DateTimeOffset Monday = new DateTimeOffset(2026, 11, 9, 20, 50, 0, TimeSpan.Zero);
+
+        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
+
+        private static readonly AssetFact Dollar = Asset(AssetType.Cash);
+
+        private static readonly AssetFact Alpha = Asset(AssetType.Equity);
+
+        private static readonly AssetFact Beta = Asset(AssetType.Equity);
+
+        private static readonly IReadOnlyDictionary<(string From, string To), decimal> Rates = new Dictionary<(string From, string To), decimal> { [("USD", "USD")] = 1m };
+
+        [Fact]
+        public void ARebalanceIsDueAtItsTimeOnWeekdays()
+        {
+            var setting = Setting(timeOfDay: (15 * 60) + 45, weekdaysOnly: true);
+            Assert.True(Rebalancing.IsDue(Monday, setting));
+            Assert.False(Rebalancing.IsDue(Monday.AddMinutes(-10), setting));   // 3:40 pm
+            Assert.False(Rebalancing.IsDue(Monday.AddDays(-2), setting));       // Saturday
+            Assert.True(Rebalancing.IsDue(Monday.AddDays(-2), Setting(timeOfDay: 0, weekdaysOnly: false)));
+            Assert.Equal(new DateOnly(2026, 11, 9), Rebalancing.TradingDay(Monday.AddHours(3)));   // 11:50 pm in New York, still Monday
+        }
+
+        [Fact]
+        public void TheLatestWeightsOnOrBeforeTheDayAreInForce()
+        {
+            var targets = new[] { Target(Alpha, 0.5m, 6), Target(Beta, 0.4m, 6), Target(Alpha, 0.6m, 9), Target(Alpha, 0.9m, 10) };
+            Assert.Equal([(Alpha.AssetId, 0.6m)], Rebalancing.WeightsInForce(targets, new DateOnly(2026, 11, 9)).Select(item => (item.Key, item.Value)));   // Beta left out on the 9th: to be sold
+            Assert.Empty(Rebalancing.WeightsInForce(targets, new DateOnly(2026, 11, 5)));
+        }
+
+        [Fact]
+        public void FromCashItBuysEachTargetInWholeShares()
+        {
+            var plan = Plan(
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 0.3m, [Beta.AssetId] = 0.2m },
+                [Position(Dollar, 1_000_000m)],
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m, [Beta.AssetId] = 33.33m });
+
+            Assert.NotNull(plan);
+            Assert.Equal(
+                new[] { (Alpha.AssetId, OrderSide.Buy, 3_000m), (Beta.AssetId, OrderSide.Buy, 6_000m) }.OrderBy(trade => trade.AssetId),
+                plan.Select(trade => (trade.AssetId, trade.Side, trade.Quantity)));   // 200,000 ÷ 33.33 = 6,000.6
+        }
+
+        [Fact]
+        public void ItSellsWhatTheTargetsLeaveOutAndSkipsTradesInsideTheBand()
+        {
+            // $1,000,000 in all: Alpha 3,010 shares ($301,000, target $300,000: a $1,000 trade, inside a 0.5% band), Beta held but left out.
+            var plan = Plan(
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 0.3m },
+                [Position(Dollar, 689_000m), Position(Alpha, 3_010m), Position(Beta, 300m)],
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m, [Beta.AssetId] = 33.33m },
+                band: 0.005m);
+
+            Assert.Equal([(Beta.AssetId, OrderSide.Sell, 300m)], plan!.Select(trade => (trade.AssetId, trade.Side, trade.Quantity)));
+        }
+
+        [Fact]
+        public void OpenOrdersCountAsAlreadyBought()
+        {
+            var plan = Plan(
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 0.3m },
+                [Position(Dollar, 1_000_000m)],
+                new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m },
+                open: new Dictionary<Guid, decimal> { [Alpha.AssetId] = 2_000m });
+
+            Assert.Equal([(Alpha.AssetId, OrderSide.Buy, 1_000m)], plan!.Select(trade => (trade.AssetId, trade.Side, trade.Quantity)));
+        }
+
+        [Fact]
+        public void ItWaitsForACurrentPriceOfEverythingItTrades()
+        {
+            var weights = new Dictionary<Guid, decimal> { [Alpha.AssetId] = 0.3m };
+            Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal>()));   // no price
+            Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, asOf: Monday.AddDays(-1)));   // yesterday's
+            Assert.Null(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, source: PriceSource.LastTrade));
+            Assert.NotNull(Plan(weights, [Position(Dollar, 1_000_000m)], new Dictionary<Guid, decimal> { [Alpha.AssetId] = 100m }, source: PriceSource.Override, asOf: Monday.AddDays(-1)));   // an override in force is current
+        }
+
+        private static IReadOnlyList<PlannedTrade>? Plan(
+            IReadOnlyDictionary<Guid, decimal> weights,
+            PositionState[] positions,
+            IReadOnlyDictionary<Guid, decimal> prices,
+            decimal band = 0m,
+            IReadOnlyDictionary<Guid, decimal>? open = null,
+            PriceSource source = PriceSource.Market,
+            DateTimeOffset? asOf = null)
+        {
+            var effective = prices
+                .Select(item => new EffectivePrice(item.Key, item.Value, "USD", asOf ?? Monday, source))
+                .Append(new EffectivePrice(Dollar.AssetId, 1m, "USD", Monday.AddDays(-30), PriceSource.Market))
+                .ToDictionary(price => price.AssetId);
+            return Rebalancing.Plan(
+                Account,
+                weights,
+                positions,
+                new[] { Dollar, Alpha, Beta }.ToDictionary(asset => asset.AssetId),
+                effective,
+                Rates,
+                open ?? new Dictionary<Guid, decimal>(),
+                band,
+                Rebalancing.StartOf(Rebalancing.TradingDay(Monday)));
+        }
+
+        private static AssetFact Asset(AssetType type) =>
+            new AssetFact(new AssetDto { AssetId = Guid.NewGuid(), AssetType = type, QuoteCurrency = "USD", QuantityFactor = 1m, PriceFactor = 1m });
+
+        private static PositionState Position(AssetFact asset, decimal quantity) =>
+            new PositionState(Account.AccountId, asset.AssetId, asset.AssetType, "USD", "USD", 1m, 1m, quantity, null, false, Monday, 1);
+
+        private static TargetWeightFact Target(AssetFact asset, decimal weight, int day) =>
+            new TargetWeightFact(new TargetWeightDto { AccountId = Account.AccountId, AssetId = asset.AssetId, EffectiveDate = new DateOnly(2026, 11, day), Weight = weight });
+
+        private static RebalanceSettingFact Setting(int timeOfDay, bool weekdaysOnly) =>
+            new RebalanceSettingFact(new RebalanceSettingDto { AccountId = Account.AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = EventSource.Simulator, WeekdaysOnly = weekdaysOnly });
+    }
+}

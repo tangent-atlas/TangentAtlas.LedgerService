@@ -129,6 +129,17 @@ namespace AtlasLedger.Client.Api
             ?? throw new InvalidOperationException("The server returned no jobs.");
 
         /// <summary>
+        /// Runs a task now, whatever its schedules say, and waits for it.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="job">The task's key.</param>
+        /// <param name="cancellationToken">Cancels the request (not the run).</param>
+        /// <returns>What it did.  The server answers 404 for an unknown job, 409 for a service or one already running.</returns>
+        public async Task<JobRun> RunJobAsync(Guid tenantId, string job, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<JobRun>(HttpMethod.Post, $"v1/tenants/{tenantId}/jobs/{Uri.EscapeDataString(job)}/run", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned nothing.");
+
+        /// <summary>
         /// Gets the state of a tenant's orders, from the rules' latest snapshot.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>

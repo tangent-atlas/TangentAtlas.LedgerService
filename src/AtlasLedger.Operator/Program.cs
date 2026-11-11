@@ -13,6 +13,7 @@ namespace AtlasLedger.Operator
     using System.Threading.Tasks;
     using AtlasLedger.Client;
     using AtlasLedger.Client.Api;
+    using AtlasLedger.Model;
 
     /// <summary>
     /// ledger-operator: the operator's console.
@@ -40,8 +41,13 @@ namespace AtlasLedger.Operator
               orders <tenant>                 Show what each account's model proposes, and each order's state: its
                                               allocations, broker orders and fills.
               trade <tenant>                  Turn the proposals into orders now, as the scheduled run would.
-              jobs <tenant>                   Show the tenant's scheduled jobs: when each runs next, and what its
-                                              last run did.
+              jobs <tenant>                   Show the tenant's jobs (running or not, and what each last did) and
+                                              its schedules (off, on or scheduled, and when each next starts and
+                                              stops).
+              jobs run <tenant> <job>         Run a task now, whatever its schedules say.
+              jobs set <tenant> <job> off|on|scheduled
+                                              Set the status of every schedule of the job: off (it doesn't run on
+                                              its own), on (a service runs until turned off) or scheduled.
               weights <tenant> <script.json>  Replace the weights of each model the script names with the script's
                                               Weight rows: changes, removes and adds rows to match, in one batch.
               services                        Show the server's optional services (market feed, rules engine).
@@ -116,6 +122,12 @@ namespace AtlasLedger.Operator
                         return 0;
                     case "jobs" when positional.Count == 2:
                         await Commands.JobsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 4 && positional[1] == "run":
+                        await Commands.RunJobAsync(api, Guid.Parse(positional[2]), positional[3], output, token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 5 && positional[1] == "set" && Enum.TryParse<JobStatus>(positional[4], ignoreCase: true, out var jobStatus) && Enum.IsDefined(jobStatus):
+                        await Commands.SetJobStatusAsync(api, Guid.Parse(positional[2]), positional[3], jobStatus, output, token).ConfigureAwait(false);
                         return 0;
                     case "orders" when positional.Count == 2:
                         await Commands.OrdersAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

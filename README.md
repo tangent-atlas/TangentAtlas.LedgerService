@@ -79,26 +79,47 @@ another.  The walkthrough turns on the services that are off, and off again only
 `v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
 application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
 
-## Scheduled jobs
+## Jobs
 
-Jobs run on Quartz.NET, in memory.  Each tenant's `JobSchedule` rows say what runs when: `Job` names a job by its key,
-`CronSchedule` is a Quartz cron expression (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on weekdays), `TimeZone` is
-the IANA zone it is read in (`America/New_York`), and `IsEnabled` turns it on or off.  A job is a class implementing
-`ITenantJob` with a `[Job("key")]` attribute (`src/AtlasLedger.Server/Jobs`); the server finds them at start-up, and two
-with one key stop it starting.
+A job is a class with a `[Job("key")]` attribute (`src/AtlasLedger.Server/Jobs`), of one of two kinds:
+
+- a **task** (`ITenantJob`) runs to completion, such as `GenerateOrders`;
+- a **service** (`ITenantService`) runs until stopped, such as a stream of a customer's prices.  One that ends or fails
+  while it should be on is started again after `Jobs:RestartDelay` (30 seconds).
+
+The server finds them at start-up; two with one key, or a class that is neither kind, stop it starting.  Each tenant's
+`JobSchedule` rows say what each job is to do.  Every schedule belongs to a tenant: there are no system-wide jobs (the
+service switches are the system's stops, not schedules).
+
+| Status | A task | A service |
+| --- | --- | --- |
+| `Off` | doesn't run on its own (it can still be run by hand) | stopped |
+| `On` | not allowed: run it by hand instead | runs now, until the status changes |
+| `Scheduled` | runs at each `CronSchedule` time | on from each `CronSchedule` time to the next `StopSchedule` time; on at once if set inside its window |
+
+`CronSchedule` and `StopSchedule` are Quartz cron expressions (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on
+weekdays), read in `TimeZone` (IANA, such as `America/New_York`).  A job marked for market days skips the NYSE's
+holidays (listed through 2028 in `MarketCalendar`; early closings still run).  A time missed while the server was down is
+skipped, not made up.
 
 The scheduler is driven by the ledger's commits, not a timer: it waits on each tenant's commit signal (the one the rules
-engine uses), and after each commit compares the tenant's rows with what it has scheduled.  An inserted or changed row
-is (re)scheduled at once; a row turned off or deleted is unscheduled, and a run of it in progress is cancelled (its
-cancellation token fires; a job stops at its next safe point, and a ledger transaction is never cut in half).  A job
-marked for market days skips the NYSE's holidays (listed through 2028 in `MarketCalendar`; early closings still run).  A
-run missed while the server was down is skipped, not made up.  Nothing about runs is persisted:
-`ledger-operator jobs <tenant>` (`v1/tenants/{id}/jobs`) shows each schedule, why it isn't scheduled if it isn't
-(turned off, an unknown key, a bad expression or zone), its next run, and what its last run since start-up did.
+engine uses) and after each commit compares the tenant's rows with what it has acted on, so a change takes effect at
+once.  Turning a row off, changing it or deleting it stops what it started: a task's run in progress is cancelled (its
+cancellation token fires; it stops at its next safe point, and a ledger transaction is never cut in half), and a service
+is stopped.  At most one run of a job per tenant at a time, however it was started.  Nothing about runs is persisted.
 
-| Job | Market days | Does |
-| --- | --- | --- |
-| `GenerateOrders` | yes | Turns the tenant's proposed trades into orders (while the `trading` switch is on). |
+```
+ledger-operator jobs <tenant>                            # every job: running or not, its last outcome; every schedule
+ledger-operator jobs run <tenant> GenerateOrders         # run a task now, whatever its schedules say
+ledger-operator jobs set <tenant> <job> off|on|scheduled # set the status of every schedule of the job
+```
+
+The API is `v1/tenants/{id}/jobs` and `POST v1/tenants/{id}/jobs/{job}/run`; schedules are changed through the
+`JobSchedule` table.
+
+| Job | Kind | Market days | Does |
+| --- | --- | --- | --- |
+| `GenerateOrders` | task | yes | Turns the tenant's proposed trades into orders (while the `trading` switch is on). |
 
 ## License
 

@@ -137,8 +137,8 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
-        /// Shows a tenant's scheduled jobs: each schedule, whether it is scheduled, when it runs next, and what its last run
-        /// did.
+        /// Shows a tenant's jobs: every job the server has, whether it is running and what its last run did; then each of
+        /// the tenant's schedules, what it asks for and when it next starts and stops.
         /// </summary>
         /// <param name="api">The API.</param>
         /// <param name="tenantId">The tenant.</param>
@@ -151,24 +151,126 @@ namespace AtlasLedger.Client
             ArgumentNullException.ThrowIfNull(output);
             var jobs = await api.GetJobsAsync(tenantId, cancellationToken).ConfigureAwait(false);
             static string Time(DateTimeOffset? time) => time is { } value ? value.ToLocalTime().ToString("ddd yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture) : "-";
-            output.WriteLine($"Jobs of {tenantId} (the server has: {string.Join(", ", jobs.Jobs)})");
+            output.WriteLine($"Jobs of {tenantId}");
+            foreach (var job in jobs.Jobs)
+            {
+                var doing = job.IsRunning
+                    ? $"running since {Time(job.RunningSince)}{(job.StartedBy is null ? " (by hand)" : string.Empty)}"
+                    : "not running";
+                output.WriteLine($"  {job.Job,-24} {job.Kind,-8} {doing}");
+                if (job.LastOutcome is { } outcome)
+                {
+                    output.WriteLine($"  {string.Empty,-24} last {Time(job.LastRun)}: {outcome}");
+                }
+            }
+
+            output.WriteLine();
             if (jobs.Schedules.Count == 0)
             {
-                output.WriteLine("  No schedules (add JobSchedule rows to schedule a job).");
+                output.WriteLine("No schedules: add JobSchedule rows, or turn a service on with jobs set <tenant> <job> on.");
             }
 
             foreach (var schedule in jobs.Schedules)
             {
-                output.WriteLine();
-                output.WriteLine($"{schedule.Job}  {schedule.CronSchedule}  ({schedule.TimeZone})  {schedule.Status}");
-                if (schedule.Message is { } message)
+                var when = schedule.StopSchedule is { } stop ? $"{schedule.CronSchedule} to {stop}" : schedule.CronSchedule ?? "-";
+                output.WriteLine($"{schedule.Job}  {schedule.Status}  {when}  ({schedule.TimeZone ?? "no zone"})  [{schedule.JobScheduleId.ToString()[..8]}]");
+                if (schedule.Problem is { } problem)
                 {
-                    output.WriteLine($"  {message}");
+                    output.WriteLine($"  can't act on it: {problem}");
                 }
-
-                output.WriteLine($"  next run  {Time(schedule.NextRun)}");
-                output.WriteLine($"  last run  {Time(schedule.LastRun)}{(schedule.LastOutcome is { } outcome ? $": {outcome}" : string.Empty)}");
+                else if (schedule.Status == JobStatus.Scheduled)
+                {
+                    output.WriteLine(schedule.NextStop is { } nextStop
+                        ? $"  next start {Time(schedule.NextStart)}, next stop {Time(nextStop)}"
+                        : $"  next run {Time(schedule.NextStart)}");
+                }
             }
+        }
+
+        /// <summary>
+        /// Runs a task now, whatever its schedules say, and shows what it did.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="job">The task's key.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the task has run.</returns>
+        public static async Task RunJobAsync(LedgerApiClient api, Guid tenantId, string job, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var run = await api.RunJobAsync(tenantId, job, cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"{run.Job}: {run.Outcome}");
+        }
+
+        /// <summary>
+        /// Sets the status of every schedule of one of a tenant's jobs: off, on (a service) or scheduled.  Turning a service
+        /// on that has no schedule adds one, with no times.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="job">The job's key.</param>
+        /// <param name="status">The status.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the change is applied.</returns>
+        public static async Task SetJobStatusAsync(LedgerApiClient api, Guid tenantId, string job, JobStatus status, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var (script, message) = SetJobStatus(await api.ListAsync<JobScheduleDto>(tenantId, "JobSchedule", cancellationToken).ConfigureAwait(false), job, status, Guid.NewGuid);
+            if (script is not null)
+            {
+                await api.ApplyAsync(tenantId, script, cancellationToken).ConfigureAwait(false);
+            }
+
+            output.WriteLine(message);
+        }
+
+        /// <summary>
+        /// Builds the change that sets the status of every schedule of a job.
+        /// </summary>
+        /// <param name="current">The tenant's schedules.</param>
+        /// <param name="job">The job's key.</param>
+        /// <param name="status">The status.</param>
+        /// <param name="newId">Makes a key for a new schedule.</param>
+        /// <returns>The script, or null if there is nothing to change; and what it does.</returns>
+        public static (LedgerScript? Script, string Message) SetJobStatus(IEnumerable<JobScheduleDto> current, string job, JobStatus status, Func<Guid> newId)
+        {
+            ArgumentNullException.ThrowIfNull(current);
+            ArgumentNullException.ThrowIfNull(newId);
+            var rows = current.Where(row => row.Job == job).ToArray();
+            if (rows.Length == 0)
+            {
+                return status switch
+                {
+                    JobStatus.On => (new LedgerScript().Insert("JobSchedule", new JobScheduleDto { JobScheduleId = newId(), Job = job, Status = JobStatus.On }), $"{job}: on (a new schedule, with no times)."),
+                    JobStatus.Off => (null, $"{job} has no schedules: it is already off."),
+                    _ => (null, $"{job} has no schedules to set to Scheduled: add a JobSchedule row with its CronSchedule and TimeZone."),
+                };
+            }
+
+            var script = new LedgerScript();
+            foreach (var row in rows.Where(row => row.Status != status))
+            {
+                script.Update("JobSchedule", new { row.JobScheduleId }, new JobScheduleDto
+                {
+                    JobScheduleId = row.JobScheduleId,
+                    Job = row.Job,
+                    Status = status,
+                    CronSchedule = row.CronSchedule,
+                    StopSchedule = row.StopSchedule,
+                    TimeZone = row.TimeZone,
+                    Description = row.Description,
+                    RowVersion = row.RowVersion,
+                });
+            }
+
+            var changed = script.Operations.Count;
+            return changed == 0
+                ? (null, $"{job}: already {status}.")
+                : (script, $"{job}: {status} ({changed} schedule(s) changed).");
         }
 
         /// <summary>

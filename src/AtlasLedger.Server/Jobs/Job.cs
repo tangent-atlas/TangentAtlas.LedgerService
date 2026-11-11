@@ -12,18 +12,47 @@ namespace AtlasLedger.Server.Jobs
     using System.Threading.Tasks;
 
     /// <summary>
-    /// A job that runs for one tenant when a schedule of the tenant's says so.  Write the class, give it a
-    /// <see cref="JobAttribute"/>, and it can be scheduled: nothing else to register.
+    /// The two kinds of job.
+    /// </summary>
+    public enum JobKind
+    {
+        /// <summary>A task: runs to completion, at its schedule's times or when run by hand (<see cref="ITenantJob"/>).</summary>
+        Task,
+
+        /// <summary>A service: runs until stopped, while on by hand or inside its schedule's window (<see cref="ITenantService"/>).</summary>
+        Service,
+    }
+
+    /// <summary>
+    /// A task: a job that runs to completion for one tenant.  Write the class, give it a <see cref="JobAttribute"/>, and it
+    /// can be scheduled or run by hand: nothing else to register.
     /// </summary>
     public interface ITenantJob
     {
         /// <summary>
-        /// Runs the job for a tenant.
+        /// Runs the task for a tenant.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
-        /// <param name="cancellationToken">Cancelled when the server stops.</param>
+        /// <param name="cancellationToken">Cancelled when its schedule is turned off, changed or deleted, or the server
+        /// stops: stop at the next safe point.</param>
         /// <returns>What happened, in a few words, for the job's status.</returns>
         Task<string> RunAsync(Guid tenantId, CancellationToken cancellationToken);
+    }
+
+    /// <summary>
+    /// A service: a job that runs for one tenant until it is stopped, such as a stream of a customer's prices.  If it ends
+    /// or fails while it should still be on, it is started again after a pause.
+    /// </summary>
+    public interface ITenantService
+    {
+        /// <summary>
+        /// Runs the service for a tenant until it is cancelled.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancelled when it is to stop: turned off, its window over, or the server
+        /// stopping.</param>
+        /// <returns>A task that completes when the service stops.</returns>
+        Task RunAsync(Guid tenantId, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -46,17 +75,49 @@ namespace AtlasLedger.Server.Jobs
     }
 
     /// <summary>
-    /// A job the server knows.
+    /// A job the server knows.  Its kind follows from its class: a task implements <see cref="ITenantJob"/>, a service
+    /// <see cref="ITenantService"/>; never both.
     /// </summary>
-    /// <param name="Key">Its key.</param>
-    /// <param name="Type">Its class.</param>
-    /// <param name="MarketDaysOnly">Whether it skips market holidays.</param>
-    public sealed record JobDescriptor(string Key, Type Type, bool MarketDaysOnly);
+    public sealed record JobDescriptor
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="JobDescriptor"/> class.
+        /// </summary>
+        /// <param name="key">Its key.</param>
+        /// <param name="type">Its class.</param>
+        /// <param name="marketDaysOnly">Whether its schedules skip market holidays.</param>
+        public JobDescriptor(string key, Type type, bool marketDaysOnly)
+        {
+            ArgumentNullException.ThrowIfNull(type);
+            var isTask = typeof(ITenantJob).IsAssignableFrom(type);
+            var isService = typeof(ITenantService).IsAssignableFrom(type);
+            if (isTask == isService)
+            {
+                throw new InvalidOperationException($"The job \"{key}\" ({type.FullName}) must be either a task (ITenantJob) or a service (ITenantService).");
+            }
+
+            this.Key = key;
+            this.Type = type;
+            this.Kind = isService ? JobKind.Service : JobKind.Task;
+            this.MarketDaysOnly = marketDaysOnly;
+        }
+
+        /// <summary>Gets its key.</summary>
+        public string Key { get; }
+
+        /// <summary>Gets its class.</summary>
+        public Type Type { get; }
+
+        /// <summary>Gets whether it is a task or a service.</summary>
+        public JobKind Kind { get; }
+
+        /// <summary>Gets a value indicating whether its schedules skip market holidays.</summary>
+        public bool MarketDaysOnly { get; }
+    }
 
     /// <summary>
-    /// The jobs the server knows: every class in its own assembly with a <see cref="JobAttribute"/> that is an
-    /// <see cref="ITenantJob"/>.  A schedule's job is resolved only among these, never by type name, so data can't choose
-    /// what code runs.
+    /// The jobs the server knows: every class in its own assembly with a <see cref="JobAttribute"/> that is a task or a
+    /// service.  A schedule's job is resolved only among these, never by type name, so data can't choose what code runs.
     /// </summary>
     public sealed class JobRegistry
     {
@@ -80,9 +141,14 @@ namespace AtlasLedger.Server.Jobs
         }
 
         /// <summary>
-        /// Gets the jobs, by key.
+        /// Gets the jobs.
         /// </summary>
         public IReadOnlyCollection<JobDescriptor> All => this.jobs.Values;
+
+        /// <summary>
+        /// Gets the jobs' keys, in order.
+        /// </summary>
+        public string Keys => string.Join(", ", this.jobs.Keys.Order(StringComparer.Ordinal));
 
         /// <summary>
         /// Finds every job in an assembly.
@@ -93,7 +159,7 @@ namespace AtlasLedger.Server.Jobs
         {
             ArgumentNullException.ThrowIfNull(assembly);
             return new JobRegistry(assembly.GetTypes()
-                .Where(type => type is { IsClass: true, IsAbstract: false } && typeof(ITenantJob).IsAssignableFrom(type))
+                .Where(type => type is { IsClass: true, IsAbstract: false })
                 .Select(type => (Type: type, Attribute: type.GetCustomAttribute<JobAttribute>()))
                 .Where(item => item.Attribute is not null)
                 .Select(item => new JobDescriptor(item.Attribute!.Key, item.Type, item.Attribute.MarketDaysOnly)));

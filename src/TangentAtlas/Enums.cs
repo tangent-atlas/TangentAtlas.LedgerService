@@ -42,6 +42,21 @@ namespace AtlasLedger.Model
     }
 
     /// <summary>
+    /// What a job's schedule row asks for.  Stored as a number: never renumber.
+    /// </summary>
+    public enum JobStatus
+    {
+        /// <summary>Off: it doesn't run on its own, whatever the schedule says (a task can still be run by hand).</summary>
+        Off = 0,
+
+        /// <summary>On: a service runs now, until the status changes.  Not for a task: run it by hand instead.</summary>
+        On = 1,
+
+        /// <summary>Scheduled: a task runs when its cron says; a service is on from its start cron to its stop cron.</summary>
+        Scheduled = 2,
+    }
+
+    /// <summary>
     /// The more specific types of brokerage account.
     /// </summary>
     public enum BrokerageType

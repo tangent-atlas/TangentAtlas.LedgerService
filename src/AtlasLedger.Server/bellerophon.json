@@ -19,6 +19,7 @@
     "futureType": "AtlasLedger.Model.FutureType",
     "guid": "System.Guid",
     "int": "System.Int32",
+    "jobStatus": "AtlasLedger.Model.JobStatus",
     "lineEffect": "AtlasLedger.Model.LineEffect",
     "long": "System.Int64",
     "money": { "precision": 19, "scale": 4, "type": "System.Decimal" },
@@ -313,15 +314,16 @@
       }
     },
     "JobSchedule": {
-      "description": "When a job runs for this tenant: Job is the job's key (the [Job] attribute on its class, such as GenerateOrders), CronSchedule a Quartz cron expression, TimeZone the IANA zone it is read in. A job marked for market days skips the NYSE's holidays. A missed run is skipped, not made up. The scheduler acts on each commit: an inserted or changed row is (re)scheduled at once; turning IsEnabled off or deleting the row unschedules the job and cancels a run in progress.",
+      "description": "A job of this tenant's, and when it runs: Job is the job's key (the [Job] attribute on its class, such as GenerateOrders). Status is what is asked for: Off (it doesn't run on its own), On (a service runs now, until changed; not for a task) or Scheduled. Scheduled, a task runs at each CronSchedule time; a service is on from each CronSchedule time to the next StopSchedule time. Both are Quartz cron expressions, read in TimeZone (IANA). A job marked for market days skips the NYSE's holidays. A missed run is skipped, not made up. The scheduler acts on each commit: a change takes effect at once; turning a row Off or deleting it stops what it started, cancelling a run in progress.",
       "key": ["JobScheduleId"],
       "columns": {
-        "CronSchedule": { "maxLength": 128, "type": "string" },
+        "CronSchedule": { "maxLength": 128, "type": "string?" },
         "Description": { "maxLength": 256, "type": "string?" },
-        "IsEnabled": "bool",
         "Job": { "maxLength": 64, "type": "string" },
         "JobScheduleId": "guid",
-        "TimeZone": { "maxLength": 64, "type": "string" }
+        "Status": "jobStatus",
+        "StopSchedule": { "maxLength": 128, "type": "string?" },
+        "TimeZone": { "maxLength": 64, "type": "string?" }
       }
     },
     "Order": {

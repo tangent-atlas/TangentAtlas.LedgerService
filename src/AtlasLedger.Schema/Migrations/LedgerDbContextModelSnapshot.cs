@@ -493,16 +493,12 @@ namespace AtlasLedger.Schema.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CronSchedule")
-                        .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("Description")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("bit");
 
                     b.Property<string>("Job")
                         .IsRequired()
@@ -512,8 +508,14 @@ namespace AtlasLedger.Schema.Migrations
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StopSchedule")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<string>("TimeZone")
-                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 

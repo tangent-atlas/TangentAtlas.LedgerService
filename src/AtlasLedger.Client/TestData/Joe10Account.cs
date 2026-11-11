@@ -275,7 +275,7 @@ namespace AtlasLedger.Client.TestData
         /// <returns>The script.</returns>
         public static LedgerScript Jobs() =>
             new LedgerScript()
-                .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = GenerateOrdersScheduleId, Job = "GenerateOrders", CronSchedule = "0 45 15 ? * MON-FRI", TimeZone = "America/New_York", IsEnabled = true, Description = "Rebalance: turn the proposed trades into orders, fifteen minutes before the close." });
+                .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = GenerateOrdersScheduleId, Job = "GenerateOrders", CronSchedule = "0 45 15 ? * MON-FRI", TimeZone = "America/New_York", Status = JobStatus.Scheduled, Description = "Rebalance: turn the proposed trades into orders, fifteen minutes before the close." });
 
         /// <summary>
         /// Builds a weights script: the Joe 10's weights at a close (each company's weight times the share in stocks) as the

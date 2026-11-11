@@ -59,12 +59,13 @@ through the API stays on for four hours unless told otherwise (at most 24).  No 
 compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
 on rebuilds them from the log.
 
-The rules propose, continuously, the trades each account's model calls for; nothing is ordered until the `trading`
-service (the order generator, at 3:45 pm New York each weekday, `Trading:TimeOfDay`) or an operator
-(`ledger-operator trade <tenant>`) turns the proposals into orders.  The `broker` service is the order router: it sends
-broker orders to their brokers and records what they report; nothing is sent to a broker while it is off.  Both start
-off unless `Services:StartOn` names them.  To run an account that trades itself every weekday against the simulated
-broker: `Services__StartOn=rules,market-feed,trading,broker`.
+The rules propose, continuously, the trades each account's model calls for; nothing is ordered until a scheduled
+`GenerateOrders` job or an operator (`ledger-operator trade <tenant>`) turns the proposals into orders.  The `trading`
+switch stops the whole system's scheduled order generation: while it is off, a scheduled run does nothing.  The `broker`
+service is the order router: it sends broker orders to their brokers and records what they report; nothing is sent to a
+broker while it is off.  Both start off unless `Services:StartOn` names them.  To run an account that trades itself every
+market day against the simulated broker: `Services__StartOn=rules,market-feed,trading,broker`, and load
+`joe10-jobs.json` from the test data.
 
 ```
 dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when
@@ -77,6 +78,23 @@ With `ledger-client.json` in place the operator reaches the server in Azure; `--
 another.  The walkthrough turns on the services that are off, and off again only those, when it finishes.  The API is
 `v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
 application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
+
+## Scheduled jobs
+
+Jobs run on Quartz.NET, in memory.  Each tenant's `JobSchedule` rows say what runs when: `Job` names a job by its key,
+`CronSchedule` is a Quartz cron expression (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on weekdays), and `TimeZone`
+is the IANA zone it is read in (`America/New_York`).  A job is a class implementing `ITenantJob` with a `[Job("key")]`
+attribute (`src/AtlasLedger.Server/Jobs`); the server finds them at start-up, and two with one key stop it starting.  The
+scheduler compares the rows with what it has scheduled every few seconds (`Jobs:ReconcileInterval`): add a row to
+schedule a job, change it to reschedule, delete it to stop.  A job marked for market days skips the NYSE's holidays
+(listed through 2028 in `MarketCalendar`; early closings still run).  A run missed while the server was down is skipped,
+not made up.  Nothing about runs is persisted: `ledger-operator jobs <tenant>` (`v1/tenants/{id}/jobs`) shows each
+schedule, why it isn't scheduled if it isn't (an unknown key, a bad expression or zone), its next run, and what its last
+run since start-up did.
+
+| Job | Market days | Does |
+| --- | --- | --- |
+| `GenerateOrders` | yes | Turns the tenant's proposed trades into orders (while the `trading` switch is on). |
 
 ## License
 

@@ -119,6 +119,16 @@ namespace AtlasLedger.Client.Api
             ?? throw new InvalidOperationException("The server returned nothing.");
 
         /// <summary>
+        /// Gets where a tenant's scheduled jobs stand.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The jobs the server has and the tenant's schedules' states.</returns>
+        public async Task<TenantJobs> GetJobsAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantJobs>(HttpMethod.Get, $"v1/tenants/{tenantId}/jobs", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no jobs.");
+
+        /// <summary>
         /// Gets the state of a tenant's orders, from the rules' latest snapshot.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>

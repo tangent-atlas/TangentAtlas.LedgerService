@@ -8,32 +8,11 @@ namespace AtlasLedger.Server.Orders
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
-    using System.Threading;
-    using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Holdings;
-    using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
-    using Microsoft.Extensions.Hosting;
     using Microsoft.Extensions.Logging;
-    using Microsoft.Extensions.Options;
-
-    /// <summary>
-    /// Settings for the order generator.
-    /// </summary>
-    public sealed class TradingOptions
-    {
-        /// <summary>
-        /// The settings section.
-        /// </summary>
-        public const string SectionName = "Trading";
-
-        /// <summary>
-        /// Gets or sets when the order generator runs, each weekday, in New York: default 3:45 pm.
-        /// </summary>
-        public TimeOnly TimeOfDay { get; set; } = new TimeOnly(15, 45);
-    }
 
     /// <summary>
     /// What one run of the order generator did for a tenant.
@@ -45,8 +24,8 @@ namespace AtlasLedger.Server.Orders
     public sealed record GeneratedOrders(int Orders, int BrokerOrders, int Waiting, string? Reason);
 
     /// <summary>
-    /// Turns the rules' proposed allocations into orders: at the scheduled time each weekday while its switch
-    /// (<see cref="ServiceSwitchboard.Trading"/>) is on, or when an operator asks.  For each tenant it takes the proposals
+    /// Turns the rules' proposed allocations into orders: when a tenant's GenerateOrders job runs (its schedule, while the
+    /// trading switch is on), or when an operator asks.  For each tenant it takes the proposals
     /// of the rules' latest snapshot and writes, in one transaction, an order per asset and side (aggregating every account
     /// that wants it), the allocations that went into it, and a market day broker order per account.  The order router
     /// sends them.
@@ -56,19 +35,13 @@ namespace AtlasLedger.Server.Orders
     /// for them.  The one race is running again before the rules have seen the last run's orders; so a run works only from a
     /// snapshot of the rules that has applied the tenant's ledger through the last run's commit.
     /// </remarks>
-    public sealed partial class OrderGenerator : BackgroundService
+    public sealed partial class OrderGenerator
     {
-        private static readonly TimeZoneInfo Exchange = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-
         private readonly Ledger ledger;
 
         private readonly RulesEngineHost host;
 
         private readonly HoldingsStore store;
-
-        private readonly ServiceSwitch serviceSwitch;
-
-        private readonly TradingOptions options;
 
         private readonly TimeProvider timeProvider;
 
@@ -84,43 +57,15 @@ namespace AtlasLedger.Server.Orders
         /// <param name="ledger">The ledger.</param>
         /// <param name="host">The rules engines, for how far each has applied its tenant's ledger.</param>
         /// <param name="store">The rules' snapshots, holding the proposals.</param>
-        /// <param name="switchboard">The services' switches.</param>
-        /// <param name="options">The settings.</param>
         /// <param name="timeProvider">The clock.</param>
         /// <param name="logger">The log.</param>
-        public OrderGenerator(Ledger ledger, RulesEngineHost host, HoldingsStore store, ServiceSwitchboard switchboard, IOptions<TradingOptions> options, TimeProvider timeProvider, ILogger<OrderGenerator> logger)
+        public OrderGenerator(Ledger ledger, RulesEngineHost host, HoldingsStore store, TimeProvider timeProvider, ILogger<OrderGenerator> logger)
         {
-            ArgumentNullException.ThrowIfNull(switchboard);
-            ArgumentNullException.ThrowIfNull(options);
             this.ledger = ledger;
             this.host = host;
             this.store = store;
-            this.serviceSwitch = switchboard[ServiceSwitchboard.Trading];
-            this.options = options.Value;
             this.timeProvider = timeProvider;
             this.logger = logger;
-        }
-
-        /// <summary>
-        /// The next scheduled run after a time: the time of day in New York, on the next weekday it hasn't passed.
-        /// </summary>
-        /// <param name="after">The time.</param>
-        /// <param name="timeOfDay">The time of day, in New York.</param>
-        /// <returns>The next run.</returns>
-        public static DateTimeOffset NextRun(DateTimeOffset after, TimeOnly timeOfDay)
-        {
-            var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(after, Exchange).DateTime);
-            while (true)
-            {
-                var local = day.ToDateTime(timeOfDay);
-                var run = new DateTimeOffset(local, Exchange.GetUtcOffset(local));
-                if (run > after && day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
-                {
-                    return run;
-                }
-
-                day = day.AddDays(1);
-            }
         }
 
         /// <summary>
@@ -195,58 +140,8 @@ namespace AtlasLedger.Server.Orders
             }
         }
 
-        /// <inheritdoc/>
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            try
-            {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    if (!this.serviceSwitch.IsOn)
-                    {
-                        await this.serviceSwitch.WaitForChangeAsync(stoppingToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    var next = NextRun(this.timeProvider.GetUtcNow(), this.options.TimeOfDay);
-                    this.LogScheduled(next);
-                    using (var change = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
-                    {
-                        var switched = this.serviceSwitch.WaitForChangeAsync(change.Token);
-                        var due = Task.Delay(next - this.timeProvider.GetUtcNow(), this.timeProvider, change.Token);
-                        var first = await Task.WhenAny(switched, due).ConfigureAwait(false);
-                        await change.CancelAsync().ConfigureAwait(false);
-                        if (first != due || !this.serviceSwitch.IsOn)
-                        {
-                            continue;   // switched off (or on again): reconsider
-                        }
-                    }
-
-                    foreach (var partition in this.ledger.Partitions.ToArray())
-                    {
-                        if (!partition.IsFaulted)
-                        {
-                            var result = this.Generate(partition.TenantId);
-                            if (result.Reason is { } reason)
-                            {
-                                this.LogSkipped(partition.TenantId, reason);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        [LoggerMessage(Level = LogLevel.Information, Message = "Order generator: next run at {Next}.")]
-        private partial void LogScheduled(DateTimeOffset next);
-
         [LoggerMessage(Level = LogLevel.Information, Message = "Order generator, tenant {TenantId}: {Orders} order(s), {BrokerOrders} broker order(s); {Waiting} account(s) waiting for prices.")]
         private partial void LogGenerated(Guid tenantId, int orders, int brokerOrders, int waiting);
 
-        [LoggerMessage(Level = LogLevel.Warning, Message = "Order generator, tenant {TenantId}: nothing written: {Reason}")]
-        private partial void LogSkipped(Guid tenantId, string reason);
     }
 }

@@ -137,6 +137,41 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Shows a tenant's scheduled jobs: each schedule, whether it is scheduled, when it runs next, and what its last run
+        /// did.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the jobs are shown.</returns>
+        public static async Task JobsAsync(LedgerApiClient api, Guid tenantId, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var jobs = await api.GetJobsAsync(tenantId, cancellationToken).ConfigureAwait(false);
+            static string Time(DateTimeOffset? time) => time is { } value ? value.ToLocalTime().ToString("ddd yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture) : "-";
+            output.WriteLine($"Jobs of {tenantId} (the server has: {string.Join(", ", jobs.Jobs)})");
+            if (jobs.Schedules.Count == 0)
+            {
+                output.WriteLine("  No schedules (add JobSchedule rows to schedule a job).");
+            }
+
+            foreach (var schedule in jobs.Schedules)
+            {
+                output.WriteLine();
+                output.WriteLine($"{schedule.Job}  {schedule.CronSchedule}  ({schedule.TimeZone})  {schedule.Status}");
+                if (schedule.Message is { } message)
+                {
+                    output.WriteLine($"  {message}");
+                }
+
+                output.WriteLine($"  next run  {Time(schedule.NextRun)}");
+                output.WriteLine($"  last run  {Time(schedule.LastRun)}{(schedule.LastOutcome is { } outcome ? $": {outcome}" : string.Empty)}");
+            }
+        }
+
+        /// <summary>
         /// Shows the state of a tenant's orders: each order with its allocations and broker orders.
         /// </summary>
         /// <param name="api">The API.</param>

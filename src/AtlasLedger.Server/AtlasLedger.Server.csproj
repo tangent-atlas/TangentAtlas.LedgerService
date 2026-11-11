@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <!-- The generator.  A development dependency: it runs in the compiler and ships nothing at run time. -->
+    <PackageReference Include="Quartz" />
     <PackageReference Include="Bellerophon" />
     <PackageReference Include="Bellerophon.Runtime" />
     <!-- Referencing these makes the generator emit the rules adapters and the SQL Server writer and loader. -->

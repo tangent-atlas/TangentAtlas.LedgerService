@@ -12,6 +12,7 @@ namespace AtlasLedger.Server
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Compliance;
     using AtlasLedger.Server.Holdings;
+    using AtlasLedger.Server.Jobs;
     using AtlasLedger.Server.Market;
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
@@ -141,10 +142,16 @@ namespace AtlasLedger.Server
             builder.Services.AddSingleton<IBroker, SimulatedBroker>();
             builder.Services.AddHostedService<OrderRouter>();
 
-            // The order generator: turns the rules' proposed allocations into orders on a schedule (its switch) or on demand.
-            builder.Services.Configure<TradingOptions>(configuration.GetSection(TradingOptions.SectionName));
+            // The order generator: turns the rules' proposed allocations into orders, when its job runs or on demand.
             builder.Services.AddSingleton<OrderGenerator>();
-            builder.Services.AddHostedService(services => services.GetRequiredService<OrderGenerator>());
+
+            // Scheduled jobs: Quartz.NET, in memory, made by the scheduler itself (not Quartz's DI package, whose logging is process-wide).  Each tenant's JobSchedule rows say which job runs when; a job is a
+            // class with a [Job("key")] attribute, found here.  The scheduler starts after the tenants are recovered.
+            builder.Services.Configure<JobOptions>(configuration.GetSection(JobOptions.SectionName));
+            var jobs = JobRegistry.Discover(typeof(AtlasLedgerServer).Assembly);
+            builder.Services.AddSingleton(jobs);
+            builder.Services.AddSingleton<JobStatusStore>();
+            builder.Services.AddHostedService<JobScheduler>();
 
             // Callers: bearer tokens from the identity provider (Microsoft Entra External ID) when one is configured;
             // otherwise development sign-in, in the Development environment only.  With neither, the server does not start:

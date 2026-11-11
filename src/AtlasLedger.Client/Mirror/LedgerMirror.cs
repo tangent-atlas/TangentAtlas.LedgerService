@@ -65,6 +65,7 @@ namespace AtlasLedger.Client.Mirror
                         "Brokerage" => await api.ListAsync<BrokerageDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Model" => await api.ListAsync<ModelDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Weight" => await api.ListAsync<WeightDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "JobSchedule" => await api.ListAsync<JobScheduleDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "CancelRequest" => await api.ListAsync<CancelRequestDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Order" => await api.ListAsync<OrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Allocation" => await api.ListAsync<AllocationDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
@@ -108,6 +109,7 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<BrokerageDto> brokerages: foreach (var dto in brokerages) { transaction.ApplyBrokerage(dto); } break;
                     case IReadOnlyList<ModelDto> models: foreach (var dto in models) { transaction.ApplyModel(dto); } break;
                     case IReadOnlyList<WeightDto> weights: foreach (var dto in weights) { transaction.ApplyWeight(dto); } break;
+                    case IReadOnlyList<JobScheduleDto> schedules: foreach (var dto in schedules) { transaction.ApplyJobSchedule(dto); } break;
                     case IReadOnlyList<CancelRequestDto> cancels: foreach (var dto in cancels) { transaction.ApplyCancelRequest(dto); } break;
                     case IReadOnlyList<OrderDto> orders: foreach (var dto in orders) { transaction.ApplyOrder(dto); } break;
                     case IReadOnlyList<AllocationDto> allocations: foreach (var dto in allocations) { transaction.ApplyAllocation(dto); } break;

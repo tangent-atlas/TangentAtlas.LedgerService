@@ -40,6 +40,8 @@ namespace AtlasLedger.Operator
               orders <tenant>                 Show what each account's model proposes, and each order's state: its
                                               allocations, broker orders and fills.
               trade <tenant>                  Turn the proposals into orders now, as the scheduled run would.
+              jobs <tenant>                   Show the tenant's scheduled jobs: when each runs next, and what its
+                                              last run did.
               weights <tenant> <script.json>  Replace the weights of each model the script names with the script's
                                               Weight rows: changes, removes and adds rows to match, in one batch.
               services                        Show the server's optional services (market feed, rules engine).
@@ -111,6 +113,9 @@ namespace AtlasLedger.Operator
                         return 0;
                     case "trade" when positional.Count == 2:
                         await Commands.TradeAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 2:
+                        await Commands.JobsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
                         return 0;
                     case "orders" when positional.Count == 2:
                         await Commands.OrdersAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

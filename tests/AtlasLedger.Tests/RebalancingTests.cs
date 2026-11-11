@@ -35,13 +35,9 @@ namespace AtlasLedger.Tests
         private static readonly IReadOnlyDictionary<(string From, string To), decimal> Rates = new Dictionary<(string From, string To), decimal> { [("USD", "USD")] = 1m };
 
         [Fact]
-        public void TheTradingDayAndTheOrderGeneratorsScheduleAreInNewYork()
+        public void TheTradingDayIsInNewYork()
         {
             Assert.Equal(new DateOnly(2026, 11, 9), Rebalancing.TradingDay(Monday.AddHours(3)));   // 11:50 pm in New York, still Monday
-            var quarterTo4 = new TimeOnly(15, 45);
-            Assert.Equal(new DateTimeOffset(2026, 11, 10, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday, quarterTo4));   // 3:50 pm Monday: next is Tuesday
-            Assert.Equal(new DateTimeOffset(2026, 11, 9, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday.AddHours(-1), quarterTo4));   // 2:50 pm: today
-            Assert.Equal(new DateTimeOffset(2026, 11, 16, 20, 45, 0, TimeSpan.Zero), OrderGenerator.NextRun(Monday.AddDays(4), quarterTo4));   // Friday after: Monday
         }
 
         [Fact]

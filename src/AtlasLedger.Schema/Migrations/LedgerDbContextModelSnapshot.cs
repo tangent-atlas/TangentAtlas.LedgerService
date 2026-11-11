@@ -484,6 +484,42 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Institution", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.JobSchedule", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("JobScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CronSchedule")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Job")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("TenantId", "JobScheduleId")
+                        .HasName("PK_JobSchedule");
+
+                    b.ToTable("JobSchedule", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.LedgerWatermark", b =>
                 {
                     b.Property<Guid>("TenantId")

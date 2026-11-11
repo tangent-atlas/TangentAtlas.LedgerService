@@ -22,7 +22,7 @@ namespace AtlasLedger.TestData
         private const string Usage = """
             Usage: test-data joe10 [--state <joe10.json>] [--deposit <dollars>] [--out <folder>]
 
-            Writes a test account holding the Joe 10, as two scripts for script-loader:
+            Writes a test account holding the Joe 10, as scripts for script-loader:
               joe10-reference.json   the account, its connection, and its assets (US dollars and the ten
                                      companies) with their names (rows)
               joe10-history.json     a deposit of dollars, then one purchase per company at the last close,
@@ -34,10 +34,12 @@ namespace AtlasLedger.TestData
                                      the history or the trading script, not both.
               joe10-opening.json     the deposit only, for an account the rules rebalance: with the
                                      the weights, the rules propose buying the Joe 10, and the order
-                                     generator (3:45 pm New York, or ledger-operator trade) orders it
+                                     generator (its scheduled job, or ledger-operator trade) orders it
               joe10-weights.json     the close's weights (each company's weight times the share in stocks) as
                                      the Joe 10 model's weights: load it once, then each day replace them with
                                      ledger-operator weights <tenant> joe10-weights.json
+              joe10-jobs.json        the schedule that generates the account's orders: 3:45 pm New York on
+                                     market days, while the trading switch is on (ledger-operator jobs <tenant>)
 
               --state <joe10.json>   Optional. Without it, a generic Joe 10: ten large US companies at equal
                                      weights, half the account in stocks, each at $100 (where the simulated
@@ -101,11 +103,13 @@ namespace AtlasLedger.TestData
             var tradingPath = Path.Combine(folder, "joe10-trading.json");
             var openingPath = Path.Combine(folder, "joe10-opening.json");
             var weightsPath = Path.Combine(folder, "joe10-weights.json");
+            var jobsPath = Path.Combine(folder, "joe10-jobs.json");
             await WriteAsync(Joe10Account.Reference(state), referencePath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.History(state, deposit), historyPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Trading(state, deposit), tradingPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Opening(state, deposit), openingPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Weights(state), weightsPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Jobs(), jobsPath).ConfigureAwait(false);
 
             var english = CultureInfo.GetCultureInfo("en-US");
             var purchases = Joe10Account.Purchases(state, deposit);
@@ -117,7 +121,7 @@ namespace AtlasLedger.TestData
             }
 
             Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
-            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath} and {weightsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
+            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath}, {weightsPath} and {jobsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }
 

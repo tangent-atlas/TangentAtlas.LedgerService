@@ -123,6 +123,11 @@ namespace AtlasLedger.Client.TestData
         /// </summary>
         public static readonly Guid InstitutionId = KeyFor("institution/simulator");
 
+        /// <summary>
+        /// The schedule that generates the tenant's orders: 3:45 pm in New York on market days.
+        /// </summary>
+        public static readonly Guid GenerateOrdersScheduleId = KeyFor("job/GenerateOrders");
+
         private const string ExternalAccountNumber = "JOE10-TEST";
 
         /// <summary>
@@ -261,6 +266,16 @@ namespace AtlasLedger.Client.TestData
         /// <param name="deposit">The dollars paid in.</param>
         /// <returns>The script.</returns>
         public static LedgerScript Opening(Joe10State state, decimal deposit) => Deposit(state, deposit);
+
+        /// <summary>
+        /// Builds the jobs script: the schedule that rebalances the tenant, generating its orders at 3:45 pm in New York on
+        /// market days (while the trading switch is on).  Separate from the reference, so it can be added to a tenant that
+        /// already has its reference rows.
+        /// </summary>
+        /// <returns>The script.</returns>
+        public static LedgerScript Jobs() =>
+            new LedgerScript()
+                .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = GenerateOrdersScheduleId, Job = "GenerateOrders", CronSchedule = "0 45 15 ? * MON-FRI", TimeZone = "America/New_York", Description = "Rebalance: turn the proposed trades into orders, fifteen minutes before the close." });
 
         /// <summary>
         /// Builds a weights script: the Joe 10's weights at a close (each company's weight times the share in stocks) as the

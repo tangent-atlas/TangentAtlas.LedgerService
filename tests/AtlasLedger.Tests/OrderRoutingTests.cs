@@ -101,7 +101,8 @@ namespace AtlasLedger.Tests
         public async Task OrdersWrittenBeforeTheRulesSeeThemAreNotWrittenAgain()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
-            await using var server = ServerFixture.With(["--Services:StartOn=rules,market-feed", "--MarketFeed:TickInterval=00:00:00.100", "--MarketFeed:BadPrintInterval=1.00:00:00"]);
+            // Prices every five seconds: still while it checks, so a move can't call for a top-up that looks like a repeat.
+            await using var server = ServerFixture.With(["--Services:StartOn=rules,market-feed", "--MarketFeed:TickInterval=00:00:05", "--MarketFeed:BadPrintInterval=1.00:00:00"]);
             await server.InitializeAsync();
             var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
             var tenantId = Guid.NewGuid();
@@ -252,7 +253,7 @@ namespace AtlasLedger.Tests
             Assert.Equal(2_401m, holdings.Holdings.Single(holding => holding.AssetId == Joe10Account.AssetIdOf("AAA")).CostBasis);   // 10 at $120 and 10 at $120, plus $1 in fees
         }
 
-        private static async Task<T> WaitForAsync<T>(Func<Task<T>> read, Func<T, bool> condition)
+        internal static async Task<T> WaitForAsync<T>(Func<Task<T>> read, Func<T, bool> condition)
         {
             var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
             while (true)
@@ -275,7 +276,7 @@ namespace AtlasLedger.Tests
             }
         }
 
-        private static Joe10State ReadState()
+        internal static Joe10State ReadState()
         {
             var path = Path.Combine(Path.GetTempPath(), $"joe10-state-{Guid.NewGuid():N}.json");
             File.WriteAllText(path, StateJson);

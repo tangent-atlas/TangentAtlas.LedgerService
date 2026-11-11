@@ -200,9 +200,15 @@ namespace AtlasLedger.Server.Compliance
             {
                 this.LogRejected(result.TenantId, rejected.Message);
             }
+            else if (result.CommittedSequence > 0)
+            {
+                // Something was written: a rebalance, bookings, alerts.
+                this.LogCommitted(result.TenantId, result.CommittedSequence, result.RulesFired, result.FactChanges);
+            }
             else if (result.RulesFired > 0)
             {
-                this.LogDecisions(result.TenantId, result.RulesFired, result.FactChanges, result.CommittedSequence);
+                // Rules fired but wrote nothing (prices and holdings recomputed as the market moves): every tick, so debug only.
+                this.LogRecomputed(result.TenantId, result.RulesFired, result.FactChanges);
             }
         }
 
@@ -214,8 +220,11 @@ namespace AtlasLedger.Server.Compliance
         [LoggerMessage(Level = LogLevel.Information, Message = "Rules: switched off; {TenantCount} tenant engine(s) stopped.")]
         private partial void LogSwitchedOff(int tenantCount);
 
-        [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: {RulesFired} decision(s) from {FactChanges} fact change(s), committed at {Sequence}.")]
-        private partial void LogDecisions(Guid tenantId, int rulesFired, int factChanges, long sequence);
+        [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: committed at sequence {Sequence} ({RulesFired} rule firing(s) from {FactChanges} fact change(s)).")]
+        private partial void LogCommitted(Guid tenantId, long sequence, int rulesFired, int factChanges);
+
+        [LoggerMessage(Level = LogLevel.Debug, Message = "Rules for tenant {TenantId}: {RulesFired} rule firing(s) from {FactChanges} fact change(s); nothing to commit.")]
+        private partial void LogRecomputed(Guid tenantId, int rulesFired, int factChanges);
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Rules for tenant {TenantId}: decisions refused ({Reason}); the rules decide again with newer data.")]
         private partial void LogRejected(Guid tenantId, string reason);

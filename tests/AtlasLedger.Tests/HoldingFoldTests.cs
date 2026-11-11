@@ -23,7 +23,7 @@ namespace AtlasLedger.Tests
     {
         private static readonly Guid Account = Guid.Parse("00000000-0000-0000-0000-00000000000a");
 
-        private static readonly AccountFact Holder = new AccountFact(new AccountDto { AccountId = Account, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
+        private static readonly AccountFact Holder = new AccountFact(new AccountDto { AccountId = Account, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
 
         private static readonly AssetFact Stock = AssetOf(Guid.Parse("00000000-0000-0000-0000-00000000000b"), AssetType.Equity, ValueFactor.One, ValueFactor.One);
 

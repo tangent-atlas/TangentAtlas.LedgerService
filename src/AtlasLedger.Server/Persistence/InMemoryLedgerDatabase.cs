@@ -97,7 +97,8 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Future"], cut.ChangedFutures, cut.DeletedFutures, dto => dto.AssetId.ToString());
                 Apply(tables["Option"], cut.ChangedOptions, cut.DeletedOptions, dto => dto.AssetId.ToString());
                 Apply(tables["PriceOverride"], cut.ChangedPriceOverrides, cut.DeletedPriceOverrides, dto => dto.PriceOverrideId.ToString());
-                Apply(tables["TargetWeight"], cut.ChangedTargetWeights, cut.DeletedTargetWeights, dto => $"{dto.AccountId}/{dto.EffectiveDate:yyyy-MM-dd}/{dto.AssetId}");
+                Apply(tables["Model"], cut.ChangedModels, cut.DeletedModels, dto => dto.ModelId.ToString());
+                Apply(tables["Weight"], cut.ChangedWeights, cut.DeletedWeights, dto => $"{dto.ModelId}/{dto.AssetId}");
                 Apply(tables["RebalanceSetting"], cut.ChangedRebalanceSettings, cut.DeletedRebalanceSettings, dto => dto.AccountId.ToString());
                 Apply(tables["Rebalance"], cut.ChangedRebalances, cut.DeletedRebalances, dto => $"{dto.AccountId}/{dto.TradingDay:yyyy-MM-dd}");
                 Apply(tables["CancelRequest"], cut.ChangedCancelRequests, cut.DeletedCancelRequests, dto => dto.CancelRequestId.ToString());

@@ -63,7 +63,8 @@ namespace AtlasLedger.Client.Mirror
                         "Future" => await api.ListAsync<FutureDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Option" => await api.ListAsync<OptionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "PriceOverride" => await api.ListAsync<PriceOverrideDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "TargetWeight" => await api.ListAsync<TargetWeightDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Model" => await api.ListAsync<ModelDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Weight" => await api.ListAsync<WeightDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "RebalanceSetting" => await api.ListAsync<RebalanceSettingDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "Rebalance" => await api.ListAsync<RebalanceDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "CancelRequest" => await api.ListAsync<CancelRequestDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
@@ -107,7 +108,8 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<FutureDto> futures: foreach (var dto in futures) { transaction.ApplyFuture(dto); } break;
                     case IReadOnlyList<OptionDto> options: foreach (var dto in options) { transaction.ApplyOption(dto); } break;
                     case IReadOnlyList<PriceOverrideDto> priceOverrides: foreach (var dto in priceOverrides) { transaction.ApplyPriceOverride(dto); } break;
-                    case IReadOnlyList<TargetWeightDto> targets: foreach (var dto in targets) { transaction.ApplyTargetWeight(dto); } break;
+                    case IReadOnlyList<ModelDto> models: foreach (var dto in models) { transaction.ApplyModel(dto); } break;
+                    case IReadOnlyList<WeightDto> weights: foreach (var dto in weights) { transaction.ApplyWeight(dto); } break;
                     case IReadOnlyList<RebalanceSettingDto> settings: foreach (var dto in settings) { transaction.ApplyRebalanceSetting(dto); } break;
                     case IReadOnlyList<RebalanceDto> rebalances: foreach (var dto in rebalances) { transaction.ApplyRebalance(dto); } break;
                     case IReadOnlyList<CancelRequestDto> cancels: foreach (var dto in cancels) { transaction.ApplyCancelRequest(dto); } break;

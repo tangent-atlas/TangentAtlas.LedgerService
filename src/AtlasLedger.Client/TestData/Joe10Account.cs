@@ -94,6 +94,11 @@ namespace AtlasLedger.Client.TestData
         /// <summary>The US dollar, the account's cash.</summary>
         public static readonly Guid DollarId = KeyFor("asset/USD");
 
+        /// <summary>
+        /// The Joe 10 model: the weights the account is to hold.
+        /// </summary>
+        public static readonly Guid ModelId = KeyFor("model");
+
         private const string ExternalAccountNumber = "JOE10-TEST";
 
         /// <summary>
@@ -105,8 +110,9 @@ namespace AtlasLedger.Client.TestData
         {
             ArgumentNullException.ThrowIfNull(state);
             var script = new LedgerScript()
+                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10" })
                 .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar })
+                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = ModelId })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
                 .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber })
                 .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
@@ -223,7 +229,7 @@ namespace AtlasLedger.Client.TestData
 
         /// <summary>
         /// Builds the opening script for an account the rules rebalance: the deposit only.  The first rebalance buys the
-        /// Joe 10 with it (load the plan and the targets too).
+        /// Joe 10 with it (load the plan and the weights too).
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <param name="deposit">The dollars paid in.</param>
@@ -242,20 +248,20 @@ namespace AtlasLedger.Client.TestData
             new LedgerScript().Insert("RebalanceSetting", new RebalanceSettingDto { AccountId = AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = broker, WeekdaysOnly = weekdaysOnly });
 
         /// <summary>
-        /// Builds a targets script: the Joe 10's weights at a close (each company's weight times the share in stocks), as
-        /// the account's target weights from that day.  Load one each day, after the forward test has run; the rest stays in
-        /// cash.
+        /// Builds a weights script: the Joe 10's weights at a close (each company's weight times the share in stocks) as the
+        /// Joe 10 model's weights; the rest stays in cash.  Load it once with script-loader; after that, each day, replace the
+        /// model's weights with it (<c>ledger-operator weights &lt;tenant&gt; joe10-weights.json</c>), which changes,
+        /// removes and adds rows to match.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <returns>The script.</returns>
-        public static LedgerScript Targets(Joe10State state)
+        public static LedgerScript Weights(Joe10State state)
         {
             ArgumentNullException.ThrowIfNull(state);
-            var day = DateOnly.FromDateTime(state.Close.UtcDateTime);   // the close is 8 or 9 pm UTC: the same date as in New York
             var script = new LedgerScript();
             foreach (var holding in state.Holdings)
             {
-                script.Insert("TargetWeight", new TargetWeightDto { AccountId = AccountId, EffectiveDate = day, AssetId = AssetIdOf(holding.Ticker), Weight = Math.Round(holding.Weight * state.StockShare, 6, MidpointRounding.ToZero) });
+                script.Insert("Weight", new WeightDto { ModelId = ModelId, AssetId = AssetIdOf(holding.Ticker), Fraction = Math.Round(holding.Weight * state.StockShare, 6, MidpointRounding.ToZero) });
             }
 
             return script;

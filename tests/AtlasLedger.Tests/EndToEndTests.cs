@@ -80,7 +80,7 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(second, exported, cancellationToken);
             var again = await Commands.ExportAsync(tool, second, cancellationToken);
             Assert.Equal(Rows(exported), Rows(again));
-            Assert.Equal(10, Rows(exported).Length);   // firm-a.json: three nodes, two accounts, three symbols, an asset and its equity row
+            Assert.Equal(11, Rows(exported).Length);   // firm-a.json: a model, three nodes, two accounts, three symbols, an asset and its equity row
         }
 
         /// <summary>

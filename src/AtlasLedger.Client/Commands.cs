@@ -10,6 +10,7 @@ namespace AtlasLedger.Client
     using System.IO;
     using System.Linq;
     using System.Net;
+    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Client.Api;
@@ -54,6 +55,69 @@ namespace AtlasLedger.Client
             // Large scripts load in several batches, since the server limits a batch's size.
             await api.ApplyInBatchesAsync(tenantId, script, cancellationToken: cancellationToken).ConfigureAwait(false);
             output.WriteLine($"Loaded {script.Operations.Count} operation(s) from {path} into {tenantId}.");
+        }
+
+        /// <summary>
+        /// Replaces the weights of each model a script names with the script's Weight rows: a weight that changed is
+        /// updated, one the script leaves out is removed, and a new one is added, all in one batch (so the rules never see
+        /// half a model).  The script is the same one script-loader loads the first time.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="path">The script: Weight inserts (other rows are ignored).</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the weights are replaced.</returns>
+        public static async Task ReplaceWeightsAsync(LedgerApiClient api, Guid tenantId, string path, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var script = await LedgerScript.ReadAsync(path, cancellationToken).ConfigureAwait(false);
+            var wanted = script.Operations
+                .Where(operation => operation.Action == ScriptAction.Insert && operation.Table == "Weight" && operation.Row is not null)
+                .Select(operation => operation.Row!.Value.Deserialize<WeightDto>(JsonSerializerOptions.Web)!)
+                .ToArray();
+            var change = ReplaceWeights(wanted, await api.ListAsync<WeightDto>(tenantId, "Weight", cancellationToken).ConfigureAwait(false));
+            if (change.Operations.Count > 0)
+            {
+                await api.ApplyAsync(tenantId, change, cancellationToken).ConfigureAwait(false);
+            }
+
+            output.WriteLine($"Replaced the weights of {wanted.Select(weight => weight.ModelId).Distinct().Count()} model(s) in {tenantId}: {change.Operations.Count} change(s).");
+        }
+
+        /// <summary>
+        /// The batch that turns the current weights of the models named into the weights wanted.
+        /// </summary>
+        /// <param name="wanted">The weights wanted (the models they name are replaced whole).</param>
+        /// <param name="current">The tenant's weights now.</param>
+        /// <returns>The batch: updates, deletes and inserts.</returns>
+        public static LedgerScript ReplaceWeights(IReadOnlyCollection<WeightDto> wanted, IEnumerable<WeightDto> current)
+        {
+            ArgumentNullException.ThrowIfNull(wanted);
+            ArgumentNullException.ThrowIfNull(current);
+            var models = wanted.Select(weight => weight.ModelId).ToHashSet();
+            var now = current.Where(weight => models.Contains(weight.ModelId)).ToDictionary(weight => (weight.ModelId, weight.AssetId));
+            var script = new LedgerScript();
+            foreach (var weight in wanted)
+            {
+                if (!now.TryGetValue((weight.ModelId, weight.AssetId), out var existing))
+                {
+                    script.Insert("Weight", weight);
+                }
+                else if (existing.Fraction != weight.Fraction)
+                {
+                    script.Update("Weight", new { weight.ModelId, weight.AssetId }, new WeightDto { ModelId = weight.ModelId, AssetId = weight.AssetId, Fraction = weight.Fraction, RowVersion = existing.RowVersion });
+                }
+            }
+
+            var kept = wanted.Select(weight => (weight.ModelId, weight.AssetId)).ToHashSet();
+            foreach (var (key, existing) in now.Where(item => !kept.Contains(item.Key)))
+            {
+                script.Delete("Weight", new { key.ModelId, key.AssetId }, existing.RowVersion);
+            }
+
+            return script;
         }
 
         /// <summary>
@@ -155,10 +219,10 @@ namespace AtlasLedger.Client
                 {
                     output.WriteLine(string.Format(
                         english,
-                        "  Paid in {0:#,0.00}, gain {1}; targets of {2}, {3} in cash; last rebalanced {4}",
+                        "  Paid in {0:#,0.00}, gain {1}; model {2}, {3} in cash; last rebalanced {4}",
                         summary.NetContributions,
                         summary.Gain is { } gain ? gain.ToString("#,0.00", english) : "-",
-                        summary.TargetsAsOf?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "none",
+                        summary.ModelName ?? "none",
                         summary.TargetCash is { } cash ? cash.ToString("P1", english) : "-",
                         summary.LastRebalance is { } day ? $"{day:yyyy-MM-dd} ({summary.LastRebalanceOrders} order(s))" : "never"));
                 }

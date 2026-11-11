@@ -63,7 +63,7 @@ namespace AtlasLedger.Tests
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Targets(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Plan(EventSource.Simulator, timeOfDay: 0, weekdaysOnly: false), cancellationToken);
 
             // The rebalance buys both companies with half the account; the simulated broker fills each at once, $1 in fees.
@@ -72,7 +72,7 @@ namespace AtlasLedger.Tests
             var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count == 3);
             var account = holdings.Accounts.Single();
             Assert.Equal((1_000_000m, Rebalancing.TradingDay(DateTimeOffset.UtcNow), 2), (account.NetContributions, account.LastRebalance!.Value, account.LastRebalanceOrders!.Value));
-            Assert.Equal(0.5m, account.TargetCash);
+            Assert.Equal((0.5m, "Joe 10"), (account.TargetCash!.Value, account.ModelName));
             foreach (var holding in holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity))
             {
                 // Bought at the price of the moment, in whole shares: each within a point of its target.

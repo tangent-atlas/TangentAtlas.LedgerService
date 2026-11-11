@@ -38,6 +38,9 @@ namespace AtlasLedger.Schema.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
@@ -491,6 +494,28 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Member", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Model", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "ModelId")
+                        .HasName("PK_Model");
+
+                    b.ToTable("Model", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.Node", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -744,33 +769,6 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Symbol", "dbo");
                 });
 
-            modelBuilder.Entity("AtlasLedger.Model.Schema.TargetWeight", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateOnly>("EffectiveDate")
-                        .HasColumnType("date");
-
-                    b.Property<Guid>("AssetId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<decimal>("Weight")
-                        .HasPrecision(9, 6)
-                        .HasColumnType("decimal(9,6)");
-
-                    b.HasKey("TenantId", "AccountId", "EffectiveDate", "AssetId")
-                        .HasName("PK_TargetWeight");
-
-                    b.ToTable("TargetWeight", "dbo");
-                });
-
             modelBuilder.Entity("AtlasLedger.Model.Schema.Transaction", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -890,6 +888,30 @@ namespace AtlasLedger.Schema.Migrations
                         .HasName("PK_User");
 
                     b.ToTable("User", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Weight", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Fraction")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "ModelId", "AssetId")
+                        .HasName("PK_Weight");
+
+                    b.ToTable("Weight", "dbo");
                 });
 #pragma warning restore 612, 618
         }

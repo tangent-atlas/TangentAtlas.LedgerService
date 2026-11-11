@@ -142,7 +142,7 @@ namespace AtlasLedger.Server.Orders
             RebalanceSettingFact setting = default!;
             ClockFact clock = default!;
             AccountFact account = default!;
-            IEnumerable<TargetWeightFact> targets = default!;
+            IEnumerable<WeightFact> weights = default!;
             IEnumerable<PositionState> positions = default!;
             IEnumerable<AssetFact> assets = default!;
             IEnumerable<EffectivePrice> prices = default!;
@@ -156,14 +156,14 @@ namespace AtlasLedger.Server.Orders
                 .Match(() => clock, candidate => Rebalancing.IsDue(candidate.Now, setting))
                 .Match(() => account, candidate => candidate.AccountId == setting.AccountId)
                 .Not<RebalanceFact>(item => item.AccountId == setting.AccountId, item => item.TradingDay == Rebalancing.TradingDay(clock.Now))
-                .Query(() => targets, query => query.Match<TargetWeightFact>(item => item.AccountId == setting.AccountId).Collect())
+                .Query(() => weights, query => query.Match<WeightFact>(item => item.ModelId == account.ModelId).Collect())
                 .Query(() => positions, query => query.Match<PositionState>(item => item.AccountId == setting.AccountId).Collect())
                 .Query(() => assets, query => query.Match<AssetFact>().Collect())
                 .Query(() => prices, query => query.Match<EffectivePrice>().Collect())
                 .Query(() => rates, query => query.Match<CurrencyRate>().Collect())
                 .Query(() => orders, query => query.Match<OrderState>().Collect());
             this.Then()
-                .Do(_ => Rebalance(actions, setting, clock, account, targets, positions, assets, prices, rates, orders));
+                .Do(_ => Rebalance(actions, setting, clock, account, weights, positions, assets, prices, rates, orders));
         }
 
         private static void Rebalance(
@@ -171,7 +171,7 @@ namespace AtlasLedger.Server.Orders
             RebalanceSettingFact setting,
             ClockFact clock,
             AccountFact account,
-            IEnumerable<TargetWeightFact> targets,
+            IEnumerable<WeightFact> modelWeights,
             IEnumerable<PositionState> positions,
             IEnumerable<AssetFact> assets,
             IEnumerable<EffectivePrice> prices,
@@ -179,10 +179,10 @@ namespace AtlasLedger.Server.Orders
             IEnumerable<OrderState> orders)
         {
             var day = Rebalancing.TradingDay(clock.Now);
-            var weights = Rebalancing.WeightsInForce(targets, day);
+            var weights = Rebalancing.WeightsOf(modelWeights, account.ModelId);
             if (weights.Count == 0)
             {
-                return;
+                return;   // a model with no weights says nothing to do: it never sells the account to cash
             }
 
             var plan = Rebalancing.Plan(

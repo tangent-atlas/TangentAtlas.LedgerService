@@ -201,10 +201,11 @@ namespace AtlasLedger.Persistence.Tests
             var partition = new Ledger { UsesWriteBehind = true }.GetPartition(Guid.NewGuid());
             using (var transaction = partition.BeginTransaction())
             {
+                var model = transaction.InsertModel(new server::AtlasLedger.Model.Primary.Model { ModelId = Guid.NewGuid(), Name = "No weights" });
                 for (var index = 0; index < 5_000; index++)
                 {
                     var node = transaction.InsertNode(Model.NewNode("N" + index));
-                    transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = AccountType.ManagedAccount });
+                    transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = AccountType.ManagedAccount, Currency = "USD", ModelId = model.ModelId });
                 }
 
                 transaction.Commit();

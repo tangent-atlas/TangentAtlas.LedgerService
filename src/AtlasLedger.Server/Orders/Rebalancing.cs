@@ -26,8 +26,8 @@ namespace AtlasLedger.Server.Orders
     /// </summary>
     /// <remarks>
     /// The published rule: the account's value is every holding at its price (cash included), in the account's currency.
-    /// Each asset's target is its weight times that value, in whole units rounded down; an asset held but not in the
-    /// weights has a target of none.  What is held and what open orders will still bring or take is subtracted, and a
+    /// Each asset's target is its weight in the account's model times that value, in whole units rounded down; an asset
+    /// held but not in the model has a target of none.  What is held and what open orders will still bring or take is subtracted, and a
     /// trade smaller than the band (a fraction of the account's value) is skipped.  Cash is what is left: it is never
     /// traded for itself.  A rebalance waits until every asset it needs has a current price (the market's today, or an
     /// operator's override in force); it never trades on a stale price.
@@ -70,29 +70,22 @@ namespace AtlasLedger.Server.Orders
         }
 
         /// <summary>
-        /// The weights in force on a day: the latest date on or before it.
+        /// A model's weights.
         /// </summary>
-        /// <param name="targets">An account's target weights, of every date.</param>
-        /// <param name="day">The trading day.</param>
-        /// <returns>Each asset's weight; empty if none is in force yet.</returns>
-        public static IReadOnlyDictionary<Guid, decimal> WeightsInForce(IEnumerable<TargetWeightFact> targets, DateOnly day)
+        /// <param name="weights">Weights of any models.</param>
+        /// <param name="modelId">The model.</param>
+        /// <returns>Each asset's fraction of the account's value; empty for a model with no weights.</returns>
+        public static IReadOnlyDictionary<Guid, decimal> WeightsOf(IEnumerable<WeightFact> weights, Guid modelId)
         {
-            ArgumentNullException.ThrowIfNull(targets);
-            var list = targets.Where(target => target.EffectiveDate <= day).ToArray();
-            if (list.Length == 0)
-            {
-                return new Dictionary<Guid, decimal>();
-            }
-
-            var latest = list.Max(target => target.EffectiveDate);
-            return list.Where(target => target.EffectiveDate == latest).ToDictionary(target => target.AssetId, target => target.Weight);
+            ArgumentNullException.ThrowIfNull(weights);
+            return weights.Where(weight => weight.ModelId == modelId).ToDictionary(weight => weight.AssetId, weight => weight.Fraction);
         }
 
         /// <summary>
         /// Plans an account's rebalance.
         /// </summary>
         /// <param name="account">The account.</param>
-        /// <param name="weights">The weights in force.</param>
+        /// <param name="weights">The weights of the account's model.</param>
         /// <param name="positions">The account's holdings.</param>
         /// <param name="assets">The tenant's assets, by ID.</param>
         /// <param name="prices">The effective prices, by asset.</param>

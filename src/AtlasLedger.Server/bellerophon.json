@@ -39,15 +39,17 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
-      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them.",
+      "description": "An account: a node that holds assets. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: the weights it is to hold (every account has one, perhaps with no weights).",
       "columns": {
         "AccountId": "guid",
         "AccountType": "accountType",
-        "Currency": { "maxLength": 3, "type": "string" }
+        "Currency": { "maxLength": 3, "type": "string" },
+        "ModelId": "guid"
       },
       "key": ["AccountId"],
       "references": {
-        "Node": { "columns": ["AccountId"] }
+        "Node": { "columns": ["AccountId"] },
+        "Model": { "columns": ["ModelId"] }
       }
     },
     "AccountConnection": {
@@ -287,18 +289,24 @@
         "Node": { "columns": ["NodeId"] }
       }
     },
-    "TargetWeight": {
-      "description": "The customer's specification of an account: each asset's share of the account's value, as of a date (a published methodology's weights for that day, for instance). Recorded once per date and never changed; the latest date on or before the trading day is the one in force, and an asset it leaves out is to be sold. What the weights don't add up to stays in cash.",
-      "writeMode": "AppendOnly",
-      "key": ["AccountId", "EffectiveDate", "AssetId"],
+    "Model": {
+      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value). Every account has one, even if it has no weights; many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold.",
+      "key": ["ModelId"],
       "columns": {
-        "AccountId": "guid",
+        "ModelId": "guid",
+        "Name": { "maxLength": 64, "type": "string" }
+      }
+    },
+    "Weight": {
+      "description": "One asset's weight in a model: its fraction of the account's value (0.25 for a quarter).",
+      "key": ["ModelId", "AssetId"],
+      "columns": {
         "AssetId": "guid",
-        "EffectiveDate": "date",
-        "Weight": "rate"
+        "Fraction": "rate",
+        "ModelId": "guid"
       },
       "references": {
-        "Account": { "columns": ["AccountId"] },
+        "Model": { "columns": ["ModelId"] },
         "Asset": { "columns": ["AssetId"] }
       }
     },

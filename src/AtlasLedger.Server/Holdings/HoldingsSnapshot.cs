@@ -23,7 +23,9 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Rates">Every published rate between currencies.</param>
     /// <param name="Orders">Every order's state.</param>
     /// <param name="Flows">Every account's net contributions.</param>
-    /// <param name="Targets">Every account's target weights, of every date.</param>
+    /// <param name="Accounts">Every account (for its model).</param>
+    /// <param name="Models">Every model.</param>
+    /// <param name="Weights">Every model's weights.</param>
     /// <param name="Rebalances">Every rebalance recorded.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
@@ -33,7 +35,9 @@ namespace AtlasLedger.Server.Holdings
         IReadOnlyList<CurrencyRate> Rates,
         IReadOnlyList<Orders.OrderState> Orders,
         IReadOnlyList<AccountFlow> Flows,
-        IReadOnlyList<TargetWeightFact> Targets,
+        IReadOnlyList<AccountFact> Accounts,
+        IReadOnlyList<ModelFact> Models,
+        IReadOnlyList<WeightFact> Weights,
         IReadOnlyList<RebalanceFact> Rebalances);
 
     /// <summary>
@@ -147,7 +151,9 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<CurrencyRate>().ToArray(),
                     session.Query<Orders.OrderState>().ToArray(),
                     session.Query<AccountFlow>().ToArray(),
-                    session.Query<TargetWeightFact>().ToArray(),
+                    session.Query<AccountFact>().ToArray(),
+                    session.Query<ModelFact>().ToArray(),
+                    session.Query<WeightFact>().ToArray(),
                     session.Query<RebalanceFact>().ToArray()));
                 return fired;
             }

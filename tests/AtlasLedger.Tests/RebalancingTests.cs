@@ -24,7 +24,7 @@ namespace AtlasLedger.Tests
         // 3:50 pm in New York on Monday, November 9, 2026 (standard time).
         private static readonly DateTimeOffset Monday = new DateTimeOffset(2026, 11, 9, 20, 50, 0, TimeSpan.Zero);
 
-        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar });
+        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.ManagedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
 
         private static readonly AssetFact Dollar = Asset(AssetType.Cash);
 
@@ -46,11 +46,12 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
-        public void TheLatestWeightsOnOrBeforeTheDayAreInForce()
+        public void AnAccountsWeightsAreItsModels()
         {
-            var targets = new[] { Target(Alpha, 0.5m, 6), Target(Beta, 0.4m, 6), Target(Alpha, 0.6m, 9), Target(Alpha, 0.9m, 10) };
-            Assert.Equal([(Alpha.AssetId, 0.6m)], Rebalancing.WeightsInForce(targets, new DateOnly(2026, 11, 9)).Select(item => (item.Key, item.Value)));   // Beta left out on the 9th: to be sold
-            Assert.Empty(Rebalancing.WeightsInForce(targets, new DateOnly(2026, 11, 5)));
+            var (joe10, other) = (Guid.NewGuid(), Guid.NewGuid());
+            var weights = new[] { Weight(joe10, Alpha, 0.3m), Weight(joe10, Beta, 0.2m), Weight(other, Alpha, 0.9m) };
+            Assert.Equal([(Alpha.AssetId, 0.3m), (Beta.AssetId, 0.2m)], Rebalancing.WeightsOf(weights, joe10).OrderBy(item => item.Value).Reverse().Select(item => (item.Key, item.Value)));
+            Assert.Empty(Rebalancing.WeightsOf(weights, Guid.NewGuid()));   // a model with no weights
         }
 
         [Fact]
@@ -133,8 +134,8 @@ namespace AtlasLedger.Tests
         private static PositionState Position(AssetFact asset, decimal quantity) =>
             new PositionState(Account.AccountId, asset.AssetId, asset.AssetType, "USD", "USD", 1m, 1m, quantity, null, false, Monday, 1);
 
-        private static TargetWeightFact Target(AssetFact asset, decimal weight, int day) =>
-            new TargetWeightFact(new TargetWeightDto { AccountId = Account.AccountId, AssetId = asset.AssetId, EffectiveDate = new DateOnly(2026, 11, day), Weight = weight });
+        private static WeightFact Weight(Guid modelId, AssetFact asset, decimal fraction) =>
+            new WeightFact(new WeightDto { ModelId = modelId, AssetId = asset.AssetId, Fraction = fraction });
 
         private static RebalanceSettingFact Setting(int timeOfDay, bool weekdaysOnly) =>
             new RebalanceSettingFact(new RebalanceSettingDto { AccountId = Account.AccountId, TimeOfDay = timeOfDay, Band = 0.005m, Broker = EventSource.Simulator, WeekdaysOnly = weekdaysOnly });

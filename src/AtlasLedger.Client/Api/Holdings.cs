@@ -25,7 +25,7 @@ namespace AtlasLedger.Client.Api
     /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
     /// account's currency, if there is a price and a rate.</param>
     /// <param name="Weight">Its share of the account's value.</param>
-    /// <param name="TargetWeight">Its target share today, if the account has targets.</param>
+    /// <param name="TargetWeight">Its weight in the account's model, if the model has weights.</param>
     public sealed record Holding(Guid AccountId, Guid AssetId, AssetType AssetType, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, string QuoteCurrency, string? PriceSource, string Currency, decimal? MarketValue, decimal? Weight, decimal? TargetWeight);
 
     /// <summary>
@@ -37,11 +37,12 @@ namespace AtlasLedger.Client.Api
     /// <param name="Cash">The value of its cash.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     /// <param name="Gain">Market value less net contributions.</param>
-    /// <param name="TargetsAsOf">The date of the target weights in force today.</param>
-    /// <param name="TargetCash">The share the targets leave in cash.</param>
+    /// <param name="ModelId">The account's model.</param>
+    /// <param name="ModelName">The model's name.</param>
+    /// <param name="TargetCash">The share the model's weights leave in cash.</param>
     /// <param name="LastRebalance">The last trading day the account was rebalanced.</param>
     /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
-    public sealed record AccountSummary(Guid AccountId, string Currency, decimal? MarketValue, decimal Cash, decimal NetContributions, decimal? Gain, DateOnly? TargetsAsOf, decimal? TargetCash, DateOnly? LastRebalance, int? LastRebalanceOrders);
+    public sealed record AccountSummary(Guid AccountId, string Currency, decimal? MarketValue, decimal Cash, decimal NetContributions, decimal? Gain, Guid? ModelId, string? ModelName, decimal? TargetCash, DateOnly? LastRebalance, int? LastRebalanceOrders);
 
     /// <summary>
     /// The price of one unit of a currency in another.

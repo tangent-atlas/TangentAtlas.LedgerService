@@ -80,27 +80,29 @@ namespace AtlasLedger.AccessTest
         private async Task DataRulesAsync(Guid firm, CancellationToken cancellationToken)
         {
             this.Section("The data rules a person meets:");
-            await this.CheckAsync("Adds an account for a node that does not exist", HttpStatusCode.UnprocessableEntity, () => this.person.InsertAsync(firm, "Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar }, cancellationToken)).ConfigureAwait(false);
+            var modelId = (await this.person.ListAsync<ModelDto>(firm, "Model", cancellationToken).ConfigureAwait(false)).First().ModelId;
+            await this.CheckAsync("Adds an account for a node that does not exist", HttpStatusCode.UnprocessableEntity, () => this.person.InsertAsync(firm, "Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = modelId }, cancellationToken)).ConfigureAwait(false);
             var node = (await this.person.ListAsync<NodeDto>(firm, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
             await this.CheckAsync("Deletes the Smith Trust at a stale version", HttpStatusCode.PreconditionFailed, () => this.person.DeleteAsync(firm, "Node", new object[] { node.NodeId }, node.RowVersion - 1, cancellationToken)).ConfigureAwait(false);
             await this.CheckAsync("Deletes the Smith Trust while its account exists", HttpStatusCode.UnprocessableEntity, () => this.person.DeleteAsync(firm, "Node", new object[] { node.NodeId }, node.RowVersion, cancellationToken)).ConfigureAwait(false);
             var account = (await this.person.ListAsync<AccountDto>(firm, "Account", cancellationToken).ConfigureAwait(false)).Single(each => each.AccountId == node.NodeId);
-            await this.CheckAsync("Changes the account at a stale version", HttpStatusCode.PreconditionFailed, () => this.person.UpdateAsync(firm, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, Currency = CurrencyCode.UnitedStatesDollar, RowVersion = account.RowVersion - 1 }, cancellationToken)).ConfigureAwait(false);
-            await this.CheckAsync("Changes the account at the current version", HttpStatusCode.OK, () => this.person.UpdateAsync(firm, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, Currency = CurrencyCode.UnitedStatesDollar, RowVersion = account.RowVersion }, cancellationToken)).ConfigureAwait(false);
+            await this.CheckAsync("Changes the account at a stale version", HttpStatusCode.PreconditionFailed, () => this.person.UpdateAsync(firm, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = account.ModelId, RowVersion = account.RowVersion - 1 }, cancellationToken)).ConfigureAwait(false);
+            await this.CheckAsync("Changes the account at the current version", HttpStatusCode.OK, () => this.person.UpdateAsync(firm, "Account", new object[] { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.WeightedAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = account.ModelId, RowVersion = account.RowVersion }, cancellationToken)).ConfigureAwait(false);
         }
 
         private async Task BatchesAsync(Guid firm, Guid otherFirm, CancellationToken cancellationToken)
         {
             this.Section("Batches commit or roll back as a unit:");
+            var modelId = (await this.person.ListAsync<ModelDto>(firm, "Model", cancellationToken).ConfigureAwait(false)).First().ModelId;
             var node = (await this.person.ListAsync<NodeDto>(firm, "Node", cancellationToken).ConfigureAwait(false)).Single(each => each.DisplayName == "Smith Trust");
             var account = (await this.person.ListAsync<AccountDto>(firm, "Account", cancellationToken).ConfigureAwait(false)).Single(each => each.AccountId == node.NodeId);
             var good = new LedgerScript()
                 .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "2222", NodeId = node.NodeId })
-                .Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar, RowVersion = account.RowVersion });
+                .Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = account.ModelId, RowVersion = account.RowVersion });
             await this.CheckAsync("Adds a symbol and changes the account in one batch", HttpStatusCode.OK, () => this.person.ApplyAsync(firm, good, cancellationToken)).ConfigureAwait(false);
             var bad = new LedgerScript()
                 .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = "3333", NodeId = node.NodeId })
-                .Insert("Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar });
+                .Insert("Account", new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.GroupAccount, Currency = CurrencyCode.UnitedStatesDollar, ModelId = modelId });
             await this.CheckAsync("Adds a symbol and an account for a missing node in one batch", HttpStatusCode.UnprocessableEntity, () => this.person.ApplyAsync(firm, bad, cancellationToken)).ConfigureAwait(false);
             await this.CheckAsync("Sends a batch to a firm they are not a user of", HttpStatusCode.NotFound, () => this.person.ApplyAsync(otherFirm, good, cancellationToken)).ConfigureAwait(false);
             var nonsense = new LedgerScript();

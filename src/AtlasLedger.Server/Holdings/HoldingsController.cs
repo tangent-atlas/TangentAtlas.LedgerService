@@ -30,8 +30,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
     /// account's currency, if there is a price and a rate.</param>
     /// <param name="Weight">Its share of the account's value, if every holding has a value.</param>
-    /// <param name="TargetWeight">Its target share in the weights in force today, if the account has targets (none for an
-    /// asset the targets leave out; cash is what the targets leave over).</param>
+    /// <param name="TargetWeight">Its weight in the account's model, if the model has weights (none for an asset the model
+    /// leaves out; cash is what the weights leave over).</param>
     public sealed record HoldingDto(
         Guid AccountId,
         Guid AssetId,
@@ -56,8 +56,9 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Cash">The value of its cash.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     /// <param name="Gain">Market value less net contributions.</param>
-    /// <param name="TargetsAsOf">The date of the target weights in force today, if any.</param>
-    /// <param name="TargetCash">The share the targets leave in cash.</param>
+    /// <param name="ModelId">The account's model.</param>
+    /// <param name="ModelName">The model's name.</param>
+    /// <param name="TargetCash">The share the model's weights leave in cash, if it has weights.</param>
     /// <param name="LastRebalance">The last trading day the account was rebalanced, if ever.</param>
     /// <param name="LastRebalanceOrders">How many orders that rebalance created.</param>
     public sealed record AccountSummaryDto(
@@ -67,7 +68,8 @@ namespace AtlasLedger.Server.Holdings
         decimal Cash,
         decimal NetContributions,
         decimal? Gain,
-        DateOnly? TargetsAsOf,
+        Guid? ModelId,
+        string? ModelName,
         decimal? TargetCash,
         DateOnly? LastRebalance,
         int? LastRebalanceOrders);
@@ -121,12 +123,11 @@ namespace AtlasLedger.Server.Holdings
 
             var prices = snapshot.Prices.ToDictionary(price => price.AssetId);
             var rates = snapshot.Rates.ToDictionary(rate => (rate.FromCurrency, rate.ToCurrency), rate => rate.Rate);
-            var today = Rebalancing.TradingDay(snapshot.AsOf);
             var held = snapshot.Positions.Where(position => position.Quantity != 0m).ToArray();
             var values = held.ToDictionary(position => (position.AccountId, position.AssetId), position => HoldingFold.MarketValue(position, prices.GetValueOrDefault(position.AssetId), rates));
             var accountIds = held.Select(position => position.AccountId)
                 .Concat(snapshot.Flows.Select(flow => flow.AccountId))
-                .Concat(snapshot.Targets.Select(target => target.AccountId))
+                .Concat(snapshot.Accounts.Select(account => account.AccountId))
                 .Distinct()
                 .OrderBy(accountId => accountId)
                 .ToArray();
@@ -137,7 +138,11 @@ namespace AtlasLedger.Server.Holdings
                     var accountValues = held.Where(position => position.AccountId == accountId).Select(position => values[(position.AccountId, position.AssetId)]).ToArray();
                     return accountValues.Any(value => value is null) ? (decimal?)null : accountValues.Sum(value => value!.Value);
                 });
-            var weights = accountIds.ToDictionary(accountId => accountId, accountId => Rebalancing.WeightsInForce(snapshot.Targets.Where(target => target.AccountId == accountId), today));
+            var accountFacts = snapshot.Accounts.ToDictionary(account => account.AccountId);
+            var models = snapshot.Models.ToDictionary(model => model.ModelId);
+            var weights = accountIds.ToDictionary(
+                accountId => accountId,
+                accountId => accountFacts.TryGetValue(accountId, out var account) ? Rebalancing.WeightsOf(snapshot.Weights, account.ModelId) : new Dictionary<Guid, decimal>());
 
             var holdings = held
                 .OrderBy(position => position.AccountId)
@@ -170,11 +175,11 @@ namespace AtlasLedger.Server.Holdings
                 .Select(accountId =>
                 {
                     var positions = held.Where(position => position.AccountId == accountId).ToArray();
-                    var currency = positions.FirstOrDefault()?.AccountCurrency ?? string.Empty;
+                    var currency = positions.FirstOrDefault()?.AccountCurrency ?? (accountFacts.TryGetValue(accountId, out var found) ? found.Currency : string.Empty);
                     var cash = positions.Where(position => position.AssetType == AssetType.Cash).Sum(position => values[(position.AccountId, position.AssetId)] ?? 0m);
                     var contributions = snapshot.Flows.FirstOrDefault(flow => flow.AccountId == accountId)?.NetContributions ?? 0m;
                     var total = totals[accountId];
-                    var targetDates = snapshot.Targets.Where(target => target.AccountId == accountId && target.EffectiveDate <= today).Select(target => (DateOnly?)target.EffectiveDate);
+                    var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : (Guid?)null;
                     var targets = weights[accountId];
                     var last = snapshot.Rebalances.Where(rebalance => rebalance.AccountId == accountId).OrderByDescending(rebalance => rebalance.TradingDay).FirstOrDefault();
                     return new AccountSummaryDto(
@@ -184,7 +189,8 @@ namespace AtlasLedger.Server.Holdings
                         cash,
                         contributions,
                         total - contributions,
-                        targetDates.Max(),
+                        modelId,
+                        modelId is { } id && models.TryGetValue(id, out var model) ? model.Name : null,
                         targets.Count == 0 ? null : 1m - targets.Values.Sum(),
                         last?.TradingDay,
                         last?.OrderCount);

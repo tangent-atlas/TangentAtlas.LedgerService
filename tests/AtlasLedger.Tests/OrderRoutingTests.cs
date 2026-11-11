@@ -87,8 +87,7 @@ namespace AtlasLedger.Tests
             using (var printed = new StringWriter())
             {
                 await client::AtlasLedger.Client.Commands.HoldingsAsync(tool, tenantId, printed, cancellationToken);
-                await client::AtlasLedger.Client.Commands.OrdersAsync(tool, tenantId, printed, cancellationToken);
-                File.WriteAllText("/tmp/claude-0/printout.txt", printed.ToString());
+                Assert.Contains("Paid in 1,000,000.00", printed.ToString(), StringComparison.Ordinal);
             }
 
             // Once a day: the rules keep running as prices move, and nothing more is ordered.

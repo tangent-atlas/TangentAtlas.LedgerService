@@ -20,7 +20,7 @@ namespace AtlasLedger.TestData
     internal static class Program
     {
         private const string Usage = """
-            Usage: test-data joe10 --state <joe10.json> [--deposit <dollars>] [--out <folder>]
+            Usage: test-data joe10 [--state <joe10.json>] [--deposit <dollars>] [--out <folder>]
 
             Writes a test account holding the Joe 10, as two scripts for script-loader:
               joe10-reference.json   the account, its connection, and its assets (US dollars and the ten
@@ -40,13 +40,16 @@ namespace AtlasLedger.TestData
                                      the Joe 10 model's weights: load it once, then each day replace them with
                                      ledger-operator weights <tenant> joe10-weights.json
 
-              --state <joe10.json>   The forward test's state file (tangent-atlas/forward-test, state/joe10.json):
+              --state <joe10.json>   Optional. Without it, a generic Joe 10: ten large US companies at equal
+                                     weights, half the account in stocks, each at $100 (where the simulated
+                                     feed starts), at the last weekday close; nothing licensed in it.
+                                     With it, the forward test's state file (tangent-atlas/forward-test, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
               --deposit <dollars>    The opening deposit (default 1000000).
               --out <folder>         Where to write (default: artifacts/test-data, which git ignores).
 
-            The prices come from EODHD through the forward test and are licensed, not ours to publish: keep the
-            files out of public repositories.
+            With --state, the prices come from EODHD through the forward test and are licensed, not ours to
+            publish: keep those files out of public repositories.
 
             Then, against a local server (development sign-in):
               (the rules engine starts on; otherwise: ledger-operator services on rules)
@@ -76,7 +79,7 @@ namespace AtlasLedger.TestData
                 }
             }
 
-            if (positional is not ["joe10"] || statePath is null)
+            if (positional is not ["joe10"])
             {
                 Console.Error.WriteLine(Usage);
                 return 2;
@@ -85,7 +88,7 @@ namespace AtlasLedger.TestData
             Joe10State state;
             try
             {
-                state = Joe10State.Read(statePath);
+                state = statePath is null ? Joe10State.Generic() : Joe10State.Read(statePath);
             }
             catch (Exception exception) when (exception is IOException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
             {

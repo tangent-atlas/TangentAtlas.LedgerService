@@ -63,6 +63,25 @@ namespace AtlasLedger.Client.TestData
         /// </summary>
         /// <param name="date">The trading date.</param>
         /// <returns>The close.</returns>
+        /// <summary>
+        /// A generic Joe 10, for a test account that needs no real data: ten large US companies at equal weights, half the
+        /// account in stocks, each at $100 (where the simulated market feed starts a ticker it hasn't priced), at the last
+        /// weekday close before a time.  No licensed prices, so the scripts it makes can be shared.
+        /// </summary>
+        /// <param name="now">The time (default: now).</param>
+        /// <returns>The state.</returns>
+        public static Joe10State Generic(DateTimeOffset? now = null)
+        {
+            var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now ?? DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/New_York")).DateTime);
+            while (CloseOf(day) > (now ?? DateTimeOffset.UtcNow) || day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            {
+                day = day.AddDays(-1);
+            }
+
+            var tickers = new[] { "NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "AVGO", "TSLA", "BRK.B", "JPM" };
+            return new Joe10State(CloseOf(day), 0.5m, tickers.Select(ticker => new Joe10Holding(ticker, 0.1m, 100m)).ToArray());
+        }
+
         public static DateTimeOffset CloseOf(DateOnly date)
         {
             var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");

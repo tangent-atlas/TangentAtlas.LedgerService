@@ -57,6 +57,17 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public void TheGenericJoe10NeedsNoStateFile()
+        {
+            // Tuesday, November 10, 2026, 8:30 pm in New York: the last close was that afternoon; on Sunday it was Friday's.
+            var tuesday = Joe10State.Generic(new DateTimeOffset(2026, 11, 11, 1, 30, 0, TimeSpan.Zero));
+            Assert.Equal(Joe10State.CloseOf(new DateOnly(2026, 11, 10)), tuesday.Close);
+            Assert.Equal(Joe10State.CloseOf(new DateOnly(2026, 11, 6)), Joe10State.Generic(new DateTimeOffset(2026, 11, 8, 15, 0, 0, TimeSpan.Zero)).Close);
+            Assert.Equal((10, 1m, 0.5m), (tuesday.Holdings.Count, tuesday.Holdings.Sum(holding => holding.Weight), tuesday.StockShare));
+            Assert.Equal(50, Joe10Account.Purchases(tuesday, 1_000_000m).Sum(purchase => purchase.Shares) / 100);   // $50,000 each at $100
+        }
+
+        [Fact]
         public void PurchasesAreWholeSharesRoundedDownAndTheRestStaysInCash()
         {
             var purchases = Joe10Account.Purchases(ReadState(), 1_000_000m);

@@ -67,13 +67,7 @@ namespace AtlasLedger.Client.Mirror
                         "Weight" => await api.ListAsync<WeightDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "JobSchedule" => await api.ListAsync<JobScheduleDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         "JobRun" => await api.ListAsync<JobRunDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "CancelRequest" => await api.ListAsync<CancelRequestDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Order" => await api.ListAsync<OrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Allocation" => await api.ListAsync<AllocationDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "BrokerOrder" => await api.ListAsync<BrokerOrderDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "ExecutionReport" => await api.ListAsync<ExecutionReportDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "Transaction" => await api.ListAsync<TransactionDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
-                        "TransactionLine" => await api.ListAsync<TransactionLineDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
+                        "Event" => await api.ListAsync<EventDto>(tenantId, table, cancellationToken).ConfigureAwait(false),
                         _ => throw new InvalidOperationException($"The mirror does not know the table {table}; update it with the model."),
                     };
                 }
@@ -112,13 +106,7 @@ namespace AtlasLedger.Client.Mirror
                     case IReadOnlyList<WeightDto> weights: foreach (var dto in weights) { transaction.ApplyWeight(dto); } break;
                     case IReadOnlyList<JobScheduleDto> schedules: foreach (var dto in schedules) { transaction.ApplyJobSchedule(dto); } break;
                     case IReadOnlyList<JobRunDto> runs: foreach (var dto in runs) { transaction.ApplyJobRun(dto); } break;
-                    case IReadOnlyList<CancelRequestDto> cancels: foreach (var dto in cancels) { transaction.ApplyCancelRequest(dto); } break;
-                    case IReadOnlyList<OrderDto> orders: foreach (var dto in orders) { transaction.ApplyOrder(dto); } break;
-                    case IReadOnlyList<AllocationDto> allocations: foreach (var dto in allocations) { transaction.ApplyAllocation(dto); } break;
-                    case IReadOnlyList<BrokerOrderDto> brokerOrders: foreach (var dto in brokerOrders) { transaction.ApplyBrokerOrder(dto); } break;
-                    case IReadOnlyList<ExecutionReportDto> executionReports: foreach (var dto in executionReports) { transaction.ApplyExecutionReport(dto); } break;
-                    case IReadOnlyList<TransactionDto> transactions: foreach (var dto in transactions) { transaction.ApplyTransaction(dto); } break;
-                    case IReadOnlyList<TransactionLineDto> transactionLines: foreach (var dto in transactionLines) { transaction.ApplyTransactionLine(dto); } break;
+                    case IReadOnlyList<EventDto> events: foreach (var dto in events) { transaction.ApplyEvent(dto); } break;
                 }
             }
 

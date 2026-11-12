@@ -412,48 +412,6 @@ namespace AtlasLedger.Model
     }
 
     /// <summary>
-    /// The kinds of transaction. An exchange (Buy, Sell) gives one asset for another, so its lines balance; the others move value into, out of or between accounts, or correct a holding.
-    /// </summary>
-    public enum TransactionKind
-    {
-        /// <summary>Holdings as they stood where the source's history begins.</summary>
-        OpeningBalance,
-
-        /// <summary>An asset paid into an account.</summary>
-        Deposit,
-
-        /// <summary>An asset paid out of an account.</summary>
-        Withdrawal,
-
-        /// <summary>An exchange: an asset received for another given (cash, usually).</summary>
-        Buy,
-
-        /// <summary>An exchange: an asset given for another received (cash, usually).</summary>
-        Sell,
-
-        /// <summary>A distribution from a holding.</summary>
-        Dividend,
-
-        /// <summary>Interest paid on a holding.</summary>
-        Interest,
-
-        /// <summary>A charge to the account.</summary>
-        Fee,
-
-        /// <summary>A change in the number of units held, with no change in value.</summary>
-        Split,
-
-        /// <summary>An asset moved from one account to another of the same tenant.</summary>
-        Transfer,
-
-        /// <summary>A permanent correction by the operator.</summary>
-        Adjustment,
-
-        /// <summary>A temporary correction by the operator: it sets holdings until it expires.</summary>
-        Override,
-    }
-
-    /// <summary>
     /// What a transaction line does to a holding.
     /// </summary>
     public enum LineEffect

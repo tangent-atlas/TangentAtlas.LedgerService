@@ -12,7 +12,7 @@
     "email": { "maxLength": 128, "type": "System.String" },
     "equityType": "AtlasLedger.Model.EquityType",
     "eventSource": "AtlasLedger.Model.EventSource",
-    "executionReportType": "AtlasLedger.Model.ExecutionReportType",
+    "eventType": "AtlasLedger.Model.EventType",
     "exerciseStyle": "AtlasLedger.Model.ExerciseStyle",
     "fixedIncomeType": "AtlasLedger.Model.FixedIncomeType",
     "fundType": "AtlasLedger.Model.FundType",
@@ -22,22 +22,16 @@
     "jobRunReason": "AtlasLedger.Model.JobRunReason",
     "jobRunStatus": "AtlasLedger.Model.JobRunStatus",
     "jobStatus": "AtlasLedger.Model.JobStatus",
-    "lineEffect": "AtlasLedger.Model.LineEffect",
     "long": "System.Int64",
     "money": { "precision": 19, "scale": 4, "type": "System.Decimal" },
     "nodeStatus": "AtlasLedger.Model.NodeStatus",
     "nodeType": "AtlasLedger.Model.NodeType",
     "optionRight": "AtlasLedger.Model.OptionRight",
-    "orderOrigin": "AtlasLedger.Model.OrderOrigin",
-    "orderSide": "AtlasLedger.Model.OrderSide",
-    "orderType": "AtlasLedger.Model.OrderType",
     "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
     "quantity": { "precision": 19, "scale": 6, "type": "System.Decimal" },
     "rate": { "precision": 9, "scale": 6, "type": "System.Decimal" },
     "string": "System.String",
     "time": "System.DateTimeOffset",
-    "timeInForce": "AtlasLedger.Model.TimeInForce",
-    "transactionKind": "AtlasLedger.Model.TransactionKind",
     "userType": "AtlasLedger.Model.UserType"
   },
   "name": "Ledger",
@@ -71,6 +65,25 @@
       "references": {
         "Account": { "columns": ["AccountId"] }
       }
+    },
+    "Event": {
+      "description": "The log: every input as it entered the ledger, never changed or deleted. EventType says what kind (a fixed code) and SchemaVersion which version of its payload; Payload is the kind's own fields, as JSON, read back by kind and version. Holdings, orders' states and every other derived state are folded from these. Every event that changes holdings is complete in itself: an exchange within the books balances. RowVersion, the commit that wrote it, orders the log and groups what was committed together. The source supplies EventId (for a broker's messages, a name-based ID from the source and its own IDs) and (Source, SourceId) is idempotent, so a replayed message is recorded once. CorrelationId is what it belongs to (an order: the first of its replace chain); CausationId what caused it.",
+      "writeMode": "AppendOnly",
+      "key": ["EventId"],
+      "columns": {
+        "CausationId": "guid?",
+        "CorrelationId": "guid?",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "EventId": "guid",
+        "EventType": "eventType",
+        "Payload": "string",
+        "SchemaVersion": "int",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 128, "type": "string" },
+        "SourceSequence": "long?"
+      },
+      "unique": { "BySource": { "columns": ["Source", "SourceId"], "idempotent": true } }
     },
     "Institution": {
       "description": "An institution that holds accounts: a broker, a bank, a card issuer. Source is the connection the system reaches it through (Schwab's API, the aggregator, the simulator): for a broker, which adapter its orders go to. What is particular to one account (its identifier there) is on the account.",
@@ -301,20 +314,6 @@
         "Asset": { "columns": ["AssetId"] }
       }
     },
-    "CancelRequest": {
-      "description": "A request to cancel a broker order. The router sends it while the order is still open at the broker; the broker's report (cancelled, or the fills that beat it) says what happened.",
-      "writeMode": "AppendOnly",
-      "key": ["CancelRequestId"],
-      "columns": {
-        "BrokerOrderId": "guid",
-        "CancelRequestId": "guid",
-        "EnteredTime": "time",
-        "Reason": { "maxLength": 256, "type": "string?" }
-      },
-      "references": {
-        "BrokerOrder": { "columns": ["BrokerOrderId"] }
-      }
-    },
     "JobRun": {
       "description": "One run of a job for this tenant: the log of what ran, when, why and how it ended. A run by hand is asked for by inserting a row with Status Requested (the caller supplies the key and RequestedTime); the scheduler takes it up after the commit, and refuses it if the job is unknown, a service, off (every schedule of it Off) or already running. The server records scheduled runs, a service's starts and stops, and every outcome. A run still Requested or Running when the server starts is marked Interrupted: what it did is not confirmed. JobScheduleId is the schedule that started it (no reference: a schedule can be deleted, its runs stay).",
       "key": ["JobRunId"],
@@ -341,125 +340,6 @@
         "Status": "jobStatus",
         "StopSchedule": { "maxLength": 128, "type": "string?" },
         "TimeZone": { "maxLength": 64, "type": "string?" }
-      }
-    },
-    "Order": {
-      "description": "An order: an intention to buy or sell one asset, for one or more accounts (its allocations). Recorded once and never changed; its status is derived from its broker orders and their execution reports. Origin says what created it (with RuleName for a rule).",
-      "writeMode": "AppendOnly",
-      "key": ["OrderId"],
-      "columns": {
-        "AssetId": "guid",
-        "EnteredTime": "time",
-        "OrderId": "guid",
-        "Origin": "orderOrigin",
-        "RuleName": { "maxLength": 64, "type": "string?" },
-        "Side": "orderSide"
-      },
-      "references": {
-        "Asset": { "columns": ["AssetId"] }
-      }
-    },
-    "Allocation": {
-      "description": "One account's share of an order: the quantity of the order's asset it is to buy or sell. The order's quantity is the sum of its allocations. Fills are booked to the allocations in proportion to what each still needs, in whole units, by a published deterministic rule.",
-      "writeMode": "AppendOnly",
-      "key": ["OrderId", "AccountId"],
-      "columns": {
-        "AccountId": "guid",
-        "OrderId": "guid",
-        "Quantity": "quantity"
-      },
-      "references": {
-        "Order": { "columns": ["OrderId"] },
-        "Account": { "columns": ["AccountId"] }
-      }
-    },
-    "BrokerOrder": {
-      "description": "An order as sent to a broker for execution, in one account: AccountId, the brokerage account it is placed in (its institution says which broker; the account says which account there). An order may be split into several, at least one per account it allocates to. The broker is given an ID derived from the tenant and BrokerOrderId, so a retried send is the same order. Recorded once and never changed; its status comes from the broker's execution reports.",
-      "writeMode": "AppendOnly",
-      "key": ["BrokerOrderId"],
-      "columns": {
-        "AccountId": "guid",
-        "BrokerOrderId": "guid",
-        "EnteredTime": "time",
-        "LimitPrice": "price?",
-        "OrderId": "guid",
-        "OrderType": "orderType",
-        "Quantity": "quantity",
-        "TimeInForce": "timeInForce"
-      },
-      "references": {
-        "Account": { "columns": ["AccountId"] },
-        "Order": { "columns": ["OrderId"] }
-      }
-    },
-    "ExecutionReport": {
-      "description": "What a broker reported about a broker order: accepted, a fill (a quantity at a price, with fees), cancelled, rejected or expired. Recorded once, idempotently on the broker's own ID for the report (Source, SourceId), and never changed. The rules book each fill to the order's accounts as Buy or Sell transactions.",
-      "writeMode": "AppendOnly",
-      "key": ["ExecutionReportId"],
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
-      "columns": {
-        "BrokerOrderId": "guid",
-        "ExecutionReportId": "guid",
-        "Fees": "money?",
-        "Price": "price?",
-        "Quantity": "quantity?",
-        "ReportTime": "time",
-        "ReportType": "executionReportType",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "Text": { "maxLength": 256, "type": "string?" }
-      },
-      "references": {
-        "BrokerOrder": { "columns": ["BrokerOrderId"] }
-      }
-    },
-    "Transaction": {
-      "description": "An event: something that happened at a time, recorded once and never changed (a mistake is corrected by another transaction). One atomic unit: its lines are inserted with it, in the same batch. An exchange (a purchase or a sale) gives one asset for another, so its lines balance. A temporary entry (an override) carries ExpiresTime and is in force from its effective time until then.",
-      "writeMode": "AppendOnly",
-      "key": ["TransactionId"],
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
-      "columns": {
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "ExpiresTime": "time?",
-        "ExecutionReportId": "guid?",
-        "Fees": "money?",
-        "Kind": "transactionKind",
-        "OrderId": "guid?",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?",
-        "TransactionId": "guid"
-      },
-      "references": {
-        "Order": { "columns": ["OrderId"] },
-        "ExecutionReport": { "columns": ["ExecutionReportId"] }
-      }
-    },
-    "TransactionLine": {
-      "description": "What a transaction does to one holding: an account's quantity of one asset. Effect Change adds Quantity (negative to remove); Effect SetTo sets it (an override). Amount is the line's value in the account's currency at the transaction: what was received (positive) or given (negative); for a purchase, the cost; null when unknown. RelatedAssetId names another asset the line is about (the company that paid a dividend).",
-      "writeMode": "AppendOnly",
-      "key": ["TransactionId", "LineNumber"],
-      "references": {
-        "Transaction": { "columns": ["TransactionId"] },
-        "Account": { "columns": ["AccountId"] },
-        "Asset": { "columns": ["AssetId"] },
-        "Related": { "columns": ["RelatedAssetId"], "table": "Asset" }
-      },
-      "columns": {
-        "AccountId": "guid",
-        "Amount": "money?",
-        "AssetId": "guid",
-        "Effect": "lineEffect",
-        "LineNumber": "int",
-        "Quantity": "quantity",
-        "RelatedAssetId": "guid?",
-        "TransactionId": "guid"
       }
     }
   },

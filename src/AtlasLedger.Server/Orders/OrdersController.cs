@@ -51,7 +51,7 @@ namespace AtlasLedger.Server.Orders
         /// <param name="tenantId">The tenant.</param>
         /// <returns>What was written, or 409 with the reason nothing could be.</returns>
         [HttpPost("generate")]
-        [Authorize(Policy = LedgerAccessPolicies.OrderWrite)]
+        [Authorize(Policy = LedgerAccessPolicies.EventWrite)]
         public ActionResult<GeneratedOrders> Generate(Guid tenantId)
         {
             var result = this.generator.Generate(tenantId);
@@ -66,7 +66,7 @@ namespace AtlasLedger.Server.Orders
         /// <param name="tenantId">The tenant.</param>
         /// <returns>The orders, or 409 when the rules engine hasn't run for the tenant.</returns>
         [HttpGet]
-        [Authorize(Policy = LedgerAccessPolicies.OrderRead)]
+        [Authorize(Policy = LedgerAccessPolicies.EventRead)]
         public ActionResult<OrdersDto> Get(Guid tenantId)
         {
             if (this.store.Find(tenantId) is not { } snapshot)

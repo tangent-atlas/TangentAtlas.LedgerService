@@ -101,13 +101,7 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Weight"], cut.ChangedWeights, cut.DeletedWeights, dto => $"{dto.ModelId}/{dto.AssetId}");
                 Apply(tables["JobSchedule"], cut.ChangedJobSchedules, cut.DeletedJobSchedules, dto => dto.JobScheduleId.ToString());
                 Apply(tables["JobRun"], cut.ChangedJobRuns, cut.DeletedJobRuns, dto => dto.JobRunId.ToString());
-                Apply(tables["CancelRequest"], cut.ChangedCancelRequests, cut.DeletedCancelRequests, dto => dto.CancelRequestId.ToString());
-                Apply(tables["Order"], cut.ChangedOrders, cut.DeletedOrders, dto => dto.OrderId.ToString());
-                Apply(tables["Allocation"], cut.ChangedAllocations, cut.DeletedAllocations, dto => $"{dto.OrderId}/{dto.AccountId}");
-                Apply(tables["BrokerOrder"], cut.ChangedBrokerOrders, cut.DeletedBrokerOrders, dto => dto.BrokerOrderId.ToString());
-                Apply(tables["ExecutionReport"], cut.ChangedExecutionReports, cut.DeletedExecutionReports, dto => dto.ExecutionReportId.ToString());
-                Apply(tables["Transaction"], cut.ChangedTransactions, cut.DeletedTransactions, dto => dto.TransactionId.ToString());
-                Apply(tables["TransactionLine"], cut.ChangedTransactionLines, cut.DeletedTransactionLines, dto => $"{dto.TransactionId}/{dto.LineNumber}");
+                Apply(tables["Event"], cut.ChangedEvents, cut.DeletedEvents, dto => dto.EventId.ToString());
                 this.watermarks[cut.TenantId] = Math.Max(cut.Sequence, this.watermarks.GetValueOrDefault(cut.TenantId));
                 this.CutCount++;
             }

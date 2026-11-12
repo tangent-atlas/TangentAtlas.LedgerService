@@ -172,10 +172,11 @@ namespace AtlasLedger.Server.Orders
         {
             ArgumentNullException.ThrowIfNull(orders);
             return orders
-                .Where(order => order.BrokerOrders.Any(brokerOrder => brokerOrder.Open > 0m))
-                .SelectMany(order => order.Allocations
+                .Where(order => order.IsWorking)
+                .SelectMany(order => order.Legs)
+                .SelectMany(leg => leg.Allocations
                     .Where(allocation => allocation.AccountId == accountId)
-                    .Select(allocation => (order.AssetId, Quantity: order.Side == OrderSide.Buy ? allocation.Remaining : -allocation.Remaining)))
+                    .Select(allocation => (leg.AssetId, Quantity: leg.Side == OrderSide.Buy ? allocation.Remaining : -allocation.Remaining)))
                 .GroupBy(item => item.AssetId)
                 .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
         }

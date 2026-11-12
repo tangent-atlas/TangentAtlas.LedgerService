@@ -20,10 +20,7 @@ namespace AtlasLedger.Server.Brokers
     /// <param name="ClientOrderId">The ID the broker is given, so a retried send is the same order: derived from the tenant
     /// and the broker order, so it is unique across tenants (two tenants may use the same keys; the broker sees one account
     /// of orders for all of them).  A broker adapter keys everything it knows about an order on this.</param>
-    /// <param name="Side">Buy or sell.</param>
-    /// <param name="Ticker">The asset's ticker.</param>
-    /// <param name="QuoteCurrency">The currency it is quoted in.</param>
-    /// <param name="Quantity">How many units.</param>
+    /// <param name="Legs">Its legs: one for a stock order, several for a spread.</param>
     /// <param name="OrderType">Market or limit.</param>
     /// <param name="LimitPrice">The limit, for a limit order.</param>
     /// <param name="TimeInForce">How long it stays working.</param>
@@ -32,10 +29,7 @@ namespace AtlasLedger.Server.Brokers
         Guid TenantId,
         Guid BrokerOrderId,
         Guid ClientOrderId,
-        OrderSide Side,
-        string Ticker,
-        string QuoteCurrency,
-        decimal Quantity,
+        IReadOnlyList<BrokerLegRequest> Legs,
         OrderType OrderType,
         decimal? LimitPrice,
         TimeInForce TimeInForce,
@@ -67,7 +61,22 @@ namespace AtlasLedger.Server.Brokers
     /// <param name="Fees">A fill's fees, as one amount, whatever they are made of.</param>
     /// <param name="ReportTime">When it happened, by the broker's clock.</param>
     /// <param name="Text">The broker's words, if any (a rejection's reason).</param>
-    public sealed record BrokerReport(string SourceId, ExecutionReportType ReportType, decimal? Quantity, decimal? Price, decimal? Fees, DateTimeOffset ReportTime, string? Text);
+    /// <param name="LegId">The leg a fill is of.</param>
+    public sealed record BrokerReport(string SourceId, ExecutionReportType ReportType, decimal? Quantity, decimal? Price, decimal? Fees, DateTimeOffset ReportTime, string? Text, int LegId = 1);
+
+    /// <summary>
+    /// One leg of a broker order, as the broker is asked to trade it.
+    /// </summary>
+    /// <param name="LegId">The order's leg.</param>
+    /// <param name="Instruction">What to do.</param>
+    /// <param name="Ticker">The symbol to trade it by.</param>
+    /// <param name="QuoteCurrency">The currency it is quoted in.</param>
+    /// <param name="Quantity">How much.</param>
+    public sealed record BrokerLegRequest(int LegId, Instruction Instruction, string Ticker, string QuoteCurrency, decimal Quantity)
+    {
+        /// <summary>Gets the side it trades on.</summary>
+        public OrderSide Side => Orders.OrderBook.SideOf(this.Instruction);
+    }
 
     /// <summary>
     /// A broker, as the router sees it: a place to send orders and cancels, and to ask what happened.  Every answer is the

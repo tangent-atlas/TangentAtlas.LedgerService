@@ -40,7 +40,7 @@ namespace AtlasLedger.Tests
         {
             var lines = Buy(100, 10m, Morning).Concat(Buy(100, 20m, Morning.AddHours(1))).Concat(Sell(50, 30m, Morning.AddHours(2))).ToArray();
 
-            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.AssetId == Stock.AssetId));
 
             Assert.Equal(150m, stock.Quantity);
             Assert.Equal(2_250m, stock.CostBasis);   // 3,000 paid for 200; a quarter sold
@@ -52,7 +52,7 @@ namespace AtlasLedger.Tests
         {
             var lines = Deposit(1_000m, Morning).Concat(Buy(10, 20m, Morning.AddHours(1))).Concat(Sell(5, 30m, Morning.AddHours(2))).ToArray();
 
-            var dollars = HoldingFold.Position(Holder, Dollar, lines.Where(line => line.Line.AssetId == Dollar.AssetId));
+            var dollars = HoldingFold.Position(Holder, Dollar, lines.Where(line => line.AssetId == Dollar.AssetId));
 
             Assert.Equal(950m, dollars.Quantity);   // 1,000 − 200 + 150
             Assert.Equal(AssetType.Cash, dollars.AssetType);
@@ -66,9 +66,9 @@ namespace AtlasLedger.Tests
             var setTo100 = Override(100, Morning.AddHours(1));
             var late = Buy(50, 10m, Morning);
 
-            var stock = HoldingFold.Position(Holder, Stock, late.Concat(setTo100).Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, late.Concat(setTo100).Where(line => line.AssetId == Stock.AssetId));
 
-            Assert.True(late[0].Transaction.RowVersion > setTo100[0].Transaction.RowVersion);
+            Assert.True(late[0].Sequence > setTo100[0].Sequence);
             Assert.Equal(100m, stock.Quantity);
             Assert.True(stock.IsOverridden);
         }
@@ -89,10 +89,10 @@ namespace AtlasLedger.Tests
         public void ASplitAddsUnitsAndKeepsTheCost()
         {
             var lines = Buy(10, 100m, Morning)
-                .Concat(Lines(TransactionKind.Split, Morning.AddDays(1), null, null, (Stock, LineEffect.Change, 10m, 0m)))
+                .Concat(Lines(EventType.ReceiveAndDeliver, Morning.AddDays(1), null, null, (Stock, LineEffect.Change, 10m, 0m)))
                 .Concat(Buy(5, 50m, Morning.AddDays(2)));
 
-            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.Line.AssetId == Stock.AssetId));
+            var stock = HoldingFold.Position(Holder, Stock, lines.Where(line => line.AssetId == Stock.AssetId));
 
             Assert.Equal(25m, stock.Quantity);   // 10, doubled, then 5 more
             Assert.Equal(1_250m, stock.CostBasis);
@@ -101,11 +101,11 @@ namespace AtlasLedger.Tests
         [Fact]
         public void AnOpeningBalanceWithoutAnAmountLeavesTheCostUnknown()
         {
-            var known = Lines(TransactionKind.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, 500m));
-            var unknown = Lines(TransactionKind.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, null));
+            var known = Lines(EventType.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, 500m));
+            var unknown = Lines(EventType.OpeningBalance, Morning.AddDays(-30), null, null, (Stock, LineEffect.Change, 10m, null));
 
-            Assert.Equal(550m, HoldingFold.Position(Holder, Stock, known.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId)).CostBasis);
-            var position = HoldingFold.Position(Holder, Stock, unknown.Concat(Buy(5, 10m, Morning)).Where(line => line.Line.AssetId == Stock.AssetId));
+            Assert.Equal(550m, HoldingFold.Position(Holder, Stock, known.Concat(Buy(5, 10m, Morning)).Where(line => line.AssetId == Stock.AssetId)).CostBasis);
+            var position = HoldingFold.Position(Holder, Stock, unknown.Concat(Buy(5, 10m, Morning)).Where(line => line.AssetId == Stock.AssetId));
             Assert.Equal(15m, position.Quantity);
             Assert.Null(position.CostBasis);
         }
@@ -125,7 +125,7 @@ namespace AtlasLedger.Tests
         [Fact]
         public void PricesComeFromTheMarketThenTheLastExchange()
         {
-            var exchanges = Buy(1, 10m, Morning).Concat(Buy(1, 11m, Morning.AddHours(1))).Where(line => line.Line.AssetId == Stock.AssetId).ToArray();
+            var exchanges = Buy(1, 10m, Morning).Concat(Buy(1, 11m, Morning.AddHours(1))).Where(line => line.AssetId == Stock.AssetId).ToArray();
             var market = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 12m, AsOf = Morning.AddHours(2) });
             var badPrint = new PriceFact(new Price { Scheme = SymbolScheme.Ticker, Code = "X", Currency = CurrencyCode.UnitedStatesDollar, Last = 0m, AsOf = Morning.AddHours(2) });
 
@@ -146,8 +146,8 @@ namespace AtlasLedger.Tests
             Assert.Equal(500m, HoldingFold.MarketValue(500m, ValueFactor.One, 1m, ValueFactor.One, 1m));
 
             // And the quoted price is recovered from what an exchange cost.
-            var bought = Lines(TransactionKind.Buy, Morning, null, null, (Bond, LineEffect.Change, 10_000m, 9_850m), (Dollar, LineEffect.Change, -9_850m, -9_850m));
-            Assert.Equal(98.50m, HoldingFold.QuotedPrice(Bond, bought[0].Line));
+            var bought = Lines(EventType.Trade, Morning, null, null, (Bond, LineEffect.Change, 10_000m, 9_850m), (Dollar, LineEffect.Change, -9_850m, -9_850m));
+            Assert.Equal(98.50m, HoldingFold.QuotedPrice(Bond, bought[0]));
         }
 
         [Fact]
@@ -175,14 +175,14 @@ namespace AtlasLedger.Tests
         [Fact]
         public void AnExchangeBalancesWhenWhatIsGivenEqualsWhatIsReceived()
         {
-            Assert.True(HoldingFold.IsBalanced(Buy(10, 20m, Morning).Select(line => line.Line).ToArray()));
-            Assert.False(HoldingFold.IsBalanced(Lines(TransactionKind.Buy, Morning, null, null, (Stock, LineEffect.Change, 10m, 200m), (Dollar, LineEffect.Change, -190m, -190m)).Select(line => line.Line).ToArray()));
-            Assert.False(HoldingFold.IsBalanced(Lines(TransactionKind.Buy, Morning, null, null, (Stock, LineEffect.Change, 10m, 200m)).Select(line => line.Line).ToArray()));
-            Assert.False(HoldingFold.IsBalanced(Lines(TransactionKind.Buy, Morning, null, null, (Stock, LineEffect.Change, 10m, null), (Dollar, LineEffect.Change, -200m, -200m)).Select(line => line.Line).ToArray()));
+            Assert.True(HoldingFold.IsBalanced(Buy(10, 20m, Morning).Select(line => new ActivityItem(line.AssetId, line.Quantity, line.Amount)).ToArray()));
+            Assert.False(HoldingFold.IsBalanced(Lines(EventType.Trade, Morning, null, null, (Stock, LineEffect.Change, 10m, 200m), (Dollar, LineEffect.Change, -190m, -190m)).Select(line => new ActivityItem(line.AssetId, line.Quantity, line.Amount)).ToArray()));
+            Assert.False(HoldingFold.IsBalanced(Lines(EventType.Trade, Morning, null, null, (Stock, LineEffect.Change, 10m, 200m)).Select(line => new ActivityItem(line.AssetId, line.Quantity, line.Amount)).ToArray()));
+            Assert.False(HoldingFold.IsBalanced(Lines(EventType.Trade, Morning, null, null, (Stock, LineEffect.Change, 10m, null), (Dollar, LineEffect.Change, -200m, -200m)).Select(line => new ActivityItem(line.AssetId, line.Quantity, line.Amount)).ToArray()));
         }
 
         private static decimal Quantity(params PostedLine[][] transactions) =>
-            HoldingFold.Position(Holder, Stock, transactions.SelectMany(lines => lines).Where(line => line.Line.AssetId == Stock.AssetId)).Quantity;
+            HoldingFold.Position(Holder, Stock, transactions.SelectMany(lines => lines).Where(line => line.AssetId == Stock.AssetId)).Quantity;
 
         private static (decimal, PriceSource)? Pair(EffectivePrice? price) => price is null ? null : (price.Price, price.Source);
 
@@ -192,33 +192,26 @@ namespace AtlasLedger.Tests
             new AssetFact(new AssetDto { AssetId = assetId, AssetType = assetType, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = quantityFactor, PriceFactor = priceFactor });
 
         private static PostedLine[] Deposit(decimal dollars, DateTimeOffset at) =>
-            Lines(TransactionKind.Deposit, at, null, null, (Dollar, LineEffect.Change, dollars, dollars));
+            Lines(EventType.CashMovement, at, null, null, (Dollar, LineEffect.Change, dollars, dollars));
 
         private static PostedLine[] Buy(decimal shares, decimal price, DateTimeOffset at, long? sourceSequence = null) =>
-            Lines(TransactionKind.Buy, at, sourceSequence, null, (Stock, LineEffect.Change, shares, shares * price), (Dollar, LineEffect.Change, -(shares * price), -(shares * price)));
+            Lines(EventType.Trade, at, sourceSequence, null, (Stock, LineEffect.Change, shares, shares * price), (Dollar, LineEffect.Change, -(shares * price), -(shares * price)));
 
         private static PostedLine[] Sell(decimal shares, decimal price, DateTimeOffset at) =>
-            Lines(TransactionKind.Sell, at, null, null, (Stock, LineEffect.Change, -shares, -(shares * price)), (Dollar, LineEffect.Change, shares * price, shares * price));
+            Lines(EventType.Trade, at, null, null, (Stock, LineEffect.Change, -shares, -(shares * price)), (Dollar, LineEffect.Change, shares * price, shares * price));
 
         private static PostedLine[] Override(decimal shares, DateTimeOffset at, long? sourceSequence = null) =>
-            Lines(TransactionKind.Override, at, sourceSequence, at.AddDays(1), (Stock, LineEffect.SetTo, shares, null));
+            Lines(EventType.PositionOverride, at, sourceSequence, at.AddDays(1), (Stock, LineEffect.SetTo, shares, null));
 
-        private static PostedLine[] Lines(TransactionKind kind, DateTimeOffset at, long? sourceSequence, DateTimeOffset? expires, params (AssetFact Asset, LineEffect Effect, decimal Quantity, decimal? Amount)[] lines)
+        private static PostedLine[] Lines(EventType kind, DateTimeOffset at, long? sourceSequence, DateTimeOffset? expires, params (AssetFact Asset, LineEffect Effect, decimal Quantity, decimal? Amount)[] lines)
         {
-            var transaction = new TransactionFact(new TransactionDto
-            {
-                TransactionId = Guid.NewGuid(), Kind = kind, ExpiresTime = expires, EffectiveTime = at, EnteredTime = at,
-                Source = kind == TransactionKind.Override ? EventSource.Operator : EventSource.Simulator, SourceId = Guid.NewGuid().ToString(),
-                SourceSequence = sourceSequence, RowVersion = Next(),
-            });
+            // As an event posts them: one event, its items in order, at the next commit.  (An override's expiry is the rules'
+            // business, not the fold's.)
+            _ = expires;
+            var eventId = Guid.NewGuid();
+            var sequence = Next();
             return lines
-                .Select((line, index) => new PostedLine(
-                    new TransactionLineFact(new TransactionLineDto
-                    {
-                        TransactionId = transaction.TransactionId, LineNumber = index + 1, AccountId = Account, AssetId = line.Asset.AssetId,
-                        Effect = line.Effect, Quantity = line.Quantity, Amount = line.Amount, RowVersion = transaction.RowVersion,
-                    }),
-                    transaction))
+                .Select((line, index) => new PostedLine(eventId, index + 1, Account, line.Asset.AssetId, line.Effect, line.Quantity, line.Amount, kind, at, sourceSequence, sequence))
                 .ToArray();
         }
     }

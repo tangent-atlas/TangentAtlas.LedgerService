@@ -316,34 +316,41 @@ namespace AtlasLedger.Client
             foreach (var order in orders.Orders)
             {
                 output.WriteLine();
-                output.WriteLine(string.Format(
-                    english,
-                    "{0} {1:#,0.######} {2}  {3}  filled {4:#,0.######}, placed {5:#,0.######}, unplaced {6:#,0.######}  ({7}){8}",
-                    order.Side,
-                    order.Quantity,
-                    Name(order.AssetId),
-                    order.Status,
-                    order.Filled,
-                    order.Placed,
-                    order.Unplaced,
-                    order.Origin,
-                    order.Unallocated > 0m ? string.Format(english, "  unallocated {0:#,0.######}", order.Unallocated) : string.Empty));
-                foreach (var allocation in order.Allocations)
+                var chain = order.Replaces is { } replaces ? $", replaces {replaces.ToString()[..8]}" : string.Empty;
+                output.WriteLine($"Order {order.OrderId.ToString()[..8]}  {order.Status}  ({order.Origin}{chain}){(order.Link is { } link ? $"  {link.Type} with {link.OrderIds.Count} other(s)" : string.Empty)}");
+                foreach (var leg in order.Legs)
                 {
-                    output.WriteLine(string.Format(english, "  for {0,-24} {1,14:#,0.######} filled {2,14:#,0.######}", Name(allocation.AccountId), allocation.Quantity, allocation.Filled));
+                    output.WriteLine(string.Format(
+                        english,
+                        "  {0} {1:#,0.######} {2}  filled {3:#,0.######}, placed {4:#,0.######}, unplaced {5:#,0.######}{6}",
+                        leg.Instruction,
+                        leg.Quantity,
+                        Name(leg.AssetId),
+                        leg.Filled,
+                        leg.Placed,
+                        leg.Unplaced,
+                        leg.Unallocated > 0m ? string.Format(english, "  unallocated {0:#,0.######}", leg.Unallocated) : string.Empty));
+                    foreach (var allocation in leg.Allocations)
+                    {
+                        output.WriteLine(string.Format(english, "    for {0,-24} {1,14:#,0.######} filled {2,14:#,0.######}", Name(allocation.AccountId), allocation.Quantity, allocation.Filled));
+                    }
                 }
 
                 foreach (var brokerOrder in order.BrokerOrders)
                 {
-                    output.WriteLine(string.Format(
-                        english,
-                        "  broker order {0}  {1,14:#,0.######} {2,-15} filled {3,14:#,0.######} at {4}, fees {5:#,0.00}",
-                        brokerOrder.BrokerOrderId.ToString()[..8],
-                        brokerOrder.Quantity,
-                        brokerOrder.Status,
-                        brokerOrder.Filled,
-                        brokerOrder.AveragePrice is { } price ? price.ToString("#,0.00####", english) : "-",
-                        brokerOrder.Fees));
+                    foreach (var leg in brokerOrder.Legs)
+                    {
+                        output.WriteLine(string.Format(
+                            english,
+                            "  broker order {0} leg {1}  {2,14:#,0.######} {3,-15} filled {4,14:#,0.######} at {5}, fees {6:#,0.00}",
+                            brokerOrder.BrokerOrderId.ToString()[..8],
+                            leg.LegId,
+                            leg.Quantity,
+                            brokerOrder.Status,
+                            leg.Filled,
+                            leg.AveragePrice is { } price ? price.ToString("#,0.00####", english) : "-",
+                            brokerOrder.Fees));
+                    }
                 }
             }
         }
@@ -401,6 +408,16 @@ namespace AtlasLedger.Client
                         summary.ModelName ?? "none",
                         summary.TargetCash is { } cash ? cash.ToString("P1", english) : "-",
                         summary.IsWaiting ? "waiting for current prices" : summary.ProposedTrades is { } count ? $"{count} trade(s) proposed" : "not rebalanced"));
+                }
+            }
+
+            if (holdings.Problems.Count > 0)
+            {
+                output.WriteLine();
+                output.WriteLine($"{holdings.Problems.Count} event(s) left out, each needing a correction:");
+                foreach (var problem in holdings.Problems)
+                {
+                    output.WriteLine($"  {problem.EventId.ToString()[..8]}  {problem.Problem}");
                 }
             }
         }

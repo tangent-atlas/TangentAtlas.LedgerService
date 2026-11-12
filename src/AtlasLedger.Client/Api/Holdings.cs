@@ -53,11 +53,20 @@ namespace AtlasLedger.Client.Api
     public sealed record CurrencyRate(string FromCurrency, string ToCurrency, decimal Rate);
 
     /// <summary>
-    /// A tenant's holdings, as the rules derived them from its transactions.
+    /// A tenant's holdings, as the rules derived them from its events.
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
     /// <param name="Holdings">The holdings with any quantity, each valued in its account's currency.</param>
     /// <param name="Rates">Each published rate between currencies.</param>
     /// <param name="Accounts">Each account's totals.</param>
-    public sealed record TenantHoldings(DateTimeOffset AsOf, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummary> Accounts);
+    /// <param name="Problems">Events left out of these holdings, and why.</param>
+    public sealed record TenantHoldings(DateTimeOffset AsOf, IReadOnlyList<Holding> Holdings, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummary> Accounts, IReadOnlyList<EventProblem> Problems);
+
+    /// <summary>
+    /// An event the log holds that is left out of what is derived: it can't be read, names what doesn't exist, or doesn't
+    /// balance.  A correction fixes it.
+    /// </summary>
+    /// <param name="EventId">The event.</param>
+    /// <param name="Problem">What is wrong.</param>
+    public sealed record EventProblem(Guid EventId, string Problem);
 }

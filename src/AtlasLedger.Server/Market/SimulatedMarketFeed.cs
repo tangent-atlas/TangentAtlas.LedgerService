@@ -11,6 +11,7 @@ namespace AtlasLedger.Server.Market
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Events;
     using AtlasLedger.Server.Holdings;
     using AtlasLedger.Server.Switches;
     using Microsoft.Extensions.Hosting;
@@ -41,6 +42,9 @@ namespace AtlasLedger.Server.Market
         private readonly ILogger<SimulatedMarketFeed> logger;
 
         private readonly Dictionary<(string Scheme, string Code, string Currency), decimal> prices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
+
+        // Events never change, so each is read once.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid TenantId, Guid EventId), LedgerEvent> decoded = new System.Collections.Concurrent.ConcurrentDictionary<(Guid TenantId, Guid EventId), LedgerEvent>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SimulatedMarketFeed"/> class.
@@ -113,20 +117,35 @@ namespace AtlasLedger.Server.Market
             {
                 lock (partition.SyncRoot)
                 {
-                    // The last purchase or sale of each asset: its line's amount ÷ (quantity × factors) is the quoted price.
+                    // The last purchase or sale of each asset: a trade item's amount ÷ (quantity × factors), or a fill's price.
                     var lastTrades = new Dictionary<Guid, (DateTimeOffset EffectiveTime, decimal Price)>();
-                    foreach (var line in partition.TransactionLines)
+                    void Consider(Guid assetId, DateTimeOffset time, decimal price)
                     {
-                        var transaction = line.Transaction;
-                        if (!HoldingFold.Exchanges.Contains(transaction.Kind) || line.Amount is not { } amount || line.Quantity == 0m)
+                        if (!lastTrades.TryGetValue(assetId, out var latest) || time > latest.EffectiveTime)
                         {
-                            continue;
+                            lastTrades[assetId] = (time, price);
                         }
+                    }
 
-                        var units = line.Quantity * line.Asset.QuantityFactor * line.Asset.PriceFactor;
-                        if (units != 0m && (!lastTrades.TryGetValue(line.AssetId, out var latest) || transaction.EffectiveTime > latest.EffectiveTime))
+                    var events = partition.Events.Select(row => this.decoded.GetOrAdd((partition.TenantId, row.EventId), _ => EventRows.Read(row))).ToArray();
+                    var legs = events.OfType<OrderPlacedEvent>().SelectMany(order => order.Legs.Select(leg => (order.OrderId, leg.LegId, leg.AssetId))).ToDictionary(item => (item.OrderId, item.LegId), item => item.AssetId);
+                    foreach (var value in events)
+                    {
+                        if (value is TradeEvent trade)
                         {
-                            lastTrades[line.AssetId] = (transaction.EffectiveTime, Math.Abs(amount / units));
+                            foreach (var item in trade.Items)
+                            {
+                                var asset = partition.FindAsset(item.AssetId);
+                                var units = asset is null ? 0m : item.Quantity * asset.QuantityFactor * asset.PriceFactor;
+                                if (asset is { AssetType: not AssetType.Cash } && units != 0m && item.Amount is { } amount)
+                                {
+                                    Consider(item.AssetId, trade.Envelope.EffectiveTime, Math.Abs(amount / units));
+                                }
+                            }
+                        }
+                        else if (value is ExecutionReportedEvent fill && legs.TryGetValue((fill.OrderId, fill.LegId), out var assetId))
+                        {
+                            Consider(assetId, fill.ReportTime, fill.Price);
                         }
                     }
 

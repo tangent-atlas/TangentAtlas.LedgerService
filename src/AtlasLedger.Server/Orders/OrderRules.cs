@@ -14,8 +14,7 @@ namespace AtlasLedger.Server.Orders
     using NRules.Fluent.Dsl;
 
     /// <summary>
-    /// An order's state: its allocations, broker orders and their execution reports, worked out together.  Every join is
-    /// on the order's key.
+    /// Each order's state, from its events: its broker orders, the broker's answers, cancel requests, and any replacement.
     /// </summary>
     [Name("Orders.State")]
     public sealed class OrderStateRule : Rule
@@ -23,105 +22,84 @@ namespace AtlasLedger.Server.Orders
         /// <inheritdoc/>
         public override void Define()
         {
-            OrderFact order = default!;
-            IEnumerable<AllocationFact> allocations = default!;
-            IEnumerable<BrokerOrderFact> brokerOrders = default!;
-            IEnumerable<ExecutionReportFact> reports = default!;
-
+            OrderPlacedEvent order = default!;
+            IEnumerable<OrderEvent> events = default!;
+            IEnumerable<OrderReplacedEvent> replacements = default!;
             this.When()
                 .Match(() => order)
-                .Query(() => allocations, query => query.Match<AllocationFact>(item => item.OrderId == order.OrderId).Collect())
-                .Query(() => brokerOrders, query => query.Match<BrokerOrderFact>(item => item.OrderId == order.OrderId).Collect())
-                .Query(() => reports, query => query
-                    .Match<ExecutionReportFact>(item => brokerOrders.Any(brokerOrder => brokerOrder.BrokerOrderId == item.BrokerOrderId))
-                    .Collect());
+                .Query(() => events, query => query.Match<OrderEvent>(item => item.OrderId == order.OrderId, item => !(item is OrderPlacedEvent)).Collect())
+                .Query(() => replacements, query => query.Match<OrderReplacedEvent>(item => item.Replaces == order.OrderId).Collect());
             this.Then()
-                .Yield(_ => OrderBook.State(order, allocations, brokerOrders, reports));
+                .Yield(_ => OrderBook.State(order, events, replacements.OrderBy(OrderBook.ProcessingOrder).FirstOrDefault()));
         }
     }
 
     /// <summary>
-    /// Books every fill not yet booked to the order's accounts, as Buy or Sell transactions, one per account and fill.  The
-    /// division is recomputed from all the order's fills every time (it depends only on them, in the order recorded), and
-    /// only the fills without a booking are written, so a fill is booked once: the next cycle sees the bookings as facts,
-    /// and a booking written twice is the same row (its key comes from the fill and the account).
+    /// Posts an order's fills to its accounts' holdings, by the published allocation rule.  Derived from the fills, so
+    /// nothing is written: the fills are the record.
     /// </summary>
-    [Name("Orders.BookFills")]
-    public sealed class BookFillsRule : Rule
+    [Name("Orders.PostFills")]
+    public sealed class PostFillsRule : Rule
+    {
+        /// <inheritdoc/>
+        public override void Define()
+        {
+            OrderPlacedEvent order = default!;
+            IEnumerable<ExecutionReportedEvent> fills = default!;
+            IEnumerable<AssetFact> assets = default!;
+            IEnumerable<CashFact> cash = default!;
+            IEnumerable<AccountFact> accounts = default!;
+            this.When()
+                .Match(() => order)
+                .Query(() => fills, query => query.Match<ExecutionReportedEvent>(item => item.OrderId == order.OrderId).Collect())
+                .Having(() => fills.Any())
+                .Query(() => assets, query => query.Match<AssetFact>(item => order.Legs.Any(leg => leg.AssetId == item.AssetId)).Collect())
+                .Query(() => cash, query => query.Match<CashFact>().Collect())
+                .Query(() => accounts, query => query.Match<AccountFact>(item => order.Legs.Any(leg => leg.Allocations.Any(allocation => allocation.AccountId == item.AccountId))).Collect());
+            this.Then()
+                .Yield(_ => new PostedLines(
+                    order.OrderId,
+                    OrderBook.Lines(
+                        order,
+                        fills,
+                        assets.ToDictionary(asset => asset.AssetId),
+                        cash.GroupBy(item => item.CurrencyCode).ToDictionary(group => group.Key, group => group.First()),
+                        accounts.ToDictionary(account => account.AccountId, account => account.Currency))));
+        }
+    }
+
+    /// <summary>
+    /// A fill for an account kept in another currency than the asset's quote currency can't be posted: an alert says so.
+    /// </summary>
+    [Name("Orders.UnpostedFill")]
+    public sealed class UnpostedFillRule : Rule
     {
         /// <summary>
-        /// The alert raised when a fill can't be booked because an account is kept in another currency than the asset is
-        /// quoted in (booking it needs an exchange of currencies, not built yet).
+        /// The alert's rule name, followed by the order.
         /// </summary>
-        public const string UnbookedFillRule = "UnbookedFill";
+        public const string UnpostedFillAlert = "UnpostedFill";
 
         /// <inheritdoc/>
         public override void Define()
         {
-            OrderFact order = default!;
+            OrderPlacedEvent order = default!;
+            ExecutionReportedEvent fill = default!;
             AssetFact asset = default!;
-            CashFact cash = default!;
-            IEnumerable<AllocationFact> allocations = default!;
-            IEnumerable<AccountFact> accounts = default!;
-            IEnumerable<BrokerOrderFact> brokerOrders = default!;
-            IEnumerable<ExecutionReportFact> fills = default!;
-            IEnumerable<TransactionFact> booked = default!;
+            AccountFact account = default!;
             LedgerRuleActions actions = default!;
             this.Dependency().Resolve(() => actions);
-
             this.When()
-                .Match(() => order)
-                .Match(() => asset, candidate => candidate.AssetId == order.AssetId)
-                .Match(() => cash, candidate => candidate.CurrencyCode == asset.QuoteCurrency)
-                .Query(() => brokerOrders, query => query.Match<BrokerOrderFact>(item => item.OrderId == order.OrderId).Collect())
-                .Query(() => fills, query => query
-                    .Match<ExecutionReportFact>(item => item.ReportType == ExecutionReportType.Fill, item => brokerOrders.Any(brokerOrder => brokerOrder.BrokerOrderId == item.BrokerOrderId))
-                    .Collect())
-                .Query(() => booked, query => query.Match<TransactionFact>(item => item.OrderId == order.OrderId).Collect())
-                .Having(() => fills.Any(fill => !booked.Any(transaction => transaction.ExecutionReportId == fill.ExecutionReportId)))
-                .Query(() => allocations, query => query.Match<AllocationFact>(item => item.OrderId == order.OrderId).Collect())
-                .Query(() => accounts, query => query
-                    .Match<AccountFact>(item => allocations.Any(allocation => allocation.AccountId == item.AccountId))
-                    .Collect());
+                .Match(() => fill)
+                .Match(() => order, candidate => candidate.OrderId == fill.OrderId)
+                .Match(() => asset, candidate => order.Legs.Any(leg => leg.LegId == fill.LegId && leg.AssetId == candidate.AssetId))
+                .Match(() => account, candidate => order.Legs.Any(leg => leg.LegId == fill.LegId && leg.Allocations.Any(allocation => allocation.AccountId == candidate.AccountId)), candidate => candidate.Currency != asset.QuoteCurrency)
+                .Not<AlertFact>(alert => alert.NodeId == account.AccountId, alert => alert.Rule == UnpostedFillAlert + ":" + order.OrderId.ToString("N"));
             this.Then()
-                .Do(_ => Book(actions, order, asset, cash, allocations, accounts, fills, booked));
-        }
-
-        private static void Book(
-            LedgerRuleActions actions,
-            OrderFact order,
-            AssetFact asset,
-            CashFact cash,
-            IEnumerable<AllocationFact> allocations,
-            IEnumerable<AccountFact> accounts,
-            IEnumerable<ExecutionReportFact> fills,
-            IEnumerable<TransactionFact> booked)
-        {
-            var alreadyBooked = booked.Select(transaction => transaction.ExecutionReportId).OfType<Guid>().ToHashSet();
-            var currencies = accounts.ToDictionary(account => account.AccountId, account => account.Currency);
-            foreach (var fill in OrderBook.AllocateFills(allocations, fills).Where(item => !alreadyBooked.Contains(item.Fill.ExecutionReportId)))
-            {
-                foreach (var share in fill.Shares)
-                {
-                    if (currencies.GetValueOrDefault(share.AccountId) != asset.QuoteCurrency)
-                    {
-                        ComplianceRules.RaiseAlert(
-                            actions,
-                            share.AccountId,
-                            $"{UnbookedFillRule}:{order.OrderId:N}",
-                            $"A fill of order {order.OrderId} can't be booked: the account isn't kept in {asset.QuoteCurrency}, the currency the asset is quoted in.");
-                        continue;
-                    }
-
-                    var (transaction, received, given) = OrderBook.Booking(order, asset, cash, fill.Fill, share);
-                    actions.Add(ledger =>
-                    {
-                        ledger.InsertTransaction(transaction);
-                        ledger.InsertTransactionLine(received);
-                        ledger.InsertTransactionLine(given);
-                    });
-                }
-            }
+                .Do(_ => ComplianceRules.RaiseAlert(
+                    actions,
+                    account.AccountId,
+                    UnpostedFillAlert + ":" + order.OrderId.ToString("N"),
+                    $"A fill of order {order.OrderId} can't be posted: the account isn't kept in {asset.QuoteCurrency}, the currency the asset is quoted in."));
         }
     }
 

@@ -83,7 +83,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Prices">Each priced asset's effective price.</param>
     /// <param name="Rates">Each published rate between currencies.</param>
     /// <param name="Accounts">Each account's totals.</param>
-    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummaryDto> Accounts);
+    /// <param name="Problems">Events left out of these holdings, and why.</param>
+    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummaryDto> Accounts, IReadOnlyList<EventProblem> Problems);
 
     /// <summary>
     /// Serves what the tenant's transactions add up to: the rules' published snapshot, never the ledger's tables.
@@ -110,7 +111,7 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="tenantId">The tenant.</param>
         /// <returns>The holdings, or 409 when the rules engine hasn't run for the tenant (it is switched off, or just starting).</returns>
         [HttpGet]
-        [Authorize(Policy = LedgerAccessPolicies.TransactionRead)]
+        [Authorize(Policy = LedgerAccessPolicies.EventRead)]
         public ActionResult<HoldingsDto> Get(Guid tenantId)
         {
             if (this.store.Find(tenantId) is not { } snapshot)
@@ -202,7 +203,8 @@ namespace AtlasLedger.Server.Holdings
                 holdings,
                 snapshot.Prices.OrderBy(price => price.AssetId).ToArray(),
                 snapshot.Rates.OrderBy(rate => rate.FromCurrency, StringComparer.Ordinal).ThenBy(rate => rate.ToCurrency, StringComparer.Ordinal).ToArray(),
-                accounts));
+                accounts,
+                snapshot.Problems.OrderBy(problem => problem.EventId).ToArray()));
         }
     }
 }

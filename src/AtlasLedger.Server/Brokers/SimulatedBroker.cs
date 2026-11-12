@@ -57,9 +57,9 @@ namespace AtlasLedger.Server.Brokers
             {
                 if (known.Reports.Count == 0)
                 {
-                    if (this.LatestPrice(order) is null)
+                    if (order.Legs.FirstOrDefault(leg => this.LatestPrice(order.TenantId, leg) is null) is { } unpriced)
                     {
-                        known.Add(ExecutionReportType.Rejected, null, null, null, this.timeProvider.GetUtcNow(), $"No price for {order.Ticker}.");
+                        known.Add(ExecutionReportType.Rejected, null, null, null, this.timeProvider.GetUtcNow(), $"No price for {unpriced.Ticker}.");
                     }
                     else
                     {
@@ -112,21 +112,34 @@ namespace AtlasLedger.Server.Brokers
         private void TryFill(Known known)
         {
             var order = known.Order;
-            if (known.IsDone || this.LatestPrice(order) is not { } price)
+            if (known.IsDone)
             {
                 return;
             }
 
+            var prices = order.Legs.Select(leg => (Leg: leg, Price: this.LatestPrice(order.TenantId, leg))).ToArray();
+            if (prices.Any(item => item.Price is null))
+            {
+                return;
+            }
+
+            // A market order fills at once; a limit order (one leg) when the price reaches its limit.  Each leg fills at its own
+            // price; the fees ride on the first.
             var isMarketable = order.OrderType == OrderType.Market
-                || (order.LimitPrice is { } limit && (order.Side == OrderSide.Buy ? price <= limit : price >= limit));
+                || (prices.Length == 1 && order.LimitPrice is { } limit && (prices[0].Leg.Side == OrderSide.Buy ? prices[0].Price <= limit : prices[0].Price >= limit));
             if (isMarketable)
             {
-                known.Add(ExecutionReportType.Fill, order.Quantity, price, this.options.SimulatedFees, this.timeProvider.GetUtcNow(), null);
+                var first = true;
+                foreach (var (leg, price) in prices)
+                {
+                    known.Add(ExecutionReportType.Fill, leg.Quantity, price, first ? this.options.SimulatedFees : 0m, this.timeProvider.GetUtcNow(), null, leg.LegId);
+                    first = false;
+                }
             }
         }
 
-        private decimal? LatestPrice(BrokerOrderRequest order) =>
-            this.ledger.FindPartition(order.TenantId)?.FindPrice(SymbolScheme.Ticker, order.Ticker, order.QuoteCurrency) is { Last: > 0m } price ? price.Last : null;
+        private decimal? LatestPrice(Guid tenantId, BrokerLegRequest leg) =>
+            this.ledger.FindPartition(tenantId)?.FindPrice(SymbolScheme.Ticker, leg.Ticker, leg.QuoteCurrency) is { Last: > 0m } price ? price.Last : null;
 
         private sealed class Known
         {
@@ -143,8 +156,8 @@ namespace AtlasLedger.Server.Brokers
 
             public bool IsDone => this.reports.Any(report => report.ReportType is ExecutionReportType.Fill or ExecutionReportType.Cancelled or ExecutionReportType.Rejected or ExecutionReportType.Expired);
 
-            public void Add(ExecutionReportType type, decimal? quantity, decimal? price, decimal? fees, DateTimeOffset time, string? text) =>
-                this.reports.Add(new BrokerReport($"sim-{this.Order.ClientOrderId:N}-{this.reports.Count}", type, quantity, price, fees, time, text));
+            public void Add(ExecutionReportType type, decimal? quantity, decimal? price, decimal? fees, DateTimeOffset time, string? text, int legId = 1) =>
+                this.reports.Add(new BrokerReport($"sim-{this.Order.ClientOrderId:N}-{this.reports.Count}", type, quantity, price, fees, time, text, legId));
 
             public IReadOnlyList<BrokerReport> Snapshot() => this.reports.ToArray();
         }

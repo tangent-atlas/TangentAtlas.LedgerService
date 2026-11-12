@@ -123,7 +123,7 @@ namespace AtlasLedger.Tests
                 () => tool.GetJobsAsync(tenantId, cancellationToken),
                 found => found.Jobs.Single(job => job.Job == "GenerateOrders").Last?.Outcome?.StartsWith("0 order(s)", StringComparison.Ordinal) == true);
             Assert.Contains(jobs.Runs, run => run is { Job: "GenerateOrders", Reason: JobRunReason.Schedule, Status: JobRunStatus.Succeeded } && run.Outcome!.StartsWith("2 order(s)", StringComparison.Ordinal));
-            Assert.Equal(2, (await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken)).Count);
+            Assert.Equal(2, await OrderRoutingTests.OrderCountAsync(tool, tenantId, cancellationToken));
             var joe10 = jobs.Schedules.Single(schedule => schedule.JobScheduleId == Joe10Account.GenerateOrdersScheduleId);
             Assert.Null(joe10.Problem);
             Assert.NotNull(joe10.NextStart);
@@ -155,7 +155,7 @@ namespace AtlasLedger.Tests
             await OrderRoutingTests.WaitForAsync(
                 () => tool.GetJobsAsync(tenantId, cancellationToken),
                 found => found.Jobs.Single(job => job.Job == "GenerateOrders").Last?.Outcome == "Skipped: trading is switched off.");
-            Assert.Empty(await tool.ListAsync<OrderDto>(tenantId, "Order", cancellationToken));
+            Assert.Equal(0, await OrderRoutingTests.OrderCountAsync(tool, tenantId, cancellationToken));
 
             // By hand: the same task, the same switch, and the run in the log.  A key no job has is refused.
             var byHand = await tool.RunJobAsync(tenantId, "GenerateOrders", TimeSpan.FromSeconds(10), cancellationToken);

@@ -79,6 +79,29 @@ another.  The walkthrough turns on the services that are off, and off again only
 `v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
 application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
 
+## The event log
+
+Every input is an event in one table, `Event`, and nothing in it is ever changed or deleted.  An event is its kind
+(`EventType`, a fixed number), its payload's version (`SchemaVersion`), and the payload itself: the kind's own fields as
+JSON.  The other columns are the same for every kind: who sent it (`Source`, `SourceId`, idempotent together, so a replayed
+message is recorded once), when it happened and was recorded, what it belongs to (`CorrelationId`: an order, through its
+replace chain) and what caused it (`CausationId`).  Its `RowVersion`, the commit that wrote it, orders the log.  The kinds
+and their payloads are C# records in `src/TangentAtlas/Events.cs`; `EventCodec` writes and reads them.
+
+- **Account activity** changes holdings: opening balance, cash movement, trade, income, fee, receive-and-deliver, journal
+  (between two accounts), adjustment, position override (sets holdings until it expires), and correction (what an earlier
+  event should have been; the earlier one stops counting).  Its items are its effects: asset, signed quantity, signed
+  amount, and optionally the price, opening or closing, and fee type.  Cash is an asset like any other.  A trade must
+  balance (its amounts sum to zero); a movement across the books' edge, such as a deposit, has its other side outside them.
+- **Order events** change no holdings: an order placed (one or more legs, each an asset, an instruction and each account's
+  share; optionally linked to other orders, one-cancels-other or one-triggers-other), an order replacing another, a cancel
+  request, a broker order sent, and the broker's answers (accepted, a fill, cancelled, rejected, expired).
+
+Everything else is derived by the rules, never stored: holdings (folded from account-activity items, and from fills of our
+own orders divided among accounts by the published allocation rule), order and broker-order states, prices.  An event that
+can't be read, names an account or asset that doesn't exist, or doesn't balance stays in the log, is left out of what is
+derived, and is listed under `Problems` in the holdings (and by `ledger-operator holdings`) until a correction fixes it.
+
 ## Jobs
 
 A job is a class with a `[Job("key")]` attribute (`src/AtlasLedger.Server/Jobs`), of one of two kinds:

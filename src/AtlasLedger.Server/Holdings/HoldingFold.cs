@@ -25,18 +25,43 @@ namespace AtlasLedger.Server.Holdings
         /// <summary>
         /// The kinds of transaction that exchange one asset for another, whose lines must balance.
         /// </summary>
-        public static readonly IReadOnlySet<TransactionKind> Exchanges = new HashSet<TransactionKind> { TransactionKind.Buy, TransactionKind.Sell };
+        public static readonly IReadOnlySet<EventType> Exchanges = new HashSet<EventType> { EventType.Trade };
 
         /// <summary>
         /// The order in which lines are processed.
         /// </summary>
         /// <param name="posted">A posted line.</param>
         /// <returns>The sort key.</returns>
-        public static (DateTimeOffset EffectiveTime, long SourceSequence, long RowVersion, int LineNumber) ProcessingOrder(PostedLine posted)
+        public static (DateTimeOffset EffectiveTime, long SourceSequence, long Sequence, Guid EventId, int ItemNumber) ProcessingOrder(PostedLine posted)
         {
             ArgumentNullException.ThrowIfNull(posted);
-            var transaction = posted.Transaction;
-            return (transaction.EffectiveTime, transaction.SourceSequence ?? long.MinValue, transaction.RowVersion, posted.Line.LineNumber);
+            return (posted.EffectiveTime, posted.SourceSequence ?? long.MinValue, posted.Sequence, posted.EventId, posted.ItemNumber);
+        }
+
+        /// <summary>
+        /// The movements an account-activity event posts: its items, in its account (a journal's leave its account and arrive
+        /// at the other).  An override sets holdings rather than changing them.
+        /// </summary>
+        /// <param name="activity">The event.</param>
+        /// <returns>The movements.</returns>
+        public static IReadOnlyList<PostedLine> Lines(AccountActivityEvent activity)
+        {
+            ArgumentNullException.ThrowIfNull(activity);
+            var envelope = activity.Envelope;
+            var effect = activity is PositionOverrideEvent ? LineEffect.SetTo : LineEffect.Change;
+            var kind = activity is CorrectionEvent ? EventType.Correction : envelope.Type;
+            var lines = new List<PostedLine>();
+            foreach (var item in activity.Items)
+            {
+                lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, activity.AccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence));
+                if (activity is JournalEvent journal)
+                {
+                    lines[^1] = lines[^1] with { Quantity = -item.Quantity, Amount = -item.Amount };
+                    lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, journal.ToAccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence));
+                }
+            }
+
+            return lines;
         }
 
         /// <summary>
@@ -59,9 +84,9 @@ namespace AtlasLedger.Server.Holdings
             var count = 0;
             foreach (var posted in lines.OrderBy(ProcessingOrder))
             {
-                var line = posted.Line;
+                var line = posted;
                 count++;
-                last = posted.Transaction.EffectiveTime;
+                last = posted.EffectiveTime;
                 if (line.Effect == LineEffect.SetTo)
                 {
                     // An override sets the quantity and keeps the cost already there.
@@ -114,10 +139,10 @@ namespace AtlasLedger.Server.Holdings
             }
 
             var last = exchanges
-                .Where(posted => posted.Line.Quantity != 0m && posted.Line.Amount is not null)
+                .Where(posted => posted.Quantity != 0m && posted.Amount is not null)
                 .OrderByDescending(ProcessingOrder)
                 .FirstOrDefault();
-            return last is null ? null : new EffectivePrice(asset.AssetId, QuotedPrice(asset, last.Line), asset.QuoteCurrency, last.Transaction.EffectiveTime, PriceSource.LastTrade);
+            return last is null ? null : new EffectivePrice(asset.AssetId, QuotedPrice(asset, last), asset.QuoteCurrency, last.EffectiveTime, PriceSource.LastTrade);
         }
 
         /// <summary>
@@ -126,7 +151,7 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="asset">The asset.</param>
         /// <param name="line">A line with a quantity and an amount.</param>
         /// <returns>The price, as quoted.</returns>
-        public static decimal QuotedPrice(AssetFact asset, TransactionLineFact line)
+        public static decimal QuotedPrice(AssetFact asset, PostedLine line)
         {
             ArgumentNullException.ThrowIfNull(asset);
             ArgumentNullException.ThrowIfNull(line);
@@ -165,16 +190,16 @@ namespace AtlasLedger.Server.Holdings
         }
 
         /// <summary>
-        /// Whether an exchange balances: at least two lines, every line valued, and the values summing to zero (to the cent).
+        /// Whether an exchange balances: at least two items, every item valued, and the values summing to zero (to the cent).
         /// </summary>
-        /// <param name="lines">The transaction's lines.</param>
+        /// <param name="items">The event's items.</param>
         /// <returns>True if it balances.</returns>
-        public static bool IsBalanced(IReadOnlyCollection<TransactionLineFact> lines)
+        public static bool IsBalanced(IReadOnlyCollection<ActivityItem> items)
         {
-            ArgumentNullException.ThrowIfNull(lines);
-            return lines.Count >= 2
-                && lines.All(line => line.Amount is not null)
-                && Math.Abs(lines.Sum(line => line.Amount!.Value)) < 0.005m;
+            ArgumentNullException.ThrowIfNull(items);
+            return items.Count >= 2
+                && items.All(item => item.Amount is not null)
+                && Math.Abs(items.Sum(item => item.Amount!.Value)) < 0.005m;
         }
 
         /// <summary>

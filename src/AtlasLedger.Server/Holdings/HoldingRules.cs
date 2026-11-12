@@ -12,49 +12,43 @@ namespace AtlasLedger.Server.Holdings
     using NRules.Fluent.Dsl;
 
     /// <summary>
-    /// A line of an ordinary transaction is posted: it counts from the moment it is recorded.
+    /// Posts each account-activity event's items, unless the event is an override (posted while in force, below), has a
+    /// problem, or has been corrected (its correction stands instead).
     /// </summary>
-    [Name("Holdings.PostedLine")]
-    public sealed class PostedLineRule : Rule
+    [Name("Holdings.PostedLines")]
+    public sealed class PostedLinesRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
-            TransactionLineFact line = default!;
-            TransactionFact transaction = default!;
-
+            AccountActivityEvent activity = default!;
             this.When()
-                .Match(() => line)
-                .Match(() => transaction, candidate => candidate.TransactionId == line.TransactionId, candidate => candidate.Kind != TransactionKind.Override);
+                .Match(() => activity, candidate => candidate.Envelope.Type != EventType.PositionOverride)
+                .Not<EventProblem>(problem => problem.EventId == activity.EventId)
+                .Not<CorrectionEvent>(correction => correction.Corrects == activity.EventId);
             this.Then()
-                .Yield(_ => new PostedLine(line, transaction));
+                .Yield(_ => new PostedLines(activity.EventId, HoldingFold.Lines(activity)));
         }
     }
 
     /// <summary>
-    /// A line of an override is posted while the override is in force, from its effective time until it expires.  Kept apart
-    /// from the holdings so that the clock moving on re-checks only the overrides.
+    /// Posts an override's items while it is in force: from its effective time until it expires, by the rules' clock.
     /// </summary>
-    [Name("Holdings.PostedOverrideLine")]
-    public sealed class PostedOverrideLineRule : Rule
+    [Name("Holdings.PostedOverride")]
+    public sealed class PostedOverrideRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
             ClockFact clock = default!;
-            TransactionLineFact line = default!;
-            TransactionFact transaction = default!;
-
+            PositionOverrideEvent overriding = default!;
             this.When()
                 .Match(() => clock)
-                .Match(() => line)
-                .Match(
-                    () => transaction,
-                    candidate => candidate.TransactionId == line.TransactionId,
-                    candidate => candidate.Kind == TransactionKind.Override,
-                    candidate => HoldingFold.IsInForce(candidate.EffectiveTime, candidate.ExpiresTime, clock.Now));
+                .Match(() => overriding, candidate => HoldingFold.IsInForce(candidate.Envelope.EffectiveTime, candidate.ExpiresTime, clock.Now))
+                .Not<EventProblem>(problem => problem.EventId == overriding.EventId)
+                .Not<CorrectionEvent>(correction => correction.Corrects == overriding.EventId);
             this.Then()
-                .Yield(_ => new PostedLine(line, transaction));
+                .Yield(_ => new PostedLines(overriding.EventId, HoldingFold.Lines(overriding)));
         }
     }
 
@@ -80,8 +74,9 @@ namespace AtlasLedger.Server.Holdings
 
             this.When()
                 .Query(() => lines, query => query
-                    .Match<PostedLine>()
-                    .GroupBy(item => ValueTuple.Create(item.Line.AccountId, item.Line.AssetId)))
+                    .Match<PostedLines>()
+                    .SelectMany(posted => posted.Lines)
+                    .GroupBy(item => ValueTuple.Create(item.AccountId, item.AssetId)))
                 .Match(() => account, candidate => candidate.AccountId == lines.Key.AccountId)
                 .Match(() => asset, candidate => candidate.AssetId == lines.Key.AssetId);
             this.Then()
@@ -123,7 +118,7 @@ namespace AtlasLedger.Server.Holdings
             AssetFact asset = default!;
             IEnumerable<SymbolFact> symbols = default!;
             IEnumerable<PriceFact> markets = default!;
-            IEnumerable<PostedLine> exchanges = default!;
+            IEnumerable<PostedLines> exchanges = default!;
 
             this.When()
                 .Match(() => asset)
@@ -134,14 +129,14 @@ namespace AtlasLedger.Server.Holdings
                     .Match<PriceFact>(item => item.Currency == asset.QuoteCurrency, item => symbols.Any(symbol => symbol.Scheme == item.Scheme && symbol.Code == item.Code))
                     .Collect())
                 .Query(() => exchanges, query => query
-                    .Match<PostedLine>(item => item.Line.AssetId == asset.AssetId, item => HoldingFold.Exchanges.Contains(item.Transaction.Kind))
+                    .Match<PostedLines>(item => item.Lines.Any(line => line.AssetId == asset.AssetId && HoldingFold.Exchanges.Contains(line.Kind)))
                     .Collect())
                 .Having(() => markets.Any(market => market.Last > 0m) || exchanges.Any());
             this.Then()
                 .Yield(_ => HoldingFold.Price(
                     asset,
                     markets.Where(market => market.Last > 0m).OrderByDescending(market => market.AsOf).FirstOrDefault(),
-                    exchanges)!);
+                    exchanges.SelectMany(posted => posted.Lines).Where(line => line.AssetId == asset.AssetId && HoldingFold.Exchanges.Contains(line.Kind)))!);
         }
     }
 
@@ -158,10 +153,12 @@ namespace AtlasLedger.Server.Holdings
 
             this.When()
                 .Query(() => lines, query => query
-                    .Match<PostedLine>(item => item.Transaction.Kind == TransactionKind.Deposit || item.Transaction.Kind == TransactionKind.Withdrawal)
-                    .GroupBy(item => item.Line.AccountId));
+                    .Match<PostedLines>()
+                    .SelectMany(posted => posted.Lines)
+                    .Where(item => item.Kind == EventType.CashMovement)
+                    .GroupBy(item => item.AccountId));
             this.Then()
-                .Yield(_ => new AccountFlow(lines.Key, lines.Sum(item => item.Line.Amount ?? 0m)));
+                .Yield(_ => new AccountFlow(lines.Key, lines.Sum(item => item.Amount ?? 0m)));
         }
     }
 }

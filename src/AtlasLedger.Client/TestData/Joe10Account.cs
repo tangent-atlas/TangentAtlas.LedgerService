@@ -176,24 +176,23 @@ namespace AtlasLedger.Client.TestData
             var entered = state.Close;
             var script = Deposit(state, deposit);
             var sequence = 0L;
+            var day = DateOnly.FromDateTime(state.Close.Date);
             foreach (var purchase in Purchases(state, deposit))
             {
                 sequence++;
-                var transactionId = KeyFor($"buy/{purchase.Ticker}");
                 var cost = purchase.Shares * purchase.Price;
-                script
-                    .Insert("Transaction", new TransactionDto
-                    {
-                        TransactionId = transactionId,
-                        Kind = TransactionKind.Buy,
-                        Source = EventSource.Simulator,
-                        SourceId = $"joe10-buy-{purchase.Ticker}",
-                        SourceSequence = sequence,
-                        EffectiveTime = state.Close,
-                        EnteredTime = entered,
-                    })
-                    .Insert("TransactionLine", new TransactionLineDto { TransactionId = transactionId, LineNumber = 1, AccountId = AccountId, AssetId = AssetIdOf(purchase.Ticker), Effect = LineEffect.Change, Quantity = purchase.Shares, Amount = cost })
-                    .Insert("TransactionLine", new TransactionLineDto { TransactionId = transactionId, LineNumber = 2, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = -cost, Amount = -cost });
+                var trade = new TradeEvent
+                {
+                    AccountId = AccountId,
+                    TradeDate = day,
+                    SettlementDate = day.AddDays(1),
+                    Items =
+                    [
+                        new ActivityItem(AssetIdOf(purchase.Ticker), purchase.Shares, cost, purchase.Price, PositionEffect.Opening),
+                        new ActivityItem(DollarId, -cost, -cost),
+                    ],
+                };
+                script.AppendEvent(trade, KeyFor($"buy/{purchase.Ticker}"), EventSource.Simulator, $"joe10-buy-{purchase.Ticker}", state.Close, entered, sequence);
             }
 
             return script;
@@ -220,9 +219,13 @@ namespace AtlasLedger.Client.TestData
             foreach (var purchase in purchases)
             {
                 var orderId = KeyFor($"order/{purchase.Ticker}");
-                script
-                    .Insert("Order", new OrderDto { OrderId = orderId, AssetId = AssetIdOf(purchase.Ticker), Side = OrderSide.Buy, Origin = OrderOrigin.Rebalance, EnteredTime = placed })
-                    .Insert("Allocation", new AllocationDto { OrderId = orderId, AccountId = AccountId, Quantity = purchase.Shares });
+                var order = new OrderPlacedEvent
+                {
+                    OrderId = orderId,
+                    Origin = OrderOrigin.Rebalance,
+                    Legs = [new OrderLeg(1, AssetIdOf(purchase.Ticker), Instruction.Buy, [new AllocationItem(AccountId, purchase.Shares)], PositionEffect.Opening)],
+                };
+                script.AppendEvent(order, orderId, EventSource.Simulator, $"joe10-order-{purchase.Ticker}", placed, correlationId: orderId);
 
                 // The largest purchase in two broker orders, each filled in two parts; the rest in one, filled at once.
                 var isSplit = purchase.Ticker == largest && purchase.Shares >= 4m;
@@ -232,25 +235,18 @@ namespace AtlasLedger.Client.TestData
                 {
                     var quantity = brokerQuantities[part];
                     var brokerOrderId = KeyFor($"broker-order/{purchase.Ticker}/{part}");
+                    var sent = new BrokerOrderSentEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, AccountId = AccountId, Legs = [new BrokerLeg(1, quantity)], OrderType = OrderType.Market, TimeInForce = TimeInForce.Day };
+                    var accepted = new OrderAcceptedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = placed.AddMinutes(1) };
                     script
-                        .Insert("BrokerOrder", new BrokerOrderDto { BrokerOrderId = brokerOrderId, OrderId = orderId, AccountId = AccountId, Quantity = quantity, OrderType = OrderType.Market, TimeInForce = TimeInForce.Day, EnteredTime = placed })
-                        .Insert("ExecutionReport", new ExecutionReportDto { ExecutionReportId = KeyFor($"report/{purchase.Ticker}/{part}/accepted"), BrokerOrderId = brokerOrderId, ReportType = ExecutionReportType.Accepted, ReportTime = placed.AddMinutes(1), Source = EventSource.Simulator, SourceId = $"joe10-{purchase.Ticker}-{part}-accepted" });
+                        .AppendEvent(sent, brokerOrderId, EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-sent", placed, correlationId: orderId, causationId: orderId)
+                        .AppendEvent(accepted, KeyFor($"report/{purchase.Ticker}/{part}/accepted"), EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-accepted", placed.AddMinutes(1), correlationId: orderId, causationId: brokerOrderId);
                     var fillFirst = isSplit ? Math.Floor(quantity / 2m) : quantity;
                     var fills = isSplit ? new[] { fillFirst, quantity - fillFirst } : new[] { quantity };
                     for (var number = 0; number < fills.Length; number++)
                     {
-                        script.Insert("ExecutionReport", new ExecutionReportDto
-                        {
-                            ExecutionReportId = KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"),
-                            BrokerOrderId = brokerOrderId,
-                            ReportType = ExecutionReportType.Fill,
-                            Quantity = fills[number],
-                            Price = purchase.Price,
-                            Fees = 0m,
-                            ReportTime = state.Close,
-                            Source = EventSource.Simulator,
-                            SourceId = $"joe10-{purchase.Ticker}-{part}-fill-{number}",
-                        });
+                        var sourceId = $"joe10-{purchase.Ticker}-{part}-fill-{number}";
+                        var fill = new ExecutionReportedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = state.Close, ExecutionId = sourceId, Quantity = fills[number], Price = purchase.Price };
+                        script.AppendEvent(fill, KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"), EventSource.Simulator, sourceId, state.Close, correlationId: orderId, causationId: brokerOrderId);
                     }
                 }
             }
@@ -300,19 +296,14 @@ namespace AtlasLedger.Client.TestData
         private static LedgerScript Deposit(Joe10State state, decimal deposit)
         {
             var entered = state.Close;
-            var depositId = KeyFor("deposit");
-            return new LedgerScript()
-                .Insert("Transaction", new TransactionDto
-                {
-                    TransactionId = depositId,
-                    Kind = TransactionKind.Deposit,
-                    Source = EventSource.Simulator,
-                    SourceId = "joe10-deposit",
-                    EffectiveTime = state.Close.AddHours(-6.5),
-                    EnteredTime = entered,
-                    Reason = "The Joe 10 test account's opening deposit.",
-                })
-                .Insert("TransactionLine", new TransactionLineDto { TransactionId = depositId, LineNumber = 1, AccountId = AccountId, AssetId = DollarId, Effect = LineEffect.Change, Quantity = deposit, Amount = deposit });
+            var cash = new CashMovementEvent
+            {
+                AccountId = AccountId,
+                TradeDate = DateOnly.FromDateTime(state.Close.Date),
+                Method = CashMethod.Ach,
+                Items = [new ActivityItem(DollarId, deposit, deposit)],
+            };
+            return new LedgerScript().AppendEvent(cash, KeyFor("deposit"), EventSource.Simulator, "joe10-deposit", state.Close.AddHours(-6.5), entered);
         }
 
         /// <summary>

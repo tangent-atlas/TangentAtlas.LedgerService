@@ -10,6 +10,7 @@ namespace AtlasLedger.Server.Orders
     using System.Linq;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Events;
     using AtlasLedger.Server.Holdings;
     using Bellerophon.Rules;
     using Microsoft.Extensions.Logging;
@@ -28,7 +29,7 @@ namespace AtlasLedger.Server.Orders
     /// trading switch is on), or when an operator asks.  For each tenant it takes the proposals
     /// of the rules' latest snapshot and writes, in one transaction, an order per asset and side (aggregating every account
     /// that wants it), the allocations that went into it, and a market day broker order per account.  The order router
-    /// sends them.
+    /// sends them.  Everything is written as events: an OrderPlaced per asset and side, a BrokerOrderSent per account.
     /// </summary>
     /// <remarks>
     /// The proposals subtract open orders, so once these orders are seen by the rules, the next proposals no longer ask
@@ -116,20 +117,28 @@ namespace AtlasLedger.Server.Orders
                 foreach (var group in trades)
                 {
                     var orderId = Guid.CreateVersion7(now);
-                    transaction.InsertOrder(new Order { OrderId = orderId, AssetId = group.Key.AssetId, Side = group.Key.Side, Origin = OrderOrigin.Rebalance, EnteredTime = now });
-                    foreach (var (accountId, trade) in group.OrderBy(item => item.AccountId))
+                    var accounts = group.OrderBy(item => item.AccountId).ToArray();
+                    var instruction = group.Key.Side == OrderSide.Buy ? Instruction.Buy : Instruction.Sell;
+                    var placed = new OrderPlacedEvent
                     {
-                        transaction.InsertAllocation(new Allocation { OrderId = orderId, AccountId = accountId, Quantity = trade.Quantity });
-                        transaction.InsertBrokerOrder(new BrokerOrder
+                        OrderId = orderId,
+                        Origin = OrderOrigin.Rebalance,
+                        Legs = [new OrderLeg(1, group.Key.AssetId, instruction, accounts.Select(item => new AllocationItem(item.AccountId, item.Trade.Quantity)).ToArray())],
+                    };
+                    transaction.InsertEvent(EventRows.Row(placed, orderId, EventSource.Rules, orderId.ToString("N"), now, correlationId: orderId));
+                    foreach (var (accountId, trade) in accounts)
+                    {
+                        var brokerOrderId = Guid.CreateVersion7(now);
+                        var sent = new BrokerOrderSentEvent
                         {
-                            BrokerOrderId = Guid.CreateVersion7(now),
                             OrderId = orderId,
+                            BrokerOrderId = brokerOrderId,
                             AccountId = accountId,
-                            Quantity = trade.Quantity,
+                            Legs = [new BrokerLeg(1, trade.Quantity)],
                             OrderType = OrderType.Market,
                             TimeInForce = TimeInForce.Day,
-                            EnteredTime = now,
-                        });
+                        };
+                        transaction.InsertEvent(EventRows.Row(sent, brokerOrderId, EventSource.Rules, brokerOrderId.ToString("N"), now, correlationId: orderId, causationId: orderId));
                         brokerOrders++;
                     }
                 }

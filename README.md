@@ -85,7 +85,7 @@ Every input is an event in one table, `Event`, and nothing in it is ever changed
 (`EventType`, a fixed number), its payload's version (`SchemaVersion`), and the payload itself: the kind's own fields as
 JSON.  The other columns are the same for every kind: who sent it (`Source`, `SourceId`, idempotent together, so a replayed
 message is recorded once), when it happened and was recorded, what it belongs to (`CorrelationId`: an order, through its
-replace chain) and what caused it (`CausationId`).  Its `RowVersion`, the commit that wrote it, orders the log.  The kinds
+replace chain) and what caused it (`CausationId`).  Its `RowVersion` (each row written takes the next number) orders the log; commits themselves aren't recorded.  The kinds
 and their payloads are C# records in `src/TangentAtlas/Events.cs`; `EventCodec` writes and reads them.
 
 - **Account activity** changes holdings: opening balance, cash movement, trade, income, fee, receive-and-deliver, journal

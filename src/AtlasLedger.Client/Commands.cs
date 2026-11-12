@@ -137,6 +137,38 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Shows a tenant's event log in the order it was committed: each event's sequence, kind, source, what it belongs to
+        /// and what caused it, then its payload (or only the latest, or only one order's).
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="last">Show only the latest this many, or all if null.</param>
+        /// <param name="correlationId">Show only the events of this order (its replace chain), or all if null.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when the log is shown.</returns>
+        public static async Task EventsAsync(LedgerApiClient api, Guid tenantId, int? last, Guid? correlationId, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var rows = (await api.ListAsync<EventDto>(tenantId, "Event", cancellationToken).ConfigureAwait(false))
+                .Where(row => correlationId is null || row.CorrelationId == correlationId)
+                .OrderBy(row => row.RowVersion)
+                .ThenBy(row => row.EventId)
+                .ToArray();
+            static string Short(Guid? id) => id is { } value ? value.ToString()[..8] : "-";
+            output.WriteLine($"{rows.Length} event(s){(correlationId is { } chain ? $" of order {Short(chain)}" : string.Empty)}");
+            foreach (var row in last is { } count ? rows.TakeLast(count) : rows)
+            {
+                output.WriteLine();
+                output.WriteLine(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"#{row.RowVersion}  {row.EventType} v{row.SchemaVersion}  {row.EventId.ToString()[..8]}  from {row.Source} \"{row.SourceId}\"  at {row.EffectiveTime:yyyy-MM-dd HH:mm:ss}  for {Short(row.CorrelationId)}  because of {Short(row.CausationId)}"));
+                output.WriteLine($"  {row.Payload}");
+            }
+        }
+
+        /// <summary>
         /// Shows a tenant's jobs: every job the server has, whether it is running and what its last run did; then each of
         /// the tenant's schedules, what it asks for and when it next starts and stops.
         /// </summary>

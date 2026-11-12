@@ -212,7 +212,8 @@ namespace AtlasLedger.Model
     /// <param name="EventId">Its key, supplied by its source.</param>
     /// <param name="Type">Its kind.</param>
     /// <param name="Version">Its payload's version.</param>
-    /// <param name="Sequence">The commit that wrote it (its row version): the log's order, and its grouping.</param>
+    /// <param name="Sequence">Its place in the log (its row version): each row written gets the next number, so this orders the
+    /// log.  Commits themselves aren't recorded.</param>
     /// <param name="Source">Where it came from.</param>
     /// <param name="SourceId">Its identity there.</param>
     /// <param name="EffectiveTime">When it happened in the world.</param>

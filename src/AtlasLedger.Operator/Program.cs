@@ -35,6 +35,9 @@ namespace AtlasLedger.Operator
               alerts <tenant> --wait-cleared <rule> [--timeout <seconds>]
                                               Wait until there is no such alert.
               mirror <tenant>                 Copy a tenant locally and show its accounts, symbols, and alerts.
+              events <tenant> [--last <n>] [--order <id>]
+                                              Show the tenant's event log in commit order, each event's payload
+                                              under it: all, the latest n, or one order's (its replace chain).
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
                                               the rules engine must be on.
@@ -76,6 +79,8 @@ namespace AtlasLedger.Operator
             string? waitCleared = null;
             var timeout = TimeSpan.FromSeconds(10);
             var watch = false;
+            int? last = null;
+            Guid? order = null;
             var positional = new List<string>();
             for (var index = 0; index < args.Length; index++)
             {
@@ -87,6 +92,8 @@ namespace AtlasLedger.Operator
                     case "--wait-cleared" when index + 1 < args.Length: waitCleared = args[++index]; break;
                     case "--timeout" when index + 1 < args.Length: timeout = TimeSpan.FromSeconds(double.Parse(args[++index], CultureInfo.InvariantCulture)); break;
                     case "--watch": watch = true; break;
+                    case "--last" when index + 1 < args.Length: last = int.Parse(args[++index], CultureInfo.InvariantCulture); break;
+                    case "--order" when index + 1 < args.Length: order = Guid.Parse(args[++index]); break;
                     case "--help" or "-h" or "-?": Console.WriteLine(Usage); return 0;
                     default: positional.Add(args[index]); break;
                 }
@@ -120,6 +127,15 @@ namespace AtlasLedger.Operator
                         return 0;
                     case "trade" when positional.Count == 2:
                         await Commands.TradeAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "events" when positional.Count == 2:
+                        await Commands.EventsAsync(
+                            api,
+                            Guid.Parse(positional[1]),
+                            last,
+                            order,
+                            output,
+                            token).ConfigureAwait(false);
                         return 0;
                     case "jobs" when positional.Count == 2:
                         await Commands.JobsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

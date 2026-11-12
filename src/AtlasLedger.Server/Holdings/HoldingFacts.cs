@@ -35,7 +35,7 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Kind">The kind of event (a trade's price can stand in for a missing market price).</param>
     /// <param name="EffectiveTime">When it happened.</param>
     /// <param name="SourceSequence">Its order at its source, among events at the same time.</param>
-    /// <param name="Sequence">The commit that wrote the event.</param>
+    /// <param name="Sequence">The event's place in the log.</param>
     public sealed record PostedLine(
         Guid EventId,
         int ItemNumber,

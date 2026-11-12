@@ -23,15 +23,16 @@ namespace AtlasLedger.TestData
             Usage: test-data joe10 [--state <joe10.json>] [--deposit <dollars>] [--out <folder>]
 
             Writes a test account holding the Joe 10, as scripts for script-loader:
-              joe10-reference.json   the account, its connection, and its assets (US dollars and the ten
-                                     companies) with their names (rows)
-              joe10-history.json     a deposit of dollars, then one purchase per company at the last close,
-                                     each an exchange of dollars for shares in two balanced lines (transactions)
+              joe10-reference.json   the account, its institution and model, and its assets (US dollars and the
+                                     ten companies) with their names (rows)
+              joe10-history.json     a deposit of dollars, then one purchase per company at the last close
+                                     (events: a cash movement, then a trade per company, each an exchange of
+                                     dollars for shares whose items balance)
               joe10-trading.json     the same deposit and purchases as the trading events behind them: per
-                                     company an order, its allocation, a broker order, the broker's acceptance
+                                     company an order placed, its broker order sent, the broker's acceptance
                                      and a fill at the last close (the largest split into two broker orders,
-                                     each filled in two parts); the rules book the fills as purchases.  Load
-                                     the history or the trading script, not both.
+                                     each filled in two parts); the rules post the fills to the holdings.
+                                     Load the history or the trading script, not both.
               joe10-opening.json     the deposit only, for an account the rules rebalance: with the
                                      the weights, the rules propose buying the Joe 10, and the order
                                      generator (its scheduled job, or ledger-operator trade) orders it
@@ -58,6 +59,7 @@ namespace AtlasLedger.TestData
               script-loader <tenant> joe10-history.json      (or joe10-trading.json)
               ledger-operator holdings <tenant>
               ledger-operator orders <tenant>                (after the trading script)
+              ledger-operator events <tenant>                the event log, in commit order
 
             Exit codes: 0 written; 2 the command line or the state file is wrong.
             """;

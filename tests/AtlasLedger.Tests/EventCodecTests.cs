@@ -50,6 +50,7 @@ namespace AtlasLedger.Tests
             Assert.Equal(value.GetType(), read.GetType());
             Assert.Equal(EventCodec.Encode(value), EventCodec.Encode(read));   // the same payload, field for field
             Assert.Same(envelope, read.Envelope);
+            Assert.DoesNotContain("mustBalance", EventCodec.Encode(value), StringComparison.Ordinal);   // derived, never written
         }
 
         [Fact]

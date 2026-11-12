@@ -315,6 +315,7 @@ namespace AtlasLedger.Model
         public string? ExecutionId { get; init; }
 
         /// <inheritdoc/>
+        [JsonIgnore]
         public override bool MustBalance => true;
     }
 

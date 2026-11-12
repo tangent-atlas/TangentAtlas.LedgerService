@@ -298,10 +298,17 @@ namespace AtlasLedger.Persistence.Tests
         private static LedgerApiClient Tool(Microsoft.AspNetCore.Builder.WebApplication application) =>
             new LedgerApiClient(new HttpClient { BaseAddress = new Uri(application.Urls.First() + "/") }, DevelopmentCallers.Tool);
 
+        // Numbers are compared as numbers: SQL Server keeps a decimal column's scale, not the value's, so 1 comes back as
+        // 1.000000 (the same value).
         private static string[] Rows(LedgerScript script) => script.Operations
             .Where(operation => operation.Table != "Alert")
-            .Select(operation => $"{operation.Table} {string.Join(",", operation.Row!.Value.EnumerateObject().Select(property => $"{property.Name}={property.Value}"))}")
+            .Select(operation => $"{operation.Table} {string.Join(",", operation.Row!.Value.EnumerateObject().Select(property => $"{property.Name}={Value(property.Value)}"))}")
             .OrderBy(row => row, StringComparer.Ordinal)
             .ToArray();
+
+        private static string Value(System.Text.Json.JsonElement value) =>
+            value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetDecimal(out var number)
+                ? (number / 1.000000000000000000000000000000000m).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : value.ToString();
     }
 }

@@ -62,7 +62,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
 
             // The rules propose buying both companies with half the account, continuously; nothing is ordered yet.
@@ -74,6 +74,14 @@ namespace AtlasLedger.Tests
             var generated = await tool.GenerateOrdersAsync(tenantId, cancellationToken);
             Assert.Equal((2, 2), (generated.Orders, generated.BrokerOrders));
             var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.Count == 2 && found.Orders.All(order => order.Status == "Filled"));
+
+            // The run is one transaction: both orders and their broker orders.  The router records each broker order's answers as one.
+            var transactions = await EventTransportTests.ReadAllAsync(tool, tenantId, 0, cancellationToken);
+            var run = Assert.Single(transactions, transaction => transaction.Events.Any(item => item.EventType == EventType.OrderPlaced));
+            Assert.Equal(
+                [EventType.OrderPlaced, EventType.BrokerOrderSent, EventType.OrderPlaced, EventType.BrokerOrderSent],
+                run.Events.Select(item => item.EventType));
+            Assert.All(transactions.SkipWhile(transaction => transaction != run).Skip(1), transaction => Assert.All(transaction.Events, item => Assert.Equal(EventSource.Simulator, item.Source)));
             Assert.All(orders.Orders, order => Assert.Equal((OrderSide.Buy, OrderOrigin.Rebalance, 1m), (order.Legs.Single().Side, order.Origin, order.Fees)));
             var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count == 3);
             var account = holdings.Accounts.Single();
@@ -104,7 +112,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
             await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
 
@@ -141,7 +149,7 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             var account = (await tool.ListAsync<AccountDto>(tenantId, "Account", cancellationToken)).Single();
             await tool.ApplyAsync(tenantId, new LedgerScript().Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountRole = account.AccountRole, AccountType = account.AccountType, Currency = account.Currency, InstitutionId = account.InstitutionId, ExternalAccountId = account.ExternalAccountId, ModelId = null, RowVersion = account.RowVersion }), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
 
             // The weights and the prices are all there; without a model nothing is proposed, so nothing is ordered.
@@ -165,7 +173,7 @@ namespace AtlasLedger.Tests
             foreach (var (tenantId, _) in tenants)
             {
                 await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-                await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+                await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             }
 
             await Task.Delay(1_000, cancellationToken);   // the simulated feed prices AAA
@@ -197,7 +205,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
 
             await Task.Delay(1_000, cancellationToken);   // the simulated feed prices AAA, so the simulated broker accepts orders for it
 
@@ -223,7 +231,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state, EventSource.Schwab), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
 
             // As after a restart: the broker filled the order, and our ledger never heard back.
             var (orderId, known, fresh) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
@@ -366,7 +374,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Accounts.Count > 0);
             await Task.Delay(1_000, cancellationToken);
             return (tool, tenantId);

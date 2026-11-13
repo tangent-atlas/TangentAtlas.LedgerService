@@ -7,6 +7,8 @@ namespace AtlasLedger.Client.Api
     using System;
     using System.Collections.Generic;
     using System.Globalization;
+    using System.IO;
+    using System.Runtime.CompilerServices;
     using System.Linq;
     using System.Net;
     using System.Net.Http;
@@ -305,6 +307,116 @@ namespace AtlasLedger.Client.Api
         public async Task<ServiceState> SetServiceAsync(string name, bool isOn, TimeSpan? duration = null, CancellationToken cancellationToken = default) =>
             (await this.SendAsync<ServiceState>(HttpMethod.Put, $"{ServicesPath}/{Uri.EscapeDataString(name)}", new { isOn, duration }, cancellationToken).ConfigureAwait(false))!;
 
+        /// <summary>
+        /// Sends one transaction to a tenant's event log: every event committed, or none.  Sending it again is a no-op.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transaction">The transaction.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of it, once durable: committed, already committed, or refused with every problem.</returns>
+        public async Task<TransactionResult> SendTransactionAsync(Guid tenantId, TransactionMessage transaction, CancellationToken cancellationToken = default)
+        {
+            using var request = await this.CreateRequestAsync(HttpMethod.Post, EventsPath(tenantId), cancellationToken).ConfigureAwait(false);
+            request.Content = new StringContent(JsonSerializer.Serialize(transaction, EventMessages.Options), Encoding.UTF8, "application/json");
+            using var response = await this.httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity && text.Length > 0)
+            {
+                return JsonSerializer.Deserialize<TransactionResult>(text, EventMessages.Options)!;
+            }
+
+            throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Post, EventsPath(tenantId), response, text), text.Length == 0 ? null : text);
+        }
+
+        /// <summary>
+        /// Sends transactions to a tenant's event log as one stream (JSON Lines): each committed or refused by itself, in
+        /// order.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transactions">The transactions.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of each, in order, once durable.</returns>
+        public async Task<IReadOnlyList<TransactionResult>> SendTransactionsAsync(Guid tenantId, IEnumerable<TransactionMessage> transactions, CancellationToken cancellationToken = default)
+        {
+            var body = new StringBuilder();
+            foreach (var transaction in transactions)
+            {
+                body.Append(EventMessages.WriteLine(transaction)).Append('\n');
+            }
+
+            using var request = await this.CreateRequestAsync(HttpMethod.Post, EventsPath(tenantId), cancellationToken).ConfigureAwait(false);
+            request.Content = new StringContent(body.ToString(), Encoding.UTF8, EventMessages.StreamMediaType);
+            using var response = await this.httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Post, EventsPath(tenantId), response, text), text.Length == 0 ? null : text);
+            }
+
+            return text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => JsonSerializer.Deserialize<TransactionResult>(line, EventMessages.Options)!)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// Sends transactions in streams of at most a few hundred and checks that each was committed (now or before).
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transactions">The transactions, in order.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of each.</returns>
+        /// <exception cref="InvalidOperationException">A transaction was refused: its problems, and those of any other refused (the rest were committed).</exception>
+        public async Task<IReadOnlyList<TransactionResult>> CommitTransactionsAsync(Guid tenantId, IEnumerable<TransactionMessage> transactions, CancellationToken cancellationToken = default)
+        {
+            const int StreamSize = 500;
+            var results = new List<TransactionResult>();
+            foreach (var chunk in transactions.Chunk(StreamSize))
+            {
+                results.AddRange(await this.SendTransactionsAsync(tenantId, chunk, cancellationToken).ConfigureAwait(false));
+            }
+
+            var refused = results.Where(result => result.Status == TransactionStatus.Refused).ToArray();
+            if (refused.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"{refused.Length} transaction(s) refused:" + string.Concat(refused.Select(result => $"{Environment.NewLine}  {result.TransactionId}: {string.Join("; ", result.Problems)}")));
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Reads a tenant's event log as transactions, in order: every durable transaction after a sequence and, when
+        /// following, each new one as it becomes durable, until cancelled.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="after">The sequence already read (0: from the start).</param>
+        /// <param name="follow">Whether to keep reading new transactions.</param>
+        /// <param name="cancellationToken">Ends the read.</param>
+        /// <returns>The transactions.</returns>
+        public async IAsyncEnumerable<TransactionMessage> ReadTransactionsAsync(Guid tenantId, long after = 0, bool follow = false, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var path = $"{EventsPath(tenantId)}?after={after}&follow={(follow ? "true" : "false")}";
+            using var request = await this.CreateRequestAsync(HttpMethod.Get, path, cancellationToken).ConfigureAwait(false);
+            using var response = await this.httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Get, path, response, text), text.Length == 0 ? null : text);
+            }
+
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), Encoding.UTF8);
+            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+            {
+                if (line.Length > 0)
+                {
+                    yield return EventMessages.ReadLine(line);
+                }
+            }
+        }
+
+        private static string EventsPath(Guid tenantId) => $"v1/tenants/{tenantId}/events";
+
         private static string TablePath(Guid tenantId, string table) => $"v1/tenants/{tenantId}/{RouteSegment(table)}";
 
         /// <summary>
@@ -329,9 +441,9 @@ namespace AtlasLedger.Client.Api
         private static string RowPath(Guid tenantId, string table, object[] key) =>
             $"{TablePath(tenantId, table)}/{string.Join("/", key.Select(column => Uri.EscapeDataString(Convert.ToString(column, CultureInfo.InvariantCulture) ?? string.Empty)))}";
 
-        private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        private async Task<HttpRequestMessage> CreateRequestAsync(HttpMethod method, string path, CancellationToken cancellationToken)
         {
-            using var request = new HttpRequestMessage(method, path);
+            var request = new HttpRequestMessage(method, path);
             Ledger.AddContractHeaders(request.Headers);
             if (this.caller != null)
             {
@@ -343,6 +455,12 @@ namespace AtlasLedger.Client.Api
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await this.accessToken(cancellationToken).ConfigureAwait(false));
             }
 
+            return request;
+        }
+
+        private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        {
+            using var request = await this.CreateRequestAsync(method, path, cancellationToken).ConfigureAwait(false);
             if (body != null)
             {
                 request.Content = JsonContent.Create(body, body.GetType(), options: SerializerOptions);

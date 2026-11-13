@@ -100,7 +100,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = OrderRoutingTests.ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Jobs(), cancellationToken);
 
@@ -147,7 +147,7 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = OrderRoutingTests.ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
             await OrderRoutingTests.WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
 

@@ -164,17 +164,17 @@ namespace AtlasLedger.Client.TestData
         }
 
         /// <summary>
-        /// Builds the history script: transactions that say what happened, each inserted with its lines.  The deposit is
-        /// effective at the open; the purchases at the close, in order of weight.
+        /// Builds the history: transactions that say what happened, one event each.  The deposit is effective at the open;
+        /// the purchases at the close, in order of weight.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <param name="deposit">The dollars paid in.</param>
-        /// <returns>The script.</returns>
-        public static LedgerScript History(Joe10State state, decimal deposit)
+        /// <returns>The transactions, in order.</returns>
+        public static IReadOnlyList<TransactionMessage> History(Joe10State state, decimal deposit)
         {
             ArgumentNullException.ThrowIfNull(state);
             var entered = state.Close;
-            var script = Deposit(state, deposit);
+            var transactions = new List<TransactionMessage> { Deposit(state, deposit) };
             var sequence = 0L;
             var day = DateOnly.FromDateTime(state.Close.Date);
             foreach (var purchase in Purchases(state, deposit))
@@ -192,27 +192,29 @@ namespace AtlasLedger.Client.TestData
                         new ActivityItem(DollarId, -cost, -cost),
                     ],
                 };
-                script.AppendEvent(trade, KeyFor($"buy/{purchase.Ticker}"), EventSource.Simulator, $"joe10-buy-{purchase.Ticker}", state.Close, entered, sequence);
+                transactions.Add(Transaction($"buy/{purchase.Ticker}", EventMessages.From(trade, KeyFor($"buy/{purchase.Ticker}"), EventSource.Simulator, $"joe10-buy-{purchase.Ticker}", state.Close, entered, sequence)));
             }
 
-            return script;
+            return transactions;
         }
 
         /// <summary>
-        /// Builds the trading script: the same deposit and the same purchases as <see cref="History"/>, but as the trading
-        /// events that lead to them, for the rules to turn into holdings.  Each purchase is an order (origin Rebalance) with
-        /// one allocation, to the account; a broker order; the broker's acceptance; and a fill at the last close, without
-        /// fees.  The largest purchase is split into two broker orders, each filled in two parts, so the script also
-        /// exercises splitting and partial fills.  The rules book each fill as a purchase, so the holdings come out the
-        /// same as from the history script.  Load one or the other, not both.
+        /// Builds the trading transactions: the same deposit and the same purchases as <see cref="History"/>, but as the
+        /// trading events that lead to them, for the rules to turn into holdings.  Each purchase is an order (origin
+        /// Rebalance) with one allocation, to the account, placed in one transaction with its broker orders (as the order
+        /// generator writes them); then the broker's acceptance and each fill at the last close, without fees, each a
+        /// transaction of its own (as the router records them).  The largest purchase is split into two broker orders, each
+        /// filled in two parts, so the script also exercises splitting and partial fills.  The rules book each fill as a
+        /// purchase, so the holdings come out the same as from the history.  Load one or the other, not both.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <param name="deposit">The dollars paid in.</param>
-        /// <returns>The script.</returns>
-        public static LedgerScript Trading(Joe10State state, decimal deposit)
+        /// <returns>The transactions, in order.</returns>
+        public static IReadOnlyList<TransactionMessage> Trading(Joe10State state, decimal deposit)
         {
             ArgumentNullException.ThrowIfNull(state);
-            var script = Deposit(state, deposit);
+            var transactions = new List<TransactionMessage> { Deposit(state, deposit) };
+            var answers = new List<TransactionMessage>();
             var placed = state.Close.AddMinutes(-30);
             var purchases = Purchases(state, deposit);
             var largest = purchases.OrderByDescending(purchase => purchase.Shares * purchase.Price).First().Ticker;
@@ -225,7 +227,7 @@ namespace AtlasLedger.Client.TestData
                     Origin = OrderOrigin.Rebalance,
                     Legs = [new OrderLeg(1, AssetIdOf(purchase.Ticker), Instruction.Buy, [new AllocationItem(AccountId, purchase.Shares)], PositionEffect.Opening)],
                 };
-                script.AppendEvent(order, orderId, EventSource.Simulator, $"joe10-order-{purchase.Ticker}", placed, correlationId: orderId);
+                var placing = new List<EventMessage> { EventMessages.From(order, orderId, EventSource.Simulator, $"joe10-order-{purchase.Ticker}", placed, correlationId: orderId) };
 
                 // The largest purchase in two broker orders, each filled in two parts; the rest in one, filled at once.
                 var isSplit = purchase.Ticker == largest && purchase.Shares >= 4m;
@@ -237,31 +239,34 @@ namespace AtlasLedger.Client.TestData
                     var brokerOrderId = KeyFor($"broker-order/{purchase.Ticker}/{part}");
                     var sent = new BrokerOrderSentEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, AccountId = AccountId, Legs = [new BrokerLeg(1, quantity)], OrderType = OrderType.Market, TimeInForce = TimeInForce.Day };
                     var accepted = new OrderAcceptedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = placed.AddMinutes(1) };
-                    script
-                        .AppendEvent(sent, brokerOrderId, EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-sent", placed, correlationId: orderId, causationId: orderId)
-                        .AppendEvent(accepted, KeyFor($"report/{purchase.Ticker}/{part}/accepted"), EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-accepted", placed.AddMinutes(1), correlationId: orderId, causationId: brokerOrderId);
+                    placing.Add(EventMessages.From(sent, brokerOrderId, EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-sent", placed, correlationId: orderId, causationId: orderId));
+                    answers.Add(Transaction($"report/{purchase.Ticker}/{part}/accepted", EventMessages.From(accepted, KeyFor($"report/{purchase.Ticker}/{part}/accepted"), EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-accepted", placed.AddMinutes(1), correlationId: orderId, causationId: brokerOrderId)));
                     var fillFirst = isSplit ? Math.Floor(quantity / 2m) : quantity;
                     var fills = isSplit ? new[] { fillFirst, quantity - fillFirst } : new[] { quantity };
                     for (var number = 0; number < fills.Length; number++)
                     {
                         var sourceId = $"joe10-{purchase.Ticker}-{part}-fill-{number}";
                         var fill = new ExecutionReportedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = state.Close, ExecutionId = sourceId, Quantity = fills[number], Price = purchase.Price };
-                        script.AppendEvent(fill, KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"), EventSource.Simulator, sourceId, state.Close, correlationId: orderId, causationId: brokerOrderId);
+                        answers.Add(Transaction($"report/{purchase.Ticker}/{part}/fill/{number}", EventMessages.From(fill, KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"), EventSource.Simulator, sourceId, state.Close, correlationId: orderId, causationId: brokerOrderId)));
                     }
                 }
+
+                transactions.Add(Transaction($"order/{purchase.Ticker}", placing.ToArray()));
             }
 
-            return script;
+            // The broker answers after every order is placed: acceptances at a minute past, fills at the close.
+            transactions.AddRange(answers.OrderBy(answer => answer.Events[0].EffectiveTime));
+            return transactions;
         }
 
         /// <summary>
-        /// Builds the opening script for an account the rules rebalance: the deposit only.  The first rebalance buys the
+        /// Builds the opening transactions for an account the rules rebalance: the deposit only.  The first rebalance buys the
         /// Joe 10 with it (load the weights too).
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
         /// <param name="deposit">The dollars paid in.</param>
-        /// <returns>The script.</returns>
-        public static LedgerScript Opening(Joe10State state, decimal deposit) => Deposit(state, deposit);
+        /// <returns>The transactions.</returns>
+        public static IReadOnlyList<TransactionMessage> Opening(Joe10State state, decimal deposit) => [Deposit(state, deposit)];
 
         /// <summary>
         /// Builds the jobs script: the schedule that rebalances the tenant, generating its orders at 3:45 pm in New York on
@@ -293,9 +298,8 @@ namespace AtlasLedger.Client.TestData
             return script;
         }
 
-        private static LedgerScript Deposit(Joe10State state, decimal deposit)
+        private static TransactionMessage Deposit(Joe10State state, decimal deposit)
         {
-            var entered = state.Close;
             var cash = new CashMovementEvent
             {
                 AccountId = AccountId,
@@ -303,8 +307,11 @@ namespace AtlasLedger.Client.TestData
                 Method = CashMethod.Ach,
                 Items = [new ActivityItem(DollarId, deposit, deposit)],
             };
-            return new LedgerScript().AppendEvent(cash, KeyFor("deposit"), EventSource.Simulator, "joe10-deposit", state.Close.AddHours(-6.5), entered);
+            return Transaction("deposit", EventMessages.From(cash, KeyFor("deposit"), EventSource.Simulator, "joe10-deposit", state.Close.AddHours(-6.5), state.Close));
         }
+
+        private static TransactionMessage Transaction(string name, params EventMessage[] events) =>
+            new() { TransactionId = KeyFor($"transaction/{name}"), Events = events };
 
         /// <summary>
         /// The purchases that put the deposit into the Joe 10: each company's share of the stocks, in whole shares, rounded

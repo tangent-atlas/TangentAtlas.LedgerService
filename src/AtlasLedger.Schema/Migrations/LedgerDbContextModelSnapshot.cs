@@ -289,6 +289,9 @@ namespace AtlasLedger.Schema.Migrations
                     b.Property<long?>("SourceSequence")
                         .HasColumnType("bigint");
 
+                    b.Property<Guid?>("TransactionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("TenantId", "EventId")
                         .HasName("PK_Event");
 

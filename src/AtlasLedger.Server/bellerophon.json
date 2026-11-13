@@ -67,7 +67,7 @@
       }
     },
     "Event": {
-      "description": "The log: every input as it entered the ledger, never changed or deleted. EventType says what kind (a fixed code) and SchemaVersion which version of its payload; Payload is the kind's own fields, as JSON, read back by kind and version. Holdings, orders' states and every other derived state are folded from these. Every event that changes holdings is complete in itself: an exchange within the books balances. RowVersion (each row written takes the next number) orders the log; commits themselves are not recorded. The source supplies EventId (for a broker's messages, a name-based ID from the source and its own IDs) and (Source, SourceId) is idempotent, so a replayed message is recorded once. CorrelationId is what it belongs to (an order: the first of its replace chain); CausationId what caused it.",
+      "description": "The log: every input as it entered the ledger, never changed or deleted. EventType says what kind (a fixed code) and SchemaVersion which version of its payload; Payload is the kind's own fields, as JSON, read back by kind and version. Holdings, orders' states and every other derived state are folded from these. Every event that changes holdings is complete in itself: an exchange within the books balances. RowVersion (each row written takes the next number) orders the log. TransactionId is the transaction it came in: one or more events committed or refused as a unit, supplied by the client; a transaction's events are contiguous in the log. The source supplies EventId (for a broker's messages, a name-based ID from the source and its own IDs) and (Source, SourceId) is idempotent, so a replayed message is recorded once. CorrelationId is what it belongs to (an order: the first of its replace chain); CausationId what caused it.",
       "writeMode": "AppendOnly",
       "key": ["EventId"],
       "columns": {
@@ -81,7 +81,8 @@
         "SchemaVersion": "int",
         "Source": "eventSource",
         "SourceId": { "maxLength": 128, "type": "string" },
-        "SourceSequence": "long?"
+        "SourceSequence": "long?",
+        "TransactionId": "guid?"
       },
       "unique": { "BySource": { "columns": ["Source", "SourceId"], "idempotent": true } }
     },

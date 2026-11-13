@@ -56,11 +56,13 @@ namespace AtlasLedger.Server.Events
         /// <param name="correlationId">What it belongs to.</param>
         /// <param name="causationId">What caused it.</param>
         /// <param name="enteredTime">When it was recorded, if later than it happened.</param>
+        /// <param name="transactionId">The transaction it is written in.</param>
         /// <returns>The row.</returns>
-        public static Event Row(LedgerEvent value, Guid eventId, EventSource source, string sourceId, DateTimeOffset time, Guid? correlationId = null, Guid? causationId = null, DateTimeOffset? enteredTime = null) =>
+        public static Event Row(LedgerEvent value, Guid eventId, EventSource source, string sourceId, DateTimeOffset time, Guid? correlationId = null, Guid? causationId = null, DateTimeOffset? enteredTime = null, Guid? transactionId = null) =>
             new Event
             {
                 EventId = eventId,
+                TransactionId = transactionId,
                 EventType = EventCodec.TypeOf(value),
                 SchemaVersion = EventCodec.CurrentVersion,
                 Source = source,

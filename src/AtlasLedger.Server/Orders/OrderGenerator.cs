@@ -113,6 +113,7 @@ namespace AtlasLedger.Server.Orders
 
                 var now = this.timeProvider.GetUtcNow();
                 var brokerOrders = 0;
+                var transactionId = Guid.CreateVersion7(now);
                 using var transaction = partition.BeginTransaction();
                 foreach (var group in trades)
                 {
@@ -125,7 +126,7 @@ namespace AtlasLedger.Server.Orders
                         Origin = OrderOrigin.Rebalance,
                         Legs = [new OrderLeg(1, group.Key.AssetId, instruction, accounts.Select(item => new AllocationItem(item.AccountId, item.Trade.Quantity)).ToArray())],
                     };
-                    transaction.InsertEvent(EventRows.Row(placed, orderId, EventSource.Rules, orderId.ToString("N"), now, correlationId: orderId));
+                    transaction.InsertEvent(EventRows.Row(placed, orderId, EventSource.Rules, orderId.ToString("N"), now, correlationId: orderId, transactionId: transactionId));
                     foreach (var (accountId, trade) in accounts)
                     {
                         var brokerOrderId = Guid.CreateVersion7(now);
@@ -138,7 +139,7 @@ namespace AtlasLedger.Server.Orders
                             OrderType = OrderType.Market,
                             TimeInForce = TimeInForce.Day,
                         };
-                        transaction.InsertEvent(EventRows.Row(sent, brokerOrderId, EventSource.Rules, brokerOrderId.ToString("N"), now, correlationId: orderId, causationId: orderId));
+                        transaction.InsertEvent(EventRows.Row(sent, brokerOrderId, EventSource.Rules, brokerOrderId.ToString("N"), now, correlationId: orderId, causationId: orderId, transactionId: transactionId));
                         brokerOrders++;
                     }
                 }

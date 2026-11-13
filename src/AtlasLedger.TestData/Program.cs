@@ -127,6 +127,9 @@ namespace AtlasLedger.TestData
             return 0;
         }
 
+        private static Task WriteAsync(IReadOnlyList<AtlasLedger.Model.TransactionMessage> transactions, string path) =>
+            File.WriteAllTextAsync(path, AtlasLedger.Model.EventMessages.WriteScript(transactions));
+
         private static async Task WriteAsync(AtlasLedger.Client.Scripts.LedgerScript script, string path)
         {
             await using var stream = File.Create(path);

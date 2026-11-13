@@ -7,6 +7,7 @@ extern alias client;
 namespace AtlasLedger.Tests
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Linq;
     using System.Net;
@@ -83,7 +84,8 @@ namespace AtlasLedger.Tests
 
             Assert.Equal(Text(Joe10Account.Reference(state)), Text(Joe10Account.Reference(state)));
             Assert.Equal(Text(Joe10Account.History(state, 1_000_000m)), Text(Joe10Account.History(state, 1_000_000m)));
-            Assert.Equal(1 + 2, Joe10Account.History(state, 1_000_000m).Operations.Count);   // the deposit, then each purchase: one event each
+            Assert.Equal(1 + 2, Joe10Account.History(state, 1_000_000m).Count);   // the deposit, then each purchase: one transaction each
+            Assert.Equal(Text(Joe10Account.Trading(state, 1_000_000m)), Text(Joe10Account.Trading(state, 1_000_000m)));
         }
 
         [Fact]
@@ -95,7 +97,7 @@ namespace AtlasLedger.Tests
             var state = ReadState();
             await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            await tool.ApplyAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
 
             var holdings = await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 3, cancellationToken);
             Assert.Equal(3_000m, Quantity(holdings, Joe10Account.AssetIdOf("AAA")));
@@ -113,7 +115,7 @@ namespace AtlasLedger.Tests
             Assert.All(holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity), holding => Assert.Equal("LastTrade", holding.PriceSource));
 
             // Loading the history again changes nothing: each transaction is idempotent on its source and source ID.
-            await tool.ApplyAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
             await Task.Delay(300, cancellationToken);   // a change would start a cycle; there is none to wait for
             holdings = await tool.GetHoldingsAsync(tenantId, cancellationToken);
             Assert.Equal(3_000m, Quantity(holdings, Joe10Account.AssetIdOf("AAA")));
@@ -149,8 +151,8 @@ namespace AtlasLedger.Tests
                 await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
             }
 
-            await tool.ApplyAsync(direct, Joe10Account.History(state, 1_000_000m), cancellationToken);
-            await tool.ApplyAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(direct, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
 
             // The rules book the fills as purchases (AAA's in two broker orders, each filled in two parts: four bookings).
             var expected = await WaitForAsync(tool, direct, found => found.Holdings.Count == 3, cancellationToken);
@@ -176,7 +178,7 @@ namespace AtlasLedger.Tests
             // nothing: every event is idempotent on its source and source ID.
             var logged = (await tool.ListAsync<EventDto>(viaOrders, "Event", cancellationToken)).Count;
             Assert.DoesNotContain(await tool.ListAsync<EventDto>(viaOrders, "Event", cancellationToken), row => row.Source == EventSource.Rules);
-            await tool.ApplyAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(viaOrders, Joe10Account.Trading(state, 1_000_000m), cancellationToken);
             await Task.Delay(500, cancellationToken);
             Assert.Equal(logged, (await tool.ListAsync<EventDto>(viaOrders, "Event", cancellationToken)).Count);
             Assert.Equal(3_000m, Quantity(await tool.GetHoldingsAsync(viaOrders, cancellationToken), Joe10Account.AssetIdOf("AAA")));
@@ -236,6 +238,8 @@ namespace AtlasLedger.Tests
                 File.Delete(path);
             }
         }
+
+        private static string Text(IReadOnlyList<TransactionMessage> transactions) => EventMessages.WriteScript(transactions);
 
         private static string Text(LedgerScript script)
         {

@@ -277,12 +277,13 @@ namespace AtlasLedger.Server.Brokers
             if (refused.Count > 0)
             {
                 var now = this.timeProvider.GetUtcNow();
+                var transactionId = Guid.CreateVersion7(now);
                 using var transaction = partition.BeginTransaction();
                 foreach (var (sent, text) in refused.DistinctBy(item => item.Sent.BrokerOrderId))
                 {
                     var sourceId = $"router-{sent.BrokerOrderId:N}";
                     var rejected = new OrderRejectedEvent { OrderId = sent.OrderId, BrokerOrderId = sent.BrokerOrderId, ReportTime = now, Text = text };
-                    transaction.InsertEvent(EventRows.Row(rejected, ReportId(EventSource.Rules, sourceId), EventSource.Rules, sourceId, now, sent.Envelope.CorrelationId ?? sent.OrderId, sent.EventId));
+                    transaction.InsertEvent(EventRows.Row(rejected, ReportId(EventSource.Rules, sourceId), EventSource.Rules, sourceId, now, sent.Envelope.CorrelationId ?? sent.OrderId, sent.EventId, transactionId: transactionId));
                 }
 
                 transaction.Commit();
@@ -323,6 +324,7 @@ namespace AtlasLedger.Server.Brokers
                 return;
             }
 
+            var transactionId = Guid.CreateVersion7(this.timeProvider.GetUtcNow());
             using var transaction = partition.BeginTransaction();
             foreach (var report in fresh)
             {
@@ -336,7 +338,7 @@ namespace AtlasLedger.Server.Brokers
                     ExecutionReportType.Rejected => new OrderRejectedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = report.ReportTime, Text = report.Text },
                     _ => new OrderExpiredEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = report.ReportTime, Text = report.Text },
                 };
-                transaction.InsertEvent(EventRows.Row(answer, ReportId(source, report.SourceId), source, report.SourceId, report.ReportTime, null, brokerOrderId, this.timeProvider.GetUtcNow()));
+                transaction.InsertEvent(EventRows.Row(answer, ReportId(source, report.SourceId), source, report.SourceId, report.ReportTime, null, brokerOrderId, this.timeProvider.GetUtcNow(), transactionId));
             }
 
             transaction.Commit();

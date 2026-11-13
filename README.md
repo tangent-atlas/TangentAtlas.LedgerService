@@ -85,7 +85,7 @@ Every input is an event in one table, `Event`, and nothing in it is ever changed
 (`EventType`, a fixed number), its payload's version (`SchemaVersion`), and the payload itself: the kind's own fields as
 JSON.  The other columns are the same for every kind: who sent it (`Source`, `SourceId`, idempotent together, so a replayed
 message is recorded once), when it happened and was recorded, what it belongs to (`CorrelationId`: an order, through its
-replace chain) and what caused it (`CausationId`).  Its `RowVersion` (each row written takes the next number) orders the log; commits themselves aren't recorded.  The kinds
+replace chain) and what caused it (`CausationId`).  Its `RowVersion` (each row written takes the next number) orders the log, and `TransactionId` groups it: a transaction's events are contiguous.  The kinds
 and their payloads are C# records in `src/TangentAtlas/Events.cs`; `EventCodec` writes and reads them.
 
 - **Account activity** changes holdings: opening balance, cash movement, trade, income, fee, receive-and-deliver, journal
@@ -101,6 +101,31 @@ Everything else is derived by the rules, never stored: holdings (folded from acc
 own orders divided among accounts by the published allocation rule), order and broker-order states, prices.  An event that
 can't be read, names an account or asset that doesn't exist, or doesn't balance stays in the log, is left out of what is
 derived, and is listed under `Problems` in the holdings (and by `ledger-operator holdings`) until a correction fixes it.
+
+### Sending and reading events: transactions
+
+Events go in, and come out, as **transactions**: one or more events committed or refused as a unit, keyed by a
+`transactionId` the sender supplies.  One resource does both, `v1/tenants/{tenantId}/events`, in one shape: a transaction
+is `{ "transactionId", "events": [ { "eventId", "eventType", "schemaVersion", "source", "sourceId", "sourceSequence",
+"effectiveTime", "enteredTime", "correlationId", "causationId", "payload": { ... } } ] }`, the payload nested JSON in the
+kind's own fields (IDs, not tickers).  `EventMessages` (in `src/TangentAtlas/EventMessages.cs`) writes and reads it.
+
+- **`POST`, `application/json`**: one transaction.  It is checked whole under the tenant's lock: every payload reads as
+  its kind; 1 to 1,000 events; no event ID or source ID twice; the accounts and assets it names exist; a trade balances;
+  what it corrects, replaces, cancels or answers is in the log or earlier in the same transaction.  Then every event is
+  written, or none.  The answer waits until the commit is durable: 200 `Committed` (or `AlreadyCommitted`: the same
+  transaction sent again), 409 when its key or one of its events was already used for something else, 422 listing every
+  problem.
+- **`POST`, `application/x-ndjson`** (JSON Lines): one transaction per line, each committed or refused by itself; one
+  answer line per transaction, with its line number, sent once durable.  For loading many.
+- **`GET`, `application/x-ndjson`**: the log as transactions, one per line, each event with its `sequence`; `?after=n`
+  reads only what came later, `&follow=true` keeps the response open and sends each transaction as it becomes durable.
+  An event written through the table API, without a transaction, reads as a transaction by itself.
+
+`script-loader` takes a transaction script (a JSON array of transactions, or a `.jsonl` file) as readily as a table
+script, and loading one again changes nothing.  `ledger-operator events <tenant> --json` writes the log as JSON Lines,
+which load as they are; `--follow` keeps showing new transactions.  The server's own writers use transactions too: each
+order-generator run is one, and so is each batch of a broker order's answers.
 
 ## Jobs
 

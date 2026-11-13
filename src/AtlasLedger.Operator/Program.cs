@@ -35,9 +35,13 @@ namespace AtlasLedger.Operator
               alerts <tenant> --wait-cleared <rule> [--timeout <seconds>]
                                               Wait until there is no such alert.
               mirror <tenant>                 Copy a tenant locally and show its accounts, symbols, and alerts.
-              events <tenant> [--last <n>] [--order <id>]
-                                              Show the tenant's event log in commit order, each event's payload
-                                              under it: all, the latest n, or one order's (its replace chain).
+              events <tenant> [--after <seq>] [--last <n>] [--order <id>] [--follow] [--json]
+                                              Show the tenant's event log in commit order, transaction by
+                                              transaction, each event's payload under it: all (or after a
+                                              sequence), the latest n transactions, or one order's (its replace
+                                              chain).  --follow keeps showing new transactions (Ctrl+C stops);
+                                              --json writes JSON Lines, one transaction per line: the same
+                                              format the events endpoint takes, so the output can be loaded.
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
                                               the rules engine must be on.
@@ -79,6 +83,9 @@ namespace AtlasLedger.Operator
             string? waitCleared = null;
             var timeout = TimeSpan.FromSeconds(10);
             var watch = false;
+            var follow = false;
+            var json = false;
+            var after = 0L;
             int? last = null;
             Guid? order = null;
             var positional = new List<string>();
@@ -92,6 +99,9 @@ namespace AtlasLedger.Operator
                     case "--wait-cleared" when index + 1 < args.Length: waitCleared = args[++index]; break;
                     case "--timeout" when index + 1 < args.Length: timeout = TimeSpan.FromSeconds(double.Parse(args[++index], CultureInfo.InvariantCulture)); break;
                     case "--watch": watch = true; break;
+                    case "--follow": follow = true; break;
+                    case "--json": json = true; break;
+                    case "--after" when index + 1 < args.Length: after = long.Parse(args[++index], CultureInfo.InvariantCulture); break;
                     case "--last" when index + 1 < args.Length: last = int.Parse(args[++index], CultureInfo.InvariantCulture); break;
                     case "--order" when index + 1 < args.Length: order = Guid.Parse(args[++index]); break;
                     case "--help" or "-h" or "-?": Console.WriteLine(Usage); return 0;
@@ -132,8 +142,11 @@ namespace AtlasLedger.Operator
                         await Commands.EventsAsync(
                             api,
                             Guid.Parse(positional[1]),
+                            after,
                             last,
                             order,
+                            follow,
+                            json,
                             output,
                             token).ConfigureAwait(false);
                         return 0;

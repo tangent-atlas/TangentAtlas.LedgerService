@@ -39,7 +39,10 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
-        /// Loads a script into a tenant as one batch.
+        /// Loads a script into a tenant.  A table script (<c>{ "operations": [...] }</c>) goes in as one batch (several, if
+        /// it is larger than the server's limit); a transaction script (a JSON array of transactions, or JSON Lines: one
+        /// transaction per line) goes to the event log, each transaction committed or refused by itself.  Loading a
+        /// transaction script again is a no-op.
         /// </summary>
         /// <param name="api">The API.</param>
         /// <param name="tenantId">The tenant.</param>
@@ -47,10 +50,24 @@ namespace AtlasLedger.Client
         /// <param name="output">Where to write.</param>
         /// <param name="cancellationToken">Cancels the command.</param>
         /// <returns>A task that completes when the script is applied.</returns>
+        /// <exception cref="InvalidOperationException">A transaction was refused (the others were committed).</exception>
         public static async Task LoadAsync(LedgerApiClient api, Guid tenantId, string path, TextWriter output, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(api);
             ArgumentNullException.ThrowIfNull(output);
+            var text = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            var isLines = path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".ndjson", StringComparison.OrdinalIgnoreCase);
+            if (isLines || EventMessages.IsTransactionScript(text))
+            {
+                var transactions = isLines
+                    ? text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(EventMessages.ReadLine).ToArray()
+                    : EventMessages.ReadScript(text);
+                var results = await api.CommitTransactionsAsync(tenantId, transactions, cancellationToken).ConfigureAwait(false);
+                var committed = results.Count(result => result.Status == TransactionStatus.Committed);
+                output.WriteLine($"Loaded {transactions.Count} transaction(s) ({transactions.Sum(transaction => transaction.Events.Count)} event(s)) from {path} into {tenantId}: {committed} committed, {results.Count - committed} already committed.");
+                return;
+            }
+
             var script = await LedgerScript.ReadAsync(path, cancellationToken).ConfigureAwait(false);
             // Large scripts load in several batches, since the server limits a batch's size.
             await api.ApplyInBatchesAsync(tenantId, script, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -137,34 +154,87 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
-        /// Shows a tenant's event log in the order it was committed: each event's sequence, kind, source, what it belongs to
-        /// and what caused it, then its payload (or only the latest, or only one order's).
+        /// Shows a tenant's event log in the order it was committed, transaction by transaction: each event's sequence,
+        /// kind, source, what it belongs to and what caused it, then its payload.  As JSON, one transaction per line, in the
+        /// format the events endpoint takes.
         /// </summary>
         /// <param name="api">The API.</param>
         /// <param name="tenantId">The tenant.</param>
-        /// <param name="last">Show only the latest this many, or all if null.</param>
-        /// <param name="correlationId">Show only the events of this order (its replace chain), or all if null.</param>
+        /// <param name="after">Show only what came after this sequence.</param>
+        /// <param name="last">Show only the latest this many transactions, or all if null.</param>
+        /// <param name="correlationId">Show only the transactions with an event of this order (its replace chain), and only those events, or all if null.</param>
+        /// <param name="follow">Keep showing new transactions until cancelled.</param>
+        /// <param name="json">Write JSON Lines.</param>
         /// <param name="output">Where to write.</param>
-        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <param name="cancellationToken">Cancels the command (and ends a follow).</param>
         /// <returns>A task that completes when the log is shown.</returns>
-        public static async Task EventsAsync(LedgerApiClient api, Guid tenantId, int? last, Guid? correlationId, TextWriter output, CancellationToken cancellationToken)
+        public static async Task EventsAsync(LedgerApiClient api, Guid tenantId, long after, int? last, Guid? correlationId, bool follow, bool json, TextWriter output, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(api);
             ArgumentNullException.ThrowIfNull(output);
-            var rows = (await api.ListAsync<EventDto>(tenantId, "Event", cancellationToken).ConfigureAwait(false))
-                .Where(row => correlationId is null || row.CorrelationId == correlationId)
-                .OrderBy(row => row.RowVersion)
-                .ThenBy(row => row.EventId)
-                .ToArray();
             static string Short(Guid? id) => id is { } value ? value.ToString()[..8] : "-";
-            output.WriteLine($"{rows.Length} event(s){(correlationId is { } chain ? $" of order {Short(chain)}" : string.Empty)}");
-            foreach (var row in last is { } count ? rows.TakeLast(count) : rows)
+            TransactionMessage? Select(TransactionMessage transaction) =>
+                correlationId is null ? transaction
+                : transaction.Events.Where(item => item.CorrelationId == correlationId).ToArray() is { Length: > 0 } events ? transaction with { Events = events }
+                : null;
+            void Write(TransactionMessage transaction)
             {
+                if (json)
+                {
+                    output.WriteLine(EventMessages.WriteLine(transaction));
+                    return;
+                }
+
                 output.WriteLine();
-                output.WriteLine(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"#{row.RowVersion}  {row.EventType} v{row.SchemaVersion}  {row.EventId.ToString()[..8]}  from {row.Source} \"{row.SourceId}\"  at {row.EffectiveTime:yyyy-MM-dd HH:mm:ss}  for {Short(row.CorrelationId)}  because of {Short(row.CausationId)}"));
-                output.WriteLine($"  {row.Payload}");
+                output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Transaction {transaction.TransactionId}  (through #{transaction.Sequence}, {transaction.Events.Count} event(s))"));
+                foreach (var item in transaction.Events)
+                {
+                    output.WriteLine(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"  #{item.Sequence}  {item.EventType} v{item.SchemaVersion}  {item.EventId.ToString()[..8]}  from {item.Source} \"{item.SourceId}\"  at {item.EffectiveTime:yyyy-MM-dd HH:mm:ss}  for {Short(item.CorrelationId)}  because of {Short(item.CausationId)}"));
+                    output.WriteLine($"    {item.Payload.GetRawText()}");
+                }
+            }
+
+            var shown = new List<TransactionMessage>();
+            var position = after;
+            await foreach (var transaction in api.ReadTransactionsAsync(tenantId, after, follow: false, cancellationToken).ConfigureAwait(false))
+            {
+                position = transaction.Sequence ?? position;
+                if (Select(transaction) is { } selected)
+                {
+                    shown.Add(selected);
+                }
+            }
+
+            if (!json)
+            {
+                output.WriteLine($"{shown.Count} transaction(s), {shown.Sum(transaction => transaction.Events.Count)} event(s){(correlationId is { } chain ? $" of order {Short(chain)}" : string.Empty)}");
+            }
+
+            foreach (var transaction in last is { } count ? shown.TakeLast(count) : shown)
+            {
+                Write(transaction);
+            }
+
+            if (!follow)
+            {
+                return;
+            }
+
+            try
+            {
+                await foreach (var transaction in api.ReadTransactionsAsync(tenantId, position, follow: true, cancellationToken).ConfigureAwait(false))
+                {
+                    if (Select(transaction) is { } selected)
+                    {
+                        Write(selected);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Stopped.
             }
         }
 

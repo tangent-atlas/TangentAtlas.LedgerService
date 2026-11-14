@@ -45,6 +45,10 @@ namespace AtlasLedger.Operator
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
                                               the rules engine must be on.
+              statistics <tenant> [--days]    Show each account's performance at the closes: its value, net
+                                              flows, total and annualized return, volatility, worst drawdown
+                                              and Sharpe ratio against the 13-week Treasury bill (needs the
+                                              rules and market-history services on); --days adds each day.
               orders <tenant>                 Show what each account's model proposes, and each order's state: its
                                               allocations, broker orders and fills.
               trade <tenant>                  Turn the proposals into orders now, as the scheduled run would.
@@ -85,6 +89,7 @@ namespace AtlasLedger.Operator
             var watch = false;
             var follow = false;
             var json = false;
+            var days = false;
             var after = 0L;
             int? last = null;
             Guid? order = null;
@@ -101,6 +106,7 @@ namespace AtlasLedger.Operator
                     case "--watch": watch = true; break;
                     case "--follow": follow = true; break;
                     case "--json": json = true; break;
+                    case "--days": days = true; break;
                     case "--after" when index + 1 < args.Length: after = long.Parse(args[++index], CultureInfo.InvariantCulture); break;
                     case "--last" when index + 1 < args.Length: last = int.Parse(args[++index], CultureInfo.InvariantCulture); break;
                     case "--order" when index + 1 < args.Length: order = Guid.Parse(args[++index]); break;
@@ -164,6 +170,9 @@ namespace AtlasLedger.Operator
                         return 0;
                     case "weights" when positional.Count == 3:
                         await Commands.ReplaceWeightsAsync(api, Guid.Parse(positional[1]), positional[2], output, token).ConfigureAwait(false);
+                        return 0;
+                    case "statistics" when positional.Count == 2:
+                        await Commands.StatisticsAsync(api, Guid.Parse(positional[1]), days, output, token).ConfigureAwait(false);
                         return 0;
                     case "holdings" when positional.Count == 2:
                         await Commands.HoldingsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

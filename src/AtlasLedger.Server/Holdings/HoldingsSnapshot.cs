@@ -40,7 +40,8 @@ namespace AtlasLedger.Server.Holdings
         IReadOnlyList<ModelFact> Models,
         IReadOnlyList<WeightFact> Weights,
         IReadOnlyList<Orders.ProposedAllocations> Proposals,
-        IReadOnlyList<EventProblem> Problems);
+        IReadOnlyList<EventProblem> Problems,
+        IReadOnlyList<AccountHistory> Histories);
 
     /// <summary>
     /// The latest snapshot of each tenant.  In memory only: derived state is never persisted, and it is rebuilt from the
@@ -157,7 +158,8 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<ModelFact>().ToArray(),
                     session.Query<WeightFact>().ToArray(),
                     session.Query<Orders.ProposedAllocations>().ToArray(),
-                    session.Query<EventProblem>().ToArray()));
+                    session.Query<EventProblem>().ToArray(),
+                    session.Query<AccountHistory>().ToArray()));
                 return fired;
             }
         }

@@ -12,6 +12,7 @@ namespace AtlasLedger.Server.Brokers
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Jobs;
     using Microsoft.Extensions.Options;
 
     /// <summary>
@@ -117,7 +118,17 @@ namespace AtlasLedger.Server.Brokers
                 return;
             }
 
-            var prices = order.Legs.Select(leg => (Leg: leg, Price: this.LatestPrice(order.TenantId, leg))).ToArray();
+            // At the next close: the close of the market day the order was accepted before, once it is loaded.
+            var fillTime = this.timeProvider.GetUtcNow();
+            Func<BrokerLegRequest, decimal?> priceOf = leg => this.LatestPrice(order.TenantId, leg);
+            if (this.options.SimulatedFills == SimulatedFills.AtNextClose)
+            {
+                var day = MarketCalendar.NextCloseDay(known.Reports[0].ReportTime);
+                fillTime = MarketCalendar.CloseTime(day);
+                priceOf = leg => this.ledger.FindPartition(order.TenantId)?.FindClosingPrice(SymbolScheme.Ticker, leg.Ticker, leg.QuoteCurrency, day)?.Close;
+            }
+
+            var prices = order.Legs.Select(leg => (Leg: leg, Price: priceOf(leg))).ToArray();
             if (prices.Any(item => item.Price is null))
             {
                 return;
@@ -132,7 +143,7 @@ namespace AtlasLedger.Server.Brokers
                 var first = true;
                 foreach (var (leg, price) in prices)
                 {
-                    known.Add(ExecutionReportType.Fill, leg.Quantity, price, first ? this.options.SimulatedFees : 0m, this.timeProvider.GetUtcNow(), null, leg.LegId);
+                    known.Add(ExecutionReportType.Fill, leg.Quantity, price, first ? this.options.SimulatedFees : 0m, fillTime, null, leg.LegId);
                     first = false;
                 }
             }

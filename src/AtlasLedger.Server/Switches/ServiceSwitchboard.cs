@@ -35,6 +35,11 @@ namespace AtlasLedger.Server.Switches
         /// </summary>
         public const string Trading = "trading";
 
+        /// <summary>
+        /// The service that loads closing prices, dividends, splits and the risk-free rate.
+        /// </summary>
+        public const string MarketHistory = "market-history";
+
         private readonly Dictionary<string, ServiceSwitch> switches;
 
         /// <summary>
@@ -51,6 +56,7 @@ namespace AtlasLedger.Server.Switches
                 new ServiceSwitch(MarketFeed, "Prices every held symbol (simulated until a broker feed is connected).", timeProvider),
                 new ServiceSwitch(Rules, "Runs the rules engine for every tenant: derives holdings, prices, orders and proposed allocations, books fills, and raises and clears alerts.", timeProvider),
                 new ServiceSwitch(Broker, "Sends broker orders to the brokers and records their reports. Nothing is sent while it is off.", timeProvider),
+                new ServiceSwitch(MarketHistory, "Loads each tenant's closing prices, dividends and splits (EODHD) and the risk-free rate (the Treasury's 13-week bill) for its history, then each market day after the close.", timeProvider),
                 new ServiceSwitch(Trading, "Turns the rules' proposed allocations into orders at the scheduled time each weekday.", timeProvider),
             }.ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
 

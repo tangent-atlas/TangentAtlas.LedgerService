@@ -282,6 +282,60 @@
       "key": ["Scheme", "Code", "Currency"],
       "persistence": "Ephemeral"
     },
+    "ClosingPrice": {
+      "columns": {
+        "AsOf": "time",
+        "Close": "price",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
+        "Date": "date",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A symbol's official closing price on a market day, in a currency, as traded that day (not adjusted for later splits or dividends). Loaded from the market data vendor for the days the tenant's history needs, and each market day after the close; the paper broker fills market orders at it, and the rules value accounts at it. Ephemeral: reloaded at startup, never persisted.",
+      "key": ["Scheme", "Code", "Currency", "Date"],
+      "persistence": "Ephemeral"
+    },
+    "Dividend": {
+      "columns": {
+        "Amount": "price",
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
+        "ExDate": "date",
+        "PaymentDate": "date?",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A cash dividend: Amount per share, in Currency, to whoever held the shares at the close before ExDate, paid on PaymentDate. From the market data vendor; the rules credit it to paper accounts. Ephemeral.",
+      "key": ["Scheme", "Code", "ExDate"],
+      "persistence": "Ephemeral"
+    },
+    "InterestRate": {
+      "columns": {
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Date": "date",
+        "Rate": "rate"
+      },
+      "concurrency": "LatestValue",
+      "description": "An interest rate published for a day, as a fraction a year (0.0405 for 4.05%): the risk-free rate is Code TBILL-13W, the 13-week Treasury bill's coupon equivalent (its investment yield), from the Treasury's daily bill rates. Ephemeral.",
+      "key": ["Code", "Date"],
+      "persistence": "Ephemeral"
+    },
+    "Split": {
+      "columns": {
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Date": "date",
+        "Ratio": "price",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A stock split effective at the open of Date: each share held at the close before becomes Ratio shares (2 for a 2-for-1 split, 0.1 for a 1-for-10 reverse split). From the market data vendor; the rules apply it to paper accounts. Ephemeral.",
+      "key": ["Scheme", "Code", "Date"],
+      "persistence": "Ephemeral"
+    },
     "Symbol": {
       "columns": {
         "Code": { "maxLength": 32, "type": "string" },

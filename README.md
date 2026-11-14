@@ -52,8 +52,8 @@ runs only in the Development environment, with development sign-in. The programs
 
 ## Services: on while you work, off otherwise
 
-The base system (the API, persistence, and recovery) always runs.  The services on top of it, the market feed and the
-rules engine, run only while switched on.  `Services:StartOn` names those on when the server starts (on until turned
+The base system (the API, persistence, and recovery) always runs.  The services on top of it (the market feed, market
+history, the rules engine, the broker and trading) run only while switched on.  `Services:StartOn` names those on when the server starts (on until turned
 off): by default `rules`; empty (`Services__StartOn=`) starts everything off, for diagnostics.  A service turned on
 through the API stays on for four hours unless told otherwise (at most 24).  No engine, no rules: holdings, prices and
 compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
@@ -78,6 +78,33 @@ With `ledger-client.json` in place the operator reaches the server in Azure; `--
 another.  The walkthrough turns on the services that are off, and off again only those, when it finishes.  The API is
 `v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
 application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
+
+## Paper accounts: history at the closes, and statistics
+
+A paper account is an account at the simulated broker (an institution whose `Source` is `Simulator`).  For the paper game
+it runs on daily closes, not a live feed:
+
+- **Market history** (the `market-history` service): for each tenant's US tickers, the closes from a week before its first
+  event, its dividends and splits (EODHD), and the risk-free rate (the 13-week Treasury bill's coupon equivalent, from the
+  Treasury's daily bill rates); then each market day after 4:30 pm New York.  The vendor is asked once per ticker for what
+  no tenant has yet.  They are ephemeral tables (`ClosingPrice`, `Dividend`, `Split`, `InterestRate`): never persisted,
+  reloaded at startup.  The latest close is also each ticker's price, unless a live feed has priced it since.  The EODHD
+  token is a secret: `MarketHistory__EodhdApiToken` in the environment (or user secrets, or Key Vault), never in a file.
+- **Fills at the close:** with `Broker__SimulatedFills=AtNextClose`, the simulated broker fills a market order at the close
+  of the market day it was placed before (after the close, the next day's), once that close is loaded.
+- **Dividends and splits:** the rules credit a paper account with each dividend and split of a stock it held at the close
+  before the ex-date, as events from the paper broker (`Income`, `ReceiveAndDeliver` with reason `Split`), recorded once.
+  Accounts at real brokers get theirs from the broker.
+- **History and statistics:** the rules value every account at every close loaded and measure its daily returns, with
+  deposits and withdrawals taken out (time-weighted): value, net flows, total and annualized return, volatility, worst
+  drawdown, and the Sharpe ratio (mean daily return over the bill's daily rate, ÷ its standard deviation, × √252).  An
+  account is ranked after 20 returns.  `GET v1/tenants/{tenantId}/statistics[?days=true]`;
+  `ledger-operator statistics <tenant> [--days]`.
+
+```
+MarketHistory__EodhdApiToken=<token> Broker__SimulatedFills=AtNextClose \
+  Services__StartOn=rules,market-history,trading,broker dotnet run --project src/AtlasLedger.Server
+```
 
 ## The event log
 

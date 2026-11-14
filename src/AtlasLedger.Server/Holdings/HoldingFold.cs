@@ -50,14 +50,15 @@ namespace AtlasLedger.Server.Holdings
             var envelope = activity.Envelope;
             var effect = activity is PositionOverrideEvent ? LineEffect.SetTo : LineEffect.Change;
             var kind = activity is CorrectionEvent ? EventType.Correction : envelope.Type;
+            var isExternal = activity is CashMovementEvent or JournalEvent or OpeningBalanceEvent or ReceiveAndDeliverEvent { Reason: DeliveryReason.TransferIn or DeliveryReason.TransferOut };
             var lines = new List<PostedLine>();
             foreach (var item in activity.Items)
             {
-                lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, activity.AccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence));
+                lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, activity.AccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence, isExternal));
                 if (activity is JournalEvent journal)
                 {
                     lines[^1] = lines[^1] with { Quantity = -item.Quantity, Amount = -item.Amount };
-                    lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, journal.ToAccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence));
+                    lines.Add(new PostedLine(envelope.EventId, lines.Count + 1, journal.ToAccountId, item.AssetId, effect, item.Quantity, item.Amount, kind, envelope.EffectiveTime, envelope.SourceSequence, envelope.Sequence, isExternal));
                 }
             }
 

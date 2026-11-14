@@ -36,6 +36,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="EffectiveTime">When it happened.</param>
     /// <param name="SourceSequence">Its order at its source, among events at the same time.</param>
     /// <param name="Sequence">The event's place in the log.</param>
+    /// <param name="IsExternal">Whether it moves value into or out of the account from outside it (a deposit, a withdrawal, a
+    /// journal, a transfer of securities): a flow, not a gain or loss, when the account's return is measured.</param>
     public sealed record PostedLine(
         Guid EventId,
         int ItemNumber,
@@ -47,7 +49,8 @@ namespace AtlasLedger.Server.Holdings
         EventType Kind,
         DateTimeOffset EffectiveTime,
         long? SourceSequence,
-        long Sequence);
+        long Sequence,
+        bool IsExternal = false);
 
     /// <summary>
     /// The movements one event posts (or one order's fills), as one fact: the holdings rules flatten them.

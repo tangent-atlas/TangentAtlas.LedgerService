@@ -190,6 +190,17 @@ namespace AtlasLedger.Client.Api
             ?? throw new InvalidOperationException("The server returned no holdings.");
 
         /// <summary>
+        /// Gets each account's performance: statistics measured from its daily returns, and its days if asked for.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="days">Whether to include each day.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The statistics.  The server answers 409 while the rules haven't run for the tenant.</returns>
+        public async Task<TenantStatistics> GetStatisticsAsync(Guid tenantId, bool days = false, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantStatistics>(HttpMethod.Get, $"v1/tenants/{tenantId}/statistics?days={(days ? "true" : "false")}", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no statistics.");
+
+        /// <summary>
         /// Lists a table's rows in a tenant.
         /// </summary>
         /// <typeparam name="T">The table's DTO.</typeparam>

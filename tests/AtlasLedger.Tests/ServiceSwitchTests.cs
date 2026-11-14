@@ -66,9 +66,10 @@ namespace AtlasLedger.Tests
             Assert.False(byDefault[ServiceSwitchboard.MarketFeed].IsOn);
             Assert.False(byDefault[ServiceSwitchboard.Broker].IsOn);   // nothing is sent to a broker unless asked for
             Assert.False(byDefault[ServiceSwitchboard.Trading].IsOn);  // nor ordered on a schedule
+            Assert.False(byDefault[ServiceSwitchboard.MarketHistory].IsOn);   // nor anything asked of the data vendors
             Assert.True(server::AtlasLedger.Server.Switches.ServiceState.From(byDefault[ServiceSwitchboard.Rules]) is { IsOn: true, OnUntil: null });
 
-            var both = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = " rules , market-feed,broker,trading " }));
+            var both = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = " rules , market-feed,broker,trading, market-history " }));
             Assert.All(both.All, service => Assert.True(service.IsOnUntilTurnedOff));
 
             var none = new ServiceSwitchboard(TimeProvider.System, Options.Create(new ServiceSwitchOptions { StartOn = string.Empty }));
@@ -99,7 +100,7 @@ namespace AtlasLedger.Tests
             var advisor = new LedgerApiClient(fixture.HttpClient, DevelopmentCallers.Advisor);
 
             var services = await tool.GetServicesAsync(cancellationToken);
-            Assert.Equal(new[] { ServiceSwitchboard.Broker, ServiceSwitchboard.MarketFeed, ServiceSwitchboard.Rules, ServiceSwitchboard.Trading }, services.Select(service => service.Name));
+            Assert.Equal(new[] { ServiceSwitchboard.Broker, ServiceSwitchboard.MarketFeed, ServiceSwitchboard.MarketHistory, ServiceSwitchboard.Rules, ServiceSwitchboard.Trading }, services.Select(service => service.Name));
             Assert.All(services, service => Assert.False(service.IsOn));
 
             Assert.Equal(HttpStatusCode.NotFound, (await Assert.ThrowsAsync<LedgerApiException>(() => advisor.GetServicesAsync(cancellationToken))).StatusCode);

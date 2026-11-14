@@ -194,5 +194,80 @@ namespace AtlasLedger.Server.Jobs
         /// The last year the list covers: from that year on, the scheduler warns at start-up that the list needs extending.
         /// </summary>
         public const int LastYear = 2028;
+
+        /// <summary>
+        /// The time zone the market keeps.
+        /// </summary>
+        public static readonly TimeZoneInfo Zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+
+        /// <summary>
+        /// Whether a day is a market day: a weekday that isn't a holiday.
+        /// </summary>
+        /// <param name="day">The day.</param>
+        /// <returns>True if the market is open that day.</returns>
+        public static bool IsMarketDay(DateOnly day) => day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && !Holidays.Contains(day);
+
+        /// <summary>
+        /// The market day before a day.
+        /// </summary>
+        /// <param name="day">The day.</param>
+        /// <returns>The last market day before it.</returns>
+        public static DateOnly PreviousMarketDay(DateOnly day)
+        {
+            do
+            {
+                day = day.AddDays(-1);
+            }
+            while (!IsMarketDay(day));
+            return day;
+        }
+
+        /// <summary>
+        /// The latest market day whose closing prices should be published by now: today, once it is a market day and past
+        /// <paramref name="publishedAfter"/> (New York time); otherwise the market day before.
+        /// </summary>
+        /// <param name="now">The time now.</param>
+        /// <param name="publishedAfter">The time of day, in New York, after which a day's closes are expected.</param>
+        /// <returns>The day.</returns>
+        public static DateOnly LatestClosedDay(DateTimeOffset now, TimeOnly publishedAfter)
+        {
+            var local = TimeZoneInfo.ConvertTime(now, Zone);
+            var today = DateOnly.FromDateTime(local.DateTime);
+            return IsMarketDay(today) && TimeOnly.FromDateTime(local.DateTime) >= publishedAfter ? today : PreviousMarketDay(today);
+        }
+
+        /// <summary>
+        /// The moment of a day's close: 4:00 pm in New York.
+        /// </summary>
+        /// <param name="day">The day.</param>
+        /// <returns>The time.</returns>
+        public static DateTimeOffset CloseTime(DateOnly day)
+        {
+            var local = day.ToDateTime(new TimeOnly(16, 0));
+            return new DateTimeOffset(local, Zone.GetUtcOffset(local));
+        }
+
+        /// <summary>
+        /// The market day a moment belongs to for filling at the close: the day itself, if it is a market day and before
+        /// its close; otherwise the next market day.
+        /// </summary>
+        /// <param name="time">The moment.</param>
+        /// <returns>The day whose close comes next.</returns>
+        public static DateOnly NextCloseDay(DateTimeOffset time)
+        {
+            var local = TimeZoneInfo.ConvertTime(time, Zone);
+            var day = DateOnly.FromDateTime(local.DateTime);
+            if (IsMarketDay(day) && local < CloseTime(day))
+            {
+                return day;
+            }
+
+            do
+            {
+                day = day.AddDays(1);
+            }
+            while (!IsMarketDay(day));
+            return day;
+        }
     }
 }

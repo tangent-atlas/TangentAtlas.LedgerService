@@ -136,6 +136,17 @@ namespace AtlasLedger.Server
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));
             builder.Services.AddHostedService<SimulatedMarketFeed>();
 
+            // Closing prices, dividends and splits (EODHD) and the risk-free rate (the Treasury), loaded into each tenant on the
+            // market-history switch: ephemeral, reloaded at startup.
+            builder.Services.Configure<MarketHistoryOptions>(configuration.GetSection(MarketHistoryOptions.SectionName));
+            builder.Services.AddHttpClient<IMarketHistorySource, EodhdTreasurySource>(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("TangentAtlas-Ledger/1.0");   // some public data sites stall requests that name no agent
+            });
+            builder.Services.AddSingleton<MarketHistoryService>();
+            builder.Services.AddHostedService(services => services.GetRequiredService<MarketHistoryService>());
+
             // Brokers: the order router sends broker orders and records the reports, while its switch is on.  The simulated
             // broker trades against each tenant's own prices; a real broker is another IBroker.
             builder.Services.Configure<BrokerOptions>(configuration.GetSection(BrokerOptions.SectionName));

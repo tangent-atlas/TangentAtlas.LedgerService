@@ -239,6 +239,43 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
+        /// Shows each account's performance at the closes, and each day if asked.
+        /// </summary>
+        /// <param name="api">The API.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="days">Whether to show each day.</param>
+        /// <param name="output">Where to write.</param>
+        /// <param name="cancellationToken">Cancels the command.</param>
+        /// <returns>A task that completes when they are shown.</returns>
+        public static async Task StatisticsAsync(LedgerApiClient api, Guid tenantId, bool days, TextWriter output, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(api);
+            ArgumentNullException.ThrowIfNull(output);
+            var english = CultureInfo.GetCultureInfo("en-US");
+            static string Percent(decimal? value) => value is { } number ? number.ToString("P2", CultureInfo.GetCultureInfo("en-US")) : "-";
+            var statistics = await api.GetStatisticsAsync(tenantId, days, cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"As of {statistics.AsOf.ToString("u", CultureInfo.InvariantCulture)}: {statistics.Accounts.Count} account(s)");
+            foreach (var account in statistics.Accounts)
+            {
+                var item = account.Statistics;
+                output.WriteLine();
+                output.WriteLine($"Account {item.AccountId}  {item.From:yyyy-MM-dd} to {item.Through:yyyy-MM-dd}, {item.Returns} daily return(s){(item.IsRanked ? string.Empty : " (not ranked yet)")}");
+                output.WriteLine(string.Format(english, "  Value {0:C2}   net flows {1:C2}", item.Value, item.NetFlows));
+                output.WriteLine($"  Total return {Percent(item.TotalReturn)}   annualized {Percent(item.AnnualizedReturn)}   volatility {Percent(item.Volatility)}   worst drawdown {Percent(item.MaximumDrawdown)}");
+                output.WriteLine($"  Sharpe ratio {(item.SharpeRatio is { } sharpe ? sharpe.ToString("0.00", CultureInfo.InvariantCulture) : "-")}");
+                foreach (var gap in item.Gaps)
+                {
+                    output.WriteLine($"  Note: {gap}");
+                }
+
+                foreach (var day in account.Days ?? [])
+                {
+                    output.WriteLine(string.Format(english, "    {0:yyyy-MM-dd}  value {1,16:C2}  flow {2,14:C2}  return {3,9}  risk-free {4,8}", day.Date, day.Value, day.Flow, Percent(day.Return), day.RiskFreeReturn is { } free ? free.ToString("P4", english) : "-"));
+                }
+            }
+        }
+
+        /// <summary>
         /// Shows a tenant's jobs: every job the server has, whether it is running and what its last run did; then each of
         /// the tenant's schedules, what it asks for and when it next starts and stops.
         /// </summary>

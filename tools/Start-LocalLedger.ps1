@@ -17,8 +17,9 @@
     by Windows for this user on this computer (DPAPI: no other account or computer can read it); otherwise it is asked
     for once (typed hidden) and kept there.  It is given to the server's process only.
 
-    The database is the server's Development connection (appsettings.Development.json: the local SQL Server).  Ctrl+C
-    stops the server.
+    The database is this computer's SQL Server (the Developer Edition's default instance, database AtlasLedger): the
+    script applies the schema's migrations and prepares it first, so what is loaded survives a restart.  -InMemory keeps
+    everything in memory instead, gone when the server stops.  Ctrl+C stops the server.
 
 .PARAMETER Port
     The port (default 5180, the server's launch profile).
@@ -28,6 +29,12 @@
 
 .PARAMETER NoBuild
     Run the server as last built.
+
+.PARAMETER Connection
+    The SQL Server database (default: the local default instance's AtlasLedger, signed in as you).
+
+.PARAMETER InMemory
+    Keep the ledger in memory: nothing survives the server stopping.
 
 .PARAMETER ReplaceToken
     Ask for the EODHD token again and keep the new one (after it changes at EODHD).
@@ -40,6 +47,8 @@ param(
     [ValidateRange(1024, 65535)][int]$Port = 5180,
     [switch]$MarketHistory,
     [switch]$NoBuild,
+    [string]$Connection = 'Server=localhost;Database=AtlasLedger;Trusted_Connection=True;TrustServerCertificate=True',
+    [switch]$InMemory,
     [switch]$ReplaceToken
 )
 
@@ -98,13 +107,32 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Building the server failed.' }
 }
 
+if (-not $InMemory) {
+    # The schema first (Entity Framework's migrations), then the writer's table types: what the release pipeline does in Azure.
+    Write-Host 'Applying the schema to the database...' -ForegroundColor Cyan
+    Push-Location $repository
+    try {
+        dotnet tool restore | Out-Null
+        $env:LEDGER_SCHEMA_CONNECTION = $Connection
+        dotnet ef database update --project (Join-Path $repository 'src/AtlasLedger.Schema')
+        if ($LASTEXITCODE -ne 0) { throw "Applying the migrations failed: is SQL Server running, and can you sign in to it?  ($Connection)" }
+    } finally {
+        Remove-Item Env:\LEDGER_SCHEMA_CONNECTION -ErrorAction SilentlyContinue
+        Pop-Location
+    }
+    dotnet run --project (Join-Path $repository 'src/AtlasLedger.Server') --no-build --no-launch-profile -- prepare-database --ConnectionStrings:Ledger=$Connection
+    if ($LASTEXITCODE -ne 0) { throw 'Preparing the database failed.' }
+    $environment.ConnectionStrings__Ledger = $Connection
+}
+
 $saved = @{}
 foreach ($name in $environment.Keys) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process')
 }
 try {
-    Write-Host "The ledger at $server, trusting $($settings.authority) for $($settings.apiUri); services: $($environment.Services__StartOn).  Ctrl+C stops it." -ForegroundColor Green
+    $store = if ($InMemory) { 'in memory' } else { 'in SQL Server' }
+    Write-Host "The ledger at $server ($store), trusting $($settings.authority) for $($settings.apiUri); services: $($environment.Services__StartOn).  Ctrl+C stops it." -ForegroundColor Green
     dotnet run --project (Join-Path $repository 'src/AtlasLedger.Server') --no-build --no-launch-profile
 } finally {
     foreach ($name in $environment.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }

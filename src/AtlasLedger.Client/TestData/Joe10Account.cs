@@ -24,7 +24,7 @@ namespace AtlasLedger.Client.TestData
     public sealed record Joe10Holding(string Ticker, decimal Weight, decimal Price);
 
     /// <summary>
-    /// The Joe 10 at a close: what the forward test's state file (tangent-atlas/forward-test, <c>state/joe10.json</c>) says.
+    /// The Joe 10 at a close: what the forward test's state file (tangent-atlas/TangentAtlas.ForwardTest, <c>state/joe10.json</c>) says.
     /// </summary>
     /// <param name="Close">The close: 4 pm New York time on the state's last date.</param>
     /// <param name="StockShare">The share of the account in stocks after the thermostat (the rest is cash).</param>

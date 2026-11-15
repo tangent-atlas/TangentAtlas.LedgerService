@@ -45,7 +45,7 @@ namespace AtlasLedger.TestData
               --state <joe10.json>   Optional. Without it, a generic Joe 10: ten large US companies at equal
                                      weights, half the account in stocks, each at $100 (where the simulated
                                      feed starts), at the last weekday close; nothing licensed in it.
-                                     With it, the forward test's state file (tangent-atlas/forward-test, state/joe10.json):
+                                     With it, the forward test's state file (tangent-atlas/TangentAtlas.ForwardTest, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
               --deposit <dollars>    The opening deposit (default 1000000).
               --out <folder>         Where to write (default: artifacts/test-data, which git ignores).

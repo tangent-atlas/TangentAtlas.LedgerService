@@ -120,11 +120,12 @@ dotnet ef database update --project src\AtlasLedger.Schema
 .\tools\Start-LocalLedger.ps1 -MarketHistory
 
 # in another window: the Joe 10 in its tenant, and the test person as its user (a browser opens: sign in as them)
-.\tools\Set-LocalJoe10.ps1 -StatePath ..\forward-test\state\joe10.json -SignOut
+.\tools\Set-LocalJoe10.ps1 -SignOut
 ```
 
-Then run the website and sign in as the test person.  Use the forward test's state (`-StatePath`): the generic Joe 10
-buys at $100 a share, which the real closes would value as a large gain or loss.
+Then run the website and sign in as the test person.  The Joe 10 is the forward test's: `state\joe10.json` in
+TangentAtlas.ForwardTest, cloned beside this repository (`repos\tangent-atlas\TangentAtlas.ForwardTest`; another place
+with `-StatePath`).
 
 ## The event log
 

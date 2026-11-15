@@ -18,8 +18,12 @@
     The tenant (default: the Joe 10's own, the same every time).
 
 .PARAMETER StatePath
-    The Joe 10's state (the forward test's joe10.json), if not the generic Joe 10.  Its prices are licensed: the
-    scripts are written to a temporary folder and deleted afterwards.
+    The Joe 10's state: by default the forward test's, state\joe10.json in TangentAtlas.ForwardTest beside this
+    repository (repos\tangent-atlas\TangentAtlas.ForwardTest).  The scripts are written to a temporary folder and
+    deleted afterwards.
+
+.PARAMETER Generic
+    Load the generic Joe 10 instead (bought at $100 a share: real closes value it as a large gain or loss).
 
 .PARAMETER NoBuild
     Use the programs as last built.
@@ -28,12 +32,13 @@
     Forget access-test's remembered sign-in first, so the browser opens and you can sign in as the test person.
 
 .EXAMPLE
-    .\tools\Set-LocalJoe10.ps1 -StatePath ..\forward-test\state\joe10.json -SignOut
+    .\tools\Set-LocalJoe10.ps1 -SignOut
 #>
 [CmdletBinding()]
 param(
     [guid]$TenantId = '4a6f6531-3020-7061-7065-720000000001',
-    [string]$StatePath,
+    [string]$StatePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'TangentAtlas.ForwardTest\state\joe10.json'),
+    [switch]$Generic,
     [switch]$NoBuild,
     [switch]$SignOut
 )
@@ -71,7 +76,12 @@ New-Item -ItemType Directory -Path $work | Out-Null
 try {
     Write-Host "`n== The Joe 10's scripts" -ForegroundColor Cyan
     $testDataArguments = @('joe10', '--out', $work)
-    if ($StatePath) { $testDataArguments += @('--state', (Resolve-Path $StatePath).Path) }
+    if (-not $Generic) {
+        if (-not (Test-Path $StatePath)) {
+            throw "The forward test's state isn't at ${StatePath}: clone tangent-atlas/TangentAtlas.ForwardTest beside this repository, name it with -StatePath, or load the generic Joe 10 with -Generic."
+        }
+        $testDataArguments += @('--state', (Resolve-Path $StatePath).Path)
+    }
     Invoke-Program $programs.TestData $testDataArguments
 
     Write-Host "`n== Loading tenant $TenantId" -ForegroundColor Cyan

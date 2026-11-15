@@ -85,7 +85,8 @@ try {
     Invoke-Program $programs.TestData $testDataArguments
 
     Write-Host "`n== Loading tenant $TenantId" -ForegroundColor Cyan
-    $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1) -join ''
+    # A new tenant answers 404 here, which is what we want: its message isn't shown.
+    $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1 2>$null) -join ''
     if ($LASTEXITCODE -eq 0 -and $existing.Trim()) {
         throw "Tenant $TenantId already has events: it is loaded.  Name another with -TenantId, or start from an empty database."
     }

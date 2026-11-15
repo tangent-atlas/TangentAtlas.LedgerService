@@ -1,49 +1,97 @@
 {
   "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
   "datatypes": {
+    "accountRole": "AtlasLedger.Model.AccountRole",
     "accountType": "AtlasLedger.Model.AccountType",
-    "cashEntryKind": "AtlasLedger.Model.CashEntryKind",
+    "bool": "System.Boolean",
+    "brokerageType": "AtlasLedger.Model.BrokerageType",
+    "assetType": "AtlasLedger.Model.AssetType",
+    "cashType": "AtlasLedger.Model.CashType",
+    "cryptoType": "AtlasLedger.Model.CryptoType",
+    "date": "System.DateOnly",
     "email": { "maxLength": 128, "type": "System.String" },
+    "equityType": "AtlasLedger.Model.EquityType",
     "eventSource": "AtlasLedger.Model.EventSource",
+    "eventType": "AtlasLedger.Model.EventType",
+    "exerciseStyle": "AtlasLedger.Model.ExerciseStyle",
+    "fixedIncomeType": "AtlasLedger.Model.FixedIncomeType",
+    "fundType": "AtlasLedger.Model.FundType",
+    "futureType": "AtlasLedger.Model.FutureType",
     "guid": "System.Guid",
+    "int": "System.Int32",
+    "jobRunReason": "AtlasLedger.Model.JobRunReason",
+    "jobRunStatus": "AtlasLedger.Model.JobRunStatus",
+    "jobStatus": "AtlasLedger.Model.JobStatus",
     "long": "System.Int64",
     "money": { "precision": 19, "scale": 4, "type": "System.Decimal" },
     "nodeStatus": "AtlasLedger.Model.NodeStatus",
     "nodeType": "AtlasLedger.Model.NodeType",
+    "optionRight": "AtlasLedger.Model.OptionRight",
     "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
     "quantity": { "precision": 19, "scale": 6, "type": "System.Decimal" },
-    "securityType": "AtlasLedger.Model.SecurityType",
+    "rate": { "precision": 9, "scale": 6, "type": "System.Decimal" },
     "string": "System.String",
     "time": "System.DateTimeOffset",
-    "tradeSide": "AtlasLedger.Model.TradeSide",
     "userType": "AtlasLedger.Model.UserType"
   },
   "name": "Ledger",
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
+      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type; AccountRole is its place in an adviser's tree of accounts. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry); both are empty for an account held nowhere, such as a group. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: a value says the account is to be rebalanced to that model's weights; null says it is not rebalanced.",
       "columns": {
         "AccountId": "guid",
-        "AccountType": "accountType"
+        "AccountRole": "accountRole",
+        "AccountType": "accountType",
+        "Currency": { "maxLength": 3, "type": "string" },
+        "ExternalAccountId": { "maxLength": 64, "type": "string?" },
+        "InstitutionId": "guid?",
+        "ModelId": "guid?"
       },
       "key": ["AccountId"],
       "references": {
-        "Node": { "columns": ["AccountId"] }
+        "Node": { "columns": ["AccountId"] },
+        "Institution": { "columns": ["InstitutionId"] },
+        "Model": { "columns": ["ModelId"] }
       }
     },
-    "AccountConnection": {
-      "description": "Links an account to the same account at its source: the broker's account number, or the aggregator's account ID.",
-      "key": ["AccountConnectionId"],
+    "Brokerage": {
+      "description": "A brokerage account: an account of type Brokerage, with its more specific type (taxable, or an IRA).",
+      "key": ["AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "BrokerageType": "brokerageType"
+      },
       "references": {
         "Account": { "columns": ["AccountId"] }
-      },
-      "unique": {
-        "External": { "columns": ["Source", "ExternalAccountId"] }
-      },
+      }
+    },
+    "Event": {
+      "description": "The log: every input as it entered the ledger, never changed or deleted. EventType says what kind (a fixed code) and SchemaVersion which version of its payload; Payload is the kind's own fields, as JSON, read back by kind and version. Holdings, orders' states and every other derived state are folded from these. Every event that changes holdings is complete in itself: an exchange within the books balances. RowVersion (each row written takes the next number) orders the log. TransactionId is the transaction it came in: one or more events committed or refused as a unit, supplied by the client; a transaction's events are contiguous in the log. The source supplies EventId (for a broker's messages, a name-based ID from the source and its own IDs) and (Source, SourceId) is idempotent, so a replayed message is recorded once. CorrelationId is what it belongs to (an order: the first of its replace chain); CausationId what caused it.",
+      "writeMode": "AppendOnly",
+      "key": ["EventId"],
       "columns": {
-        "AccountConnectionId": "guid",
-        "AccountId": "guid",
-        "ExternalAccountId": { "maxLength": 64, "type": "string" },
+        "CausationId": "guid?",
+        "CorrelationId": "guid?",
+        "EffectiveTime": "time",
+        "EnteredTime": "time",
+        "EventId": "guid",
+        "EventType": "eventType",
+        "Payload": "string",
+        "SchemaVersion": "int",
+        "Source": "eventSource",
+        "SourceId": { "maxLength": 128, "type": "string" },
+        "SourceSequence": "long?",
+        "TransactionId": "guid?"
+      },
+      "unique": { "BySource": { "columns": ["Source", "SourceId"], "idempotent": true } }
+    },
+    "Institution": {
+      "description": "An institution that holds accounts: a broker, a bank, a card issuer. Source is the connection the system reaches it through (Schwab's API, the aggregator, the simulator): for a broker, which adapter its orders go to. What is particular to one account (its identifier there) is on the account.",
+      "key": ["InstitutionId"],
+      "columns": {
+        "InstitutionId": "guid",
+        "Name": { "maxLength": 64, "type": "string" },
         "Source": "eventSource"
       }
     },
@@ -63,29 +111,41 @@
         "Subject": { "columns": ["NodeId", "Rule"], "idempotent": true }
       }
     },
-    "CashEntry": {
-      "description": "An event: cash in or out of an account. Amount is the change in cash: negative for a withdrawal or a fee.",
-      "writeMode": "AppendOnly",
-      "key": ["CashEntryId"],
+    "Asset": {
+      "description": "Anything that can be held: cash, a stock, a fund, a bond, an option, a future or a coin. Its identity is a node, its Symbol rows are its names in each scheme (Currency, Ticker, Cusip), and one extension table by asset type holds what is particular to it. Its price is quoted in QuoteCurrency (ISO 4217; a currency is quoted in itself, at 1). Market value in an account's currency is quantity × QuantityFactor × price × PriceFactor × the price of QuoteCurrency in the account's currency: QuantityFactor is the units one quantity stands for (100 shares for an option, a futures contract's multiplier), PriceFactor the units a quoted price stands for (0.01 for a bond priced per 100 of face value, or a future quoted in cents).",
+      "key": ["AssetId"],
       "references": {
-        "Account": { "columns": ["AccountId"] },
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+        "Node": { "columns": ["AssetId"] }
       },
       "columns": {
-        "AccountId": "guid",
-        "Amount": "money",
-        "CashEntryId": "guid",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "Kind": "cashEntryKind",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid?",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?"
+        "AssetId": "guid",
+        "AssetType": "assetType",
+        "PriceFactor": "quantity",
+        "QuantityFactor": "quantity",
+        "QuoteCurrency": { "maxLength": 3, "type": "string" }
+      }
+    },
+    "Cash": {
+      "description": "An asset of type Cash: a currency, held in units of itself at a price of one.",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "CashType": "cashType",
+        "CurrencyCode": { "maxLength": 3, "type": "string" }
+      }
+    },
+    "Crypto": {
+      "description": "An asset of type Crypto: a coin or token on a blockchain.",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "CryptoType": "cryptoType"
       }
     },
     "Dossier": {
@@ -108,6 +168,55 @@
       "references": {
         "Child": { "columns": ["ChildNodeId"], "table": "Node" },
         "Parent": { "columns": ["ParentNodeId"], "table": "Node" }
+      }
+    },
+    "Equity": {
+      "description": "An asset of type Equity: a share in a company.",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "EquityType": "equityType"
+      }
+    },
+    "FixedIncome": {
+      "description": "An asset of type Fixed Income: a bond or note. Quantity is face value; price is per 100 of face value.",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "CouponRate": "rate?",
+        "FixedIncomeType": "fixedIncomeType",
+        "MaturityDate": "date?"
+      }
+    },
+    "Fund": {
+      "description": "An asset of type Fund: a share in a pooled vehicle (an exchange-traded fund, a mutual fund, a money market fund).",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "FundType": "fundType"
+      }
+    },
+    "Future": {
+      "description": "An asset of type Future: an agreement to buy or sell its underlying at a set price on its expiration date.",
+      "key": ["AssetId"],
+      "references": {
+        "Asset": { "columns": ["AssetId"] },
+        "Underlying": { "columns": ["UnderlyingAssetId"], "table": "Asset" }
+      },
+      "columns": {
+        "AssetId": "guid",
+        "ExpirationDate": "date",
+        "FutureType": "futureType",
+        "UnderlyingAssetId": "guid?"
       }
     },
     "Member": {
@@ -134,30 +243,20 @@
       },
       "key": ["NodeId"]
     },
-    "OpeningBalance": {
-      "description": "An event: a holding as it stood where the source's history begins.",
-      "writeMode": "AppendOnly",
-      "key": ["OpeningBalanceId"],
+    "Option": {
+      "description": "An asset of type Option: the right to buy (call) or sell (put) its underlying asset at the strike price until it expires.",
+      "key": ["AssetId"],
       "references": {
-        "Account": { "columns": ["AccountId"] },
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
+        "Asset": { "columns": ["AssetId"] },
+        "Underlying": { "columns": ["UnderlyingAssetId"], "table": "Asset" }
       },
       "columns": {
-        "AccountId": "guid",
-        "AcquiredTime": "time?",
-        "CostBasis": "money?",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "OpeningBalanceId": "guid",
-        "Quantity": "quantity",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?"
+        "AssetId": "guid",
+        "ExerciseStyle": "exerciseStyle",
+        "ExpirationDate": "date",
+        "OptionRight": "optionRight",
+        "StrikePrice": "price",
+        "UnderlyingAssetId": "guid"
       }
     },
     "Person": {
@@ -170,99 +269,72 @@
         "Node": { "columns": ["PersonId"] }
       }
     },
-    "PositionOverride": {
-      "description": "An event: the operator sets a holding's quantity from its effective time until it expires, because a source has it wrong.",
-      "writeMode": "AppendOnly",
-      "key": ["PositionOverrideId"],
-      "references": {
-        "Account": { "columns": ["AccountId"] },
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
-      "columns": {
-        "AccountId": "guid",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "ExpiresTime": "time",
-        "PositionOverrideId": "guid",
-        "Quantity": "quantity",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?"
-      }
-    },
     "Price": {
       "columns": {
         "AsOf": "time",
         "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
         "Last": "price",
         "Scheme": { "maxLength": 32, "type": "string" }
       },
       "concurrency": "LatestValue",
-      "description": "The latest price of a symbol, from the market data feed. Ticks are ephemeral: never persisted, synced, or served by the API.",
-      "key": ["Scheme", "Code"],
+      "description": "The latest price of a symbol in a currency: the price of one unit of what the symbol names, as quoted, in units of Currency (NVDA in USD; USD in USD, which is 1; USD in GBP). Published by the market data feed and, for constants such as a currency's price in itself, from the server's initial prices at startup. Ticks are ephemeral: never persisted, synced, or served by the API.",
+      "key": ["Scheme", "Code", "Currency"],
       "persistence": "Ephemeral"
     },
-    "PriceOverride": {
-      "description": "An event: the operator sets a security's price from its effective time until it expires, because a source has it wrong.",
-      "writeMode": "AppendOnly",
-      "key": ["PriceOverrideId"],
-      "references": {
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
+    "ClosingPrice": {
       "columns": {
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "ExpiresTime": "time",
-        "Price": "price",
-        "PriceOverrideId": "guid",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?"
-      }
+        "AsOf": "time",
+        "Close": "price",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
+        "Date": "date",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A symbol's official closing price on a market day, in a currency, as traded that day (not adjusted for later splits or dividends). Loaded from the market data vendor for the days the tenant's history needs, and each market day after the close; the paper broker fills market orders at it, and the rules value accounts at it. Ephemeral: reloaded at startup, never persisted.",
+      "key": ["Scheme", "Code", "Currency", "Date"],
+      "persistence": "Ephemeral"
     },
-    "Security": {
-      "description": "A security: its identity is a node, and its Symbol rows are its names in each scheme (Ticker, Cusip), so a ticker change adds a symbol and history keeps its node.",
-      "key": ["SecurityId"],
-      "references": {
-        "Node": { "columns": ["SecurityId"] }
-      },
+    "Dividend": {
       "columns": {
-        "SecurityId": "guid",
-        "SecurityType": "securityType"
-      }
+        "Amount": "price",
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Currency": { "maxLength": 3, "type": "string" },
+        "ExDate": "date",
+        "PaymentDate": "date?",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A cash dividend: Amount per share, in Currency, to whoever held the shares at the close before ExDate, paid on PaymentDate. From the market data vendor; the rules credit it to paper accounts. Ephemeral.",
+      "key": ["Scheme", "Code", "ExDate"],
+      "persistence": "Ephemeral"
+    },
+    "InterestRate": {
+      "columns": {
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Date": "date",
+        "Rate": "rate"
+      },
+      "concurrency": "LatestValue",
+      "description": "An interest rate published for a day, as a fraction a year (0.0405 for 4.05%): the risk-free rate is Code TBILL-13W, the 13-week Treasury bill's coupon equivalent (its investment yield), from the Treasury's daily bill rates. Ephemeral.",
+      "key": ["Code", "Date"],
+      "persistence": "Ephemeral"
     },
     "Split": {
-      "description": "An event: a split of a security. Numerator for Denominator: 2 for 1 is 2/1; a 1-for-10 reverse split is 1/10.",
-      "writeMode": "AppendOnly",
-      "key": ["SplitId"],
-      "references": {
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
       "columns": {
-        "Denominator": "quantity",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "Numerator": "quantity",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?",
-        "SplitId": "guid"
-      }
+        "AsOf": "time",
+        "Code": { "maxLength": 32, "type": "string" },
+        "Date": "date",
+        "Ratio": "price",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "concurrency": "LatestValue",
+      "description": "A stock split effective at the open of Date: each share held at the close before becomes Ratio shares (2 for a 2-for-1 split, 0.1 for a 1-for-10 reverse split). From the market data vendor; the rules apply it to paper accounts. Ephemeral.",
+      "key": ["Scheme", "Code", "Date"],
+      "persistence": "Ephemeral"
     },
     "Symbol": {
       "columns": {
@@ -275,32 +347,54 @@
         "Node": { "columns": ["NodeId"] }
       }
     },
-    "Trade": {
-      "description": "An event: the source's record of a purchase or sale. NetAmount is the change in cash: negative for a purchase.",
-      "writeMode": "AppendOnly",
-      "key": ["TradeId"],
-      "references": {
-        "Account": { "columns": ["AccountId"] },
-        "Security": { "columns": ["SecurityId"] }
-      },
-      "unique": {
-        "SourceRecord": { "columns": ["Source", "SourceId"], "idempotent": true }
-      },
+    "Model": {
+      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value), and Band, the smallest trade worth making as a fraction of the account's value. Many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold: a model with no weights is all cash.",
+      "key": ["ModelId"],
       "columns": {
-        "AccountId": "guid",
-        "EffectiveTime": "time",
-        "EnteredTime": "time",
-        "Fees": "money",
-        "NetAmount": "money",
-        "Price": "price",
-        "Quantity": "quantity",
-        "Reason": { "maxLength": 256, "type": "string?" },
-        "SecurityId": "guid",
-        "Side": "tradeSide",
-        "Source": "eventSource",
-        "SourceId": { "maxLength": 64, "type": "string" },
-        "SourceSequence": "long?",
-        "TradeId": "guid"
+        "Band": "rate",
+        "ModelId": "guid",
+        "Name": { "maxLength": 64, "type": "string" }
+      }
+    },
+    "Weight": {
+      "description": "One asset's weight in a model: its fraction of the account's value (0.25 for a quarter).",
+      "key": ["ModelId", "AssetId"],
+      "columns": {
+        "AssetId": "guid",
+        "Fraction": "rate",
+        "ModelId": "guid"
+      },
+      "references": {
+        "Model": { "columns": ["ModelId"] },
+        "Asset": { "columns": ["AssetId"] }
+      }
+    },
+    "JobRun": {
+      "description": "One run of a job for this tenant: the log of what ran, when, why and how it ended. A run by hand is asked for by inserting a row with Status Requested (the caller supplies the key and RequestedTime); the scheduler takes it up after the commit, and refuses it if the job is unknown, a service, off (every schedule of it Off) or already running. The server records scheduled runs, a service's starts and stops, and every outcome. A run still Requested or Running when the server starts is marked Interrupted: what it did is not confirmed. JobScheduleId is the schedule that started it (no reference: a schedule can be deleted, its runs stay).",
+      "key": ["JobRunId"],
+      "columns": {
+        "EndTime": "time?",
+        "Job": { "maxLength": 64, "type": "string" },
+        "JobRunId": "guid",
+        "JobScheduleId": "guid?",
+        "Outcome": { "maxLength": 512, "type": "string?" },
+        "Reason": "jobRunReason",
+        "RequestedTime": "time",
+        "StartTime": "time?",
+        "Status": "jobRunStatus"
+      }
+    },
+    "JobSchedule": {
+      "description": "A job of this tenant's, and when it runs: Job is the job's key (the [Job] attribute on its class, such as GenerateOrders). Status is what is asked for: Off (it doesn't run on its own), On (a service runs now, until changed; not for a task) or Scheduled. Scheduled, a task runs at each CronSchedule time; a service is on from each CronSchedule time to the next StopSchedule time. Both are Quartz cron expressions, read in TimeZone (IANA). A job marked for market days skips the NYSE's holidays. A missed run is skipped, not made up. The scheduler acts on each commit: a change takes effect at once; turning a row Off or deleting it stops what it started, cancelling a run in progress.",
+      "key": ["JobScheduleId"],
+      "columns": {
+        "CronSchedule": { "maxLength": 128, "type": "string?" },
+        "Description": { "maxLength": 256, "type": "string?" },
+        "Job": { "maxLength": 64, "type": "string" },
+        "JobScheduleId": "guid",
+        "Status": "jobStatus",
+        "StopSchedule": { "maxLength": 128, "type": "string?" },
+        "TimeZone": { "maxLength": 64, "type": "string?" }
       }
     }
   },

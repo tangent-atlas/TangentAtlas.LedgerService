@@ -8,6 +8,7 @@ namespace AtlasLedger.Server.Holdings
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
+    using AtlasLedger.Model.Primary;
     using Bellerophon.Rules;
     using Bellerophon.Rules.NRules;
 
@@ -17,15 +18,30 @@ namespace AtlasLedger.Server.Holdings
     /// </summary>
     /// <param name="TenantId">The tenant.</param>
     /// <param name="AsOf">When the cycle ran.</param>
-    /// <param name="Positions">Every holding, by account and security.</param>
-    /// <param name="Cash">Every account's cash.</param>
-    /// <param name="Prices">Every priced security's effective price.</param>
+    /// <param name="Positions">Every holding, by account and asset: cash, stocks, funds and the rest alike.</param>
+    /// <param name="Prices">Every priced asset's effective price, in its quote currency.</param>
+    /// <param name="Rates">Every published rate between currencies.</param>
+    /// <param name="Orders">Every order's state.</param>
+    /// <param name="Flows">Every account's net contributions.</param>
+    /// <param name="Accounts">Every account (for its model).</param>
+    /// <param name="Models">Every model.</param>
+    /// <param name="Weights">Every model's weights.</param>
+    /// <param name="Proposals">Every account's proposed allocations.</param>
+    /// <param name="Problems">Every event the log holds that is left out of what is derived, and why.</param>
     public sealed record HoldingsSnapshot(
         Guid TenantId,
         DateTimeOffset AsOf,
         IReadOnlyList<PositionState> Positions,
-        IReadOnlyList<CashState> Cash,
-        IReadOnlyList<EffectivePrice> Prices);
+        IReadOnlyList<EffectivePrice> Prices,
+        IReadOnlyList<CurrencyRate> Rates,
+        IReadOnlyList<Orders.OrderState> Orders,
+        IReadOnlyList<AccountFlow> Flows,
+        IReadOnlyList<AccountFact> Accounts,
+        IReadOnlyList<ModelFact> Models,
+        IReadOnlyList<WeightFact> Weights,
+        IReadOnlyList<Orders.ProposedAllocations> Proposals,
+        IReadOnlyList<EventProblem> Problems,
+        IReadOnlyList<AccountHistory> Histories);
 
     /// <summary>
     /// The latest snapshot of each tenant.  In memory only: derived state is never persisted, and it is rebuilt from the
@@ -51,6 +67,12 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="tenantId">The tenant.</param>
         /// <returns>The snapshot, or null if the rules haven't run for the tenant since the server started.</returns>
         public HoldingsSnapshot? Find(Guid tenantId) => this.snapshots.TryGetValue(tenantId, out var snapshot) ? snapshot : null;
+
+        /// <summary>
+        /// Forgets every snapshot, when the rules engine stops: no engine, no holdings, rather than holdings that have
+        /// stopped moving.
+        /// </summary>
+        public void Clear() => this.snapshots.Clear();
     }
 
     /// <summary>
@@ -128,8 +150,16 @@ namespace AtlasLedger.Server.Holdings
                     this.tenantId,
                     now,
                     session.Query<PositionState>().ToArray(),
-                    session.Query<CashState>().ToArray(),
-                    session.Query<EffectivePrice>().ToArray()));
+                    session.Query<EffectivePrice>().ToArray(),
+                    session.Query<CurrencyRate>().ToArray(),
+                    session.Query<Orders.OrderState>().ToArray(),
+                    session.Query<AccountFlow>().ToArray(),
+                    session.Query<AccountFact>().ToArray(),
+                    session.Query<ModelFact>().ToArray(),
+                    session.Query<WeightFact>().ToArray(),
+                    session.Query<Orders.ProposedAllocations>().ToArray(),
+                    session.Query<EventProblem>().ToArray(),
+                    session.Query<AccountHistory>().ToArray()));
                 return fired;
             }
         }

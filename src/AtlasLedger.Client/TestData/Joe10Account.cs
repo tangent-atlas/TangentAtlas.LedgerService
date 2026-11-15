@@ -1,4 +1,4 @@
-// <copyright file="Joe10Account.cs" company="Tangent Atlas">
+﻿// <copyright file="Joe10Account.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -24,7 +24,7 @@ namespace AtlasLedger.Client.TestData
     public sealed record Joe10Holding(string Ticker, decimal Weight, decimal Price);
 
     /// <summary>
-    /// The Joe 10 at a close: what the forward test's state file (tangent-atlas/forward-test, <c>state/joe10.json</c>) says.
+    /// The Joe 10 at a close: what the forward test's state file (tangent-atlas/TangentAtlas.ForwardTest, <c>state/joe10.json</c>) says.
     /// </summary>
     /// <param name="Close">The close: 4 pm New York time on the state's last date.</param>
     /// <param name="StockShare">The share of the account in stocks after the thermostat (the rest is cash).</param>
@@ -63,6 +63,25 @@ namespace AtlasLedger.Client.TestData
         /// </summary>
         /// <param name="date">The trading date.</param>
         /// <returns>The close.</returns>
+        /// <summary>
+        /// A generic Joe 10, for a test account that needs no real data: ten large US companies at equal weights, half the
+        /// account in stocks, each at $100 (where the simulated market feed starts a ticker it hasn't priced), at the last
+        /// weekday close before a time.  No licensed prices, so the scripts it makes can be shared.
+        /// </summary>
+        /// <param name="now">The time (default: now).</param>
+        /// <returns>The state.</returns>
+        public static Joe10State Generic(DateTimeOffset? now = null)
+        {
+            var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now ?? DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/New_York")).DateTime);
+            while (CloseOf(day) > (now ?? DateTimeOffset.UtcNow) || day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            {
+                day = day.AddDays(-1);
+            }
+
+            var tickers = new[] { "NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "AVGO", "TSLA", "BRK.B", "JPM" };
+            return new Joe10State(CloseOf(day), 0.5m, tickers.Select(ticker => new Joe10Holding(ticker, 0.1m, 100m)).ToArray());
+        }
+
         public static DateTimeOffset CloseOf(DateOnly date)
         {
             var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
@@ -72,14 +91,16 @@ namespace AtlasLedger.Client.TestData
     }
 
     /// <summary>
-    /// Builds a test account holding the Joe 10: a reference script (the account, its connection, the securities and their
-    /// tickers) and a history script (a cash deposit, then one purchase per company at the close).  Both are ordinary
-    /// ledger scripts, so <c>script-loader</c> loads them.
+    /// Builds a test account holding the Joe 10: a reference script (the account, its connection, and the assets it holds,
+    /// US dollars among them, with their names) and a history script (a deposit of dollars, then one purchase per company at
+    /// the close).  Both are ordinary ledger scripts, so <c>script-loader</c> loads them.
     /// </summary>
     /// <remarks>
-    /// Every key is derived from a name, so building twice gives the same keys and loading twice changes nothing (events
-    /// are idempotent on their source and source ID).  Shares are whole, rounded down, so the purchases never spend more
-    /// than the cash; what is left over stays in cash.  Fees are zero, as at Schwab.
+    /// Cash is an asset like any other.  A purchase exchanges one asset for another, so each is one transaction with two
+    /// lines that balance: the shares received (their cost) and the dollars given.  Every key is derived from a name, so
+    /// building twice gives the same keys and loading twice changes nothing (transactions are idempotent on their source and
+    /// source ID).  Shares are whole, rounded down, so the purchases never spend more than the cash; what is left stays in
+    /// dollars.  Fees are zero, as at Schwab.
     /// </remarks>
     public static class Joe10Account
     {
@@ -89,88 +110,221 @@ namespace AtlasLedger.Client.TestData
         /// <summary>The account.</summary>
         public static readonly Guid AccountId = KeyFor("account");
 
-        private const string ExternalAccountNumber = "JOE10-TEST";
+        /// <summary>The US dollar, the account's cash.</summary>
+        public static readonly Guid DollarId = KeyFor("asset/USD");
+
+        /// <summary>
+        /// The Joe 10 model: the weights the account is to hold.
+        /// </summary>
+        public static readonly Guid ModelId = KeyFor("model");
+
+        /// <summary>
+        /// The institution the account is held at: the simulated broker, presented as a fictional brokerage (paper money
+        /// only; no real firm).
+        /// </summary>
+        public static readonly Guid InstitutionId = KeyFor("institution/simulator");
+
+        /// <summary>
+        /// The schedule that generates the tenant's orders: 3:45 pm in New York on market days.
+        /// </summary>
+        public static readonly Guid GenerateOrdersScheduleId = KeyFor("job/GenerateOrders");
+
+        /// <summary>
+        /// The fictional brokerage's name: Tangent Atlas's own paper-trading broker, the simulator.
+        /// </summary>
+        public const string PaperBrokerageName = "Tangent Atlas Paper Brokerage";
+
+        private const string ExternalAccountNumber = "PAPER-100010";
 
         /// <summary>
         /// Builds the reference script: rows that say how things are.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="broker">The broker the account is held at (its institution's connection): the simulator unless a test says otherwise.</param>
         /// <returns>The script.</returns>
-        public static LedgerScript Reference(Joe10State state)
+        public static LedgerScript Reference(Joe10State state, EventSource broker = EventSource.Simulator)
         {
             ArgumentNullException.ThrowIfNull(state);
             var script = new LedgerScript()
-                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.ManagedAccount })
-                .Insert("Symbol", new SymbolDto { Scheme = "Custodian", Code = ExternalAccountNumber, NodeId = AccountId })
-                .Insert("AccountConnection", new AccountConnectionDto { AccountConnectionId = KeyFor("connection"), AccountId = AccountId, Source = EventSource.Simulator, ExternalAccountId = ExternalAccountNumber });
+                .Insert("Institution", new InstitutionDto { InstitutionId = InstitutionId, Name = broker == EventSource.Simulator ? PaperBrokerageName : broker.ToString(), Source = broker })
+                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10", Band = 0.005m })
+                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 paper account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
+                .Insert("Account", new AccountDto { AccountId = AccountId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber, ModelId = ModelId })
+                .Insert("Brokerage", new BrokerageDto { AccountId = AccountId, BrokerageType = BrokerageType.Taxable })
+                .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
+                .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
+                .Insert("Asset", new AssetDto { AssetId = DollarId, AssetType = AssetType.Cash, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                .Insert("Cash", new CashDto { AssetId = DollarId, CashType = CashType.Currency, CurrencyCode = CurrencyCode.UnitedStatesDollar })
+                .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Currency, Code = CurrencyCode.UnitedStatesDollar, NodeId = DollarId });
             foreach (var holding in state.Holdings)
             {
-                var securityId = SecurityIdOf(holding.Ticker);
+                var assetId = AssetIdOf(holding.Ticker);
                 script
-                    .Insert("Node", new NodeDto { NodeId = securityId, DisplayName = holding.Ticker, FullName = holding.Ticker, NodeStatus = NodeStatus.Active, NodeType = NodeType.Security })
-                    .Insert("Security", new SecurityDto { SecurityId = securityId, SecurityType = SecurityType.CommonStock })
-                    .Insert("Symbol", new SymbolDto { Scheme = "Ticker", Code = holding.Ticker, NodeId = securityId });
+                    .Insert("Node", new NodeDto { NodeId = assetId, DisplayName = holding.Ticker, FullName = holding.Ticker, NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })
+                    .Insert("Asset", new AssetDto { AssetId = assetId, AssetType = AssetType.Equity, QuoteCurrency = CurrencyCode.UnitedStatesDollar, QuantityFactor = ValueFactor.One, PriceFactor = ValueFactor.One })
+                    .Insert("Equity", new EquityDto { AssetId = assetId, EquityType = EquityType.CommonStock })
+                    .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Ticker, Code = holding.Ticker, NodeId = assetId });
             }
 
             return script;
         }
 
         /// <summary>
-        /// Builds the history script: events that say what happened.  The deposit is effective at the open; the purchases
-        /// at the close, in order of weight.
+        /// Builds the history: transactions that say what happened, one event each.  The deposit is effective at the open;
+        /// the purchases at the close, in order of weight.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
-        /// <param name="deposit">The cash paid in, in dollars.</param>
-        /// <returns>The script.</returns>
-        public static LedgerScript History(Joe10State state, decimal deposit)
+        /// <param name="deposit">The dollars paid in.</param>
+        /// <returns>The transactions, in order.</returns>
+        public static IReadOnlyList<TransactionMessage> History(Joe10State state, decimal deposit)
         {
             ArgumentNullException.ThrowIfNull(state);
             var entered = state.Close;
-            var script = new LedgerScript()
-                .Insert("CashEntry", new CashEntryDto
-                {
-                    CashEntryId = KeyFor("deposit"),
-                    AccountId = AccountId,
-                    Kind = CashEntryKind.Deposit,
-                    Amount = deposit,
-                    Source = EventSource.Simulator,
-                    SourceId = "joe10-deposit",
-                    EffectiveTime = state.Close.AddHours(-6.5),
-                    EnteredTime = entered,
-                    Reason = "The Joe 10 test account's opening deposit.",
-                });
+            var transactions = new List<TransactionMessage> { Deposit(state, deposit) };
             var sequence = 0L;
+            var day = DateOnly.FromDateTime(state.Close.Date);
             foreach (var purchase in Purchases(state, deposit))
             {
                 sequence++;
-                script.Insert("Trade", new TradeDto
+                var cost = purchase.Shares * purchase.Price;
+                var trade = new TradeEvent
                 {
-                    TradeId = KeyFor($"buy/{purchase.Ticker}"),
                     AccountId = AccountId,
-                    SecurityId = SecurityIdOf(purchase.Ticker),
-                    Side = TradeSide.Buy,
-                    Quantity = purchase.Shares,
-                    Price = purchase.Price,
-                    Fees = 0m,
-                    NetAmount = -(purchase.Shares * purchase.Price),
-                    Source = EventSource.Simulator,
-                    SourceId = $"joe10-buy-{purchase.Ticker}",
-                    SourceSequence = sequence,
-                    EffectiveTime = state.Close,
-                    EnteredTime = entered,
-                });
+                    TradeDate = day,
+                    SettlementDate = day.AddDays(1),
+                    Items =
+                    [
+                        new ActivityItem(AssetIdOf(purchase.Ticker), purchase.Shares, cost, purchase.Price, PositionEffect.Opening),
+                        new ActivityItem(DollarId, -cost, -cost),
+                    ],
+                };
+                transactions.Add(Transaction($"buy/{purchase.Ticker}", EventMessages.From(trade, KeyFor($"buy/{purchase.Ticker}"), EventSource.Simulator, $"joe10-buy-{purchase.Ticker}", state.Close, entered, sequence)));
+            }
+
+            return transactions;
+        }
+
+        /// <summary>
+        /// Builds the trading transactions: the same deposit and the same purchases as <see cref="History"/>, but as the
+        /// trading events that lead to them, for the rules to turn into holdings.  Each purchase is an order (origin
+        /// Rebalance) with one allocation, to the account, placed in one transaction with its broker orders (as the order
+        /// generator writes them); then the broker's acceptance and each fill at the last close, without fees, each a
+        /// transaction of its own (as the router records them).  The largest purchase is split into two broker orders, each
+        /// filled in two parts, so the script also exercises splitting and partial fills.  The rules book each fill as a
+        /// purchase, so the holdings come out the same as from the history.  Load one or the other, not both.
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="deposit">The dollars paid in.</param>
+        /// <returns>The transactions, in order.</returns>
+        public static IReadOnlyList<TransactionMessage> Trading(Joe10State state, decimal deposit)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            var transactions = new List<TransactionMessage> { Deposit(state, deposit) };
+            var answers = new List<TransactionMessage>();
+            var placed = state.Close.AddMinutes(-30);
+            var purchases = Purchases(state, deposit);
+            var largest = purchases.OrderByDescending(purchase => purchase.Shares * purchase.Price).First().Ticker;
+            foreach (var purchase in purchases)
+            {
+                var orderId = KeyFor($"order/{purchase.Ticker}");
+                var order = new OrderPlacedEvent
+                {
+                    OrderId = orderId,
+                    Origin = OrderOrigin.Rebalance,
+                    Legs = [new OrderLeg(1, AssetIdOf(purchase.Ticker), Instruction.Buy, [new AllocationItem(AccountId, purchase.Shares)], PositionEffect.Opening)],
+                };
+                var placing = new List<EventMessage> { EventMessages.From(order, orderId, EventSource.Simulator, $"joe10-order-{purchase.Ticker}", placed, correlationId: orderId) };
+
+                // The largest purchase in two broker orders, each filled in two parts; the rest in one, filled at once.
+                var isSplit = purchase.Ticker == largest && purchase.Shares >= 4m;
+                var first = isSplit ? Math.Floor(purchase.Shares / 2m) : purchase.Shares;
+                var brokerQuantities = isSplit ? new[] { first, purchase.Shares - first } : new[] { purchase.Shares };
+                for (var part = 0; part < brokerQuantities.Length; part++)
+                {
+                    var quantity = brokerQuantities[part];
+                    var brokerOrderId = KeyFor($"broker-order/{purchase.Ticker}/{part}");
+                    var sent = new BrokerOrderSentEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, AccountId = AccountId, Legs = [new BrokerLeg(1, quantity)], OrderType = OrderType.Market, TimeInForce = TimeInForce.Day };
+                    var accepted = new OrderAcceptedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = placed.AddMinutes(1) };
+                    placing.Add(EventMessages.From(sent, brokerOrderId, EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-sent", placed, correlationId: orderId, causationId: orderId));
+                    answers.Add(Transaction($"report/{purchase.Ticker}/{part}/accepted", EventMessages.From(accepted, KeyFor($"report/{purchase.Ticker}/{part}/accepted"), EventSource.Simulator, $"joe10-{purchase.Ticker}-{part}-accepted", placed.AddMinutes(1), correlationId: orderId, causationId: brokerOrderId)));
+                    var fillFirst = isSplit ? Math.Floor(quantity / 2m) : quantity;
+                    var fills = isSplit ? new[] { fillFirst, quantity - fillFirst } : new[] { quantity };
+                    for (var number = 0; number < fills.Length; number++)
+                    {
+                        var sourceId = $"joe10-{purchase.Ticker}-{part}-fill-{number}";
+                        var fill = new ExecutionReportedEvent { OrderId = orderId, BrokerOrderId = brokerOrderId, ReportTime = state.Close, ExecutionId = sourceId, Quantity = fills[number], Price = purchase.Price };
+                        answers.Add(Transaction($"report/{purchase.Ticker}/{part}/fill/{number}", EventMessages.From(fill, KeyFor($"report/{purchase.Ticker}/{part}/fill/{number}"), EventSource.Simulator, sourceId, state.Close, correlationId: orderId, causationId: brokerOrderId)));
+                    }
+                }
+
+                transactions.Add(Transaction($"order/{purchase.Ticker}", placing.ToArray()));
+            }
+
+            // The broker answers after every order is placed: acceptances at a minute past, fills at the close.
+            transactions.AddRange(answers.OrderBy(answer => answer.Events[0].EffectiveTime));
+            return transactions;
+        }
+
+        /// <summary>
+        /// Builds the opening transactions for an account the rules rebalance: the deposit only.  The first rebalance buys the
+        /// Joe 10 with it (load the weights too).
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <param name="deposit">The dollars paid in.</param>
+        /// <returns>The transactions.</returns>
+        public static IReadOnlyList<TransactionMessage> Opening(Joe10State state, decimal deposit) => [Deposit(state, deposit)];
+
+        /// <summary>
+        /// Builds the jobs script: the schedule that rebalances the tenant, generating its orders at 3:45 pm in New York on
+        /// market days (while the trading switch is on).  Separate from the reference, so it can be added to a tenant that
+        /// already has its reference rows.
+        /// </summary>
+        /// <returns>The script.</returns>
+        public static LedgerScript Jobs() =>
+            new LedgerScript()
+                .Insert("JobSchedule", new JobScheduleDto { JobScheduleId = GenerateOrdersScheduleId, Job = "GenerateOrders", CronSchedule = "0 45 15 ? * MON-FRI", TimeZone = "America/New_York", Status = JobStatus.Scheduled, Description = "Rebalance: turn the proposed trades into orders, fifteen minutes before the close." });
+
+        /// <summary>
+        /// Builds a weights script: the Joe 10's weights at a close (each company's weight times the share in stocks) as the
+        /// Joe 10 model's weights; the rest stays in cash.  Load it once with script-loader; after that, each day, replace the
+        /// model's weights with it (<c>ledger-operator weights &lt;tenant&gt; joe10-weights.json</c>), which changes,
+        /// removes and adds rows to match.
+        /// </summary>
+        /// <param name="state">The Joe 10 at a close.</param>
+        /// <returns>The script.</returns>
+        public static LedgerScript Weights(Joe10State state)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            var script = new LedgerScript();
+            foreach (var holding in state.Holdings)
+            {
+                script.Insert("Weight", new WeightDto { ModelId = ModelId, AssetId = AssetIdOf(holding.Ticker), Fraction = Math.Round(holding.Weight * state.StockShare, 6, MidpointRounding.ToZero) });
             }
 
             return script;
         }
+
+        private static TransactionMessage Deposit(Joe10State state, decimal deposit)
+        {
+            var cash = new CashMovementEvent
+            {
+                AccountId = AccountId,
+                TradeDate = DateOnly.FromDateTime(state.Close.Date),
+                Method = CashMethod.Ach,
+                Items = [new ActivityItem(DollarId, deposit, deposit)],
+            };
+            return Transaction("deposit", EventMessages.From(cash, KeyFor("deposit"), EventSource.Simulator, "joe10-deposit", state.Close.AddHours(-6.5), state.Close));
+        }
+
+        private static TransactionMessage Transaction(string name, params EventMessage[] events) =>
+            new() { TransactionId = KeyFor($"transaction/{name}"), Events = events };
 
         /// <summary>
         /// The purchases that put the deposit into the Joe 10: each company's share of the stocks, in whole shares, rounded
         /// down.
         /// </summary>
         /// <param name="state">The Joe 10 at a close.</param>
-        /// <param name="deposit">The cash paid in, in dollars.</param>
+        /// <param name="deposit">The dollars paid in.</param>
         /// <returns>Each purchase.</returns>
         public static IReadOnlyList<(string Ticker, decimal Shares, decimal Price)> Purchases(Joe10State state, decimal deposit)
         {
@@ -182,11 +336,11 @@ namespace AtlasLedger.Client.TestData
         }
 
         /// <summary>
-        /// The security for a ticker.
+        /// The asset for a ticker.
         /// </summary>
         /// <param name="ticker">The ticker.</param>
-        /// <returns>The security's node ID.</returns>
-        public static Guid SecurityIdOf(string ticker) => KeyFor($"security/{ticker}");
+        /// <returns>The asset's node ID.</returns>
+        public static Guid AssetIdOf(string ticker) => KeyFor($"asset/{ticker}");
 
         // A name-based key (RFC 9562, version 8: SHA-256 of a fixed prefix and the name), so the same name always gives the
         // same key.

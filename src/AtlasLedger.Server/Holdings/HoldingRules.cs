@@ -4,127 +4,110 @@
 // <author>Donald Airey</author>
 namespace AtlasLedger.Server.Holdings
 {
+    using System;
     using System.Collections.Generic;
     using System.Linq;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using NRules.Fluent.Dsl;
 
     /// <summary>
-    /// The scheme of a security's ticker symbol, which the market feed prices.
+    /// Posts each account-activity event's items, unless the event is an override (posted while in force, below), has a
+    /// problem, or has been corrected (its correction stands instead).
     /// </summary>
-    public static class SymbolSchemes
+    [Name("Holdings.PostedLines")]
+    public sealed class PostedLinesRule : Rule
     {
-        /// <summary>The exchange ticker.</summary>
-        public const string Ticker = "Ticker";
+        /// <inheritdoc/>
+        public override void Define()
+        {
+            AccountActivityEvent activity = default!;
+            this.When()
+                .Match(() => activity, candidate => candidate.Envelope.Type != EventType.PositionOverride)
+                .Not<EventProblem>(problem => problem.EventId == activity.EventId)
+                .Not<CorrectionEvent>(correction => correction.Corrects == activity.EventId);
+            this.Then()
+                .Yield(_ => new PostedLines(activity.EventId, HoldingFold.Lines(activity)));
+        }
     }
 
     /// <summary>
-    /// A position override is in force from its effective time until it expires.
+    /// Posts an override's items while it is in force: from its effective time until it expires, by the rules' clock.
     /// </summary>
-    [Name("Holdings.PositionOverrideInForce")]
-    public sealed class PositionOverrideInForceRule : Rule
+    [Name("Holdings.PostedOverride")]
+    public sealed class PostedOverrideRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
             ClockFact clock = default!;
-            PositionOverrideFact item = default!;
-
+            PositionOverrideEvent overriding = default!;
             this.When()
                 .Match(() => clock)
-                .Match(() => item, candidate => HoldingFold.IsInForce(candidate.EffectiveTime, candidate.ExpiresTime, clock.Now));
+                .Match(() => overriding, candidate => HoldingFold.IsInForce(candidate.Envelope.EffectiveTime, candidate.ExpiresTime, clock.Now))
+                .Not<EventProblem>(problem => problem.EventId == overriding.EventId)
+                .Not<CorrectionEvent>(correction => correction.Corrects == overriding.EventId);
             this.Then()
-                .Yield(_ => new PositionOverrideInForce(item));
+                .Yield(_ => new PostedLines(overriding.EventId, HoldingFold.Lines(overriding)));
         }
     }
 
     /// <summary>
-    /// A price override is in force from its effective time until it expires.
+    /// A holding: every posted line for an account and an asset, folded in processing order.  Cash, stocks, funds, bonds,
+    /// options, futures and crypto alike.
     /// </summary>
-    [Name("Holdings.PriceOverrideInForce")]
-    public sealed class PriceOverrideInForceRule : Rule
-    {
-        /// <inheritdoc/>
-        public override void Define()
-        {
-            ClockFact clock = default!;
-            PriceOverrideFact item = default!;
-
-            this.When()
-                .Match(() => clock)
-                .Match(() => item, candidate => HoldingFold.IsInForce(candidate.EffectiveTime, candidate.ExpiresTime, clock.Now));
-            this.Then()
-                .Yield(_ => new PriceOverrideInForce(item));
-        }
-    }
-
-    /// <summary>
-    /// A holding: every event for an account and a security, folded in processing order.
-    /// </summary>
+    /// <remarks>
+    /// Starts from the lines, grouped by account and asset, so every join has a key and a holding exists only where a line
+    /// does.  Starting from "any account and any asset" made the network hold every pair of them and test each new line
+    /// against all of them: measured November 10, 200 seconds to load 200 accounts × 1,000 assets that way, 0.2 seconds
+    /// this way (and under a second for 500 × 2,000).
+    /// </remarks>
     [Name("Holdings.Position")]
     public sealed class PositionRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
+            IGrouping<(Guid AccountId, Guid AssetId), PostedLine> lines = default!;
             AccountFact account = default!;
-            SecurityFact security = default!;
-            IEnumerable<OpeningBalanceFact> openings = default!;
-            IEnumerable<TradeFact> trades = default!;
-            IEnumerable<SplitFact> splits = default!;
-            IEnumerable<PositionOverrideInForce> overrides = default!;
+            AssetFact asset = default!;
 
             this.When()
-                .Match(() => account)
-                .Match(() => security)
-                .Query(() => openings, query => query
-                    .Match<OpeningBalanceFact>(item => item.AccountId == account.AccountId, item => item.SecurityId == security.SecurityId)
-                    .Collect())
-                .Query(() => trades, query => query
-                    .Match<TradeFact>(item => item.AccountId == account.AccountId, item => item.SecurityId == security.SecurityId)
-                    .Collect())
-                .Query(() => overrides, query => query
-                    .Match<PositionOverrideInForce>(item => item.Override.AccountId == account.AccountId, item => item.Override.SecurityId == security.SecurityId)
-                    .Collect())
-                .Having(() => openings.Any() || trades.Any() || overrides.Any())
-                .Query(() => splits, query => query
-                    .Match<SplitFact>(item => item.SecurityId == security.SecurityId)
-                    .Collect());
+                .Query(() => lines, query => query
+                    .Match<PostedLines>()
+                    .SelectMany(posted => posted.Lines)
+                    .GroupBy(item => ValueTuple.Create(item.AccountId, item.AssetId)))
+                .Match(() => account, candidate => candidate.AccountId == lines.Key.AccountId)
+                .Match(() => asset, candidate => candidate.AssetId == lines.Key.AssetId);
             this.Then()
-                .Yield(_ => HoldingFold.Position(account.AccountId, security.SecurityId, openings, trades, splits, overrides.Select(item => item.Override)));
+                .Yield(_ => HoldingFold.Position(account, asset, lines));
         }
     }
 
     /// <summary>
-    /// An account's cash: its cash entries and the cash side of its trades.
+    /// A rate between two currencies: the latest price of one in the other, from the price table (a currency in itself is
+    /// 1, from the initial prices; between currencies, from the feed).  Nothing is inverted or chained: a rate is used only
+    /// as published.
     /// </summary>
-    [Name("Holdings.Cash")]
-    public sealed class CashRule : Rule
+    [Name("Holdings.CurrencyRate")]
+    public sealed class CurrencyRateRule : Rule
     {
         /// <inheritdoc/>
         public override void Define()
         {
-            AccountFact account = default!;
-            IEnumerable<CashEntryFact> entries = default!;
-            IEnumerable<TradeFact> trades = default!;
+            PriceFact price = default!;
 
             this.When()
-                .Match(() => account)
-                .Query(() => entries, query => query
-                    .Match<CashEntryFact>(item => item.AccountId == account.AccountId)
-                    .Collect())
-                .Query(() => trades, query => query
-                    .Match<TradeFact>(item => item.AccountId == account.AccountId)
-                    .Collect())
-                .Having(() => entries.Any() || trades.Any());
+                .Match(() => price, candidate => candidate.Scheme == SymbolScheme.Currency, candidate => candidate.Last > 0m);
             this.Then()
-                .Yield(_ => HoldingFold.Cash(account.AccountId, entries, trades));
+                .Yield(_ => new CurrencyRate(price.Code, price.Currency, price.Last));
         }
     }
 
     /// <summary>
-    /// The price of a security: an override in force, else the market's latest price for its ticker, else the price of
-    /// its last trade in any of the tenant's accounts.
+    /// The price of an asset, cash included, in its quote currency: the latest price published for any of its symbols in
+    /// that currency (a ticker's from the market feed; a currency's from the initial prices), else the price of its last
+    /// purchase or sale in any of the tenant's accounts.
     /// </summary>
     [Name("Holdings.Price")]
     public sealed class PriceRule : Rule
@@ -132,33 +115,50 @@ namespace AtlasLedger.Server.Holdings
         /// <inheritdoc/>
         public override void Define()
         {
-            SecurityFact security = default!;
-            IEnumerable<SymbolFact> tickers = default!;
+            AssetFact asset = default!;
+            IEnumerable<SymbolFact> symbols = default!;
             IEnumerable<PriceFact> markets = default!;
-            IEnumerable<PriceOverrideInForce> overrides = default!;
-            IEnumerable<TradeFact> trades = default!;
+            IEnumerable<PostedLines> exchanges = default!;
 
             this.When()
-                .Match(() => security)
-                .Query(() => tickers, query => query
-                    .Match<SymbolFact>(item => item.NodeId == security.SecurityId, item => item.Scheme == SymbolSchemes.Ticker)
+                .Match(() => asset)
+                .Query(() => symbols, query => query
+                    .Match<SymbolFact>(item => item.NodeId == asset.AssetId)
                     .Collect())
                 .Query(() => markets, query => query
-                    .Match<PriceFact>(item => item.Scheme == SymbolSchemes.Ticker, item => tickers.Any(ticker => ticker.Code == item.Code))
+                    .Match<PriceFact>(item => item.Currency == asset.QuoteCurrency, item => symbols.Any(symbol => symbol.Scheme == item.Scheme && symbol.Code == item.Code))
                     .Collect())
-                .Query(() => overrides, query => query
-                    .Match<PriceOverrideInForce>(item => item.Override.SecurityId == security.SecurityId)
+                .Query(() => exchanges, query => query
+                    .Match<PostedLines>(item => item.Lines.Any(line => line.AssetId == asset.AssetId && HoldingFold.Exchanges.Contains(line.Kind)))
                     .Collect())
-                .Query(() => trades, query => query
-                    .Match<TradeFact>(item => item.SecurityId == security.SecurityId)
-                    .Collect())
-                .Having(() => markets.Any(market => market.Last > 0m) || overrides.Any() || trades.Any());
+                .Having(() => markets.Any(market => market.Last > 0m) || exchanges.Any());
             this.Then()
                 .Yield(_ => HoldingFold.Price(
-                    security.SecurityId,
-                    overrides.Select(item => item.Override),
+                    asset,
                     markets.Where(market => market.Last > 0m).OrderByDescending(market => market.AsOf).FirstOrDefault(),
-                    trades)!);
+                    exchanges.SelectMany(posted => posted.Lines).Where(line => line.AssetId == asset.AssetId && HoldingFold.Exchanges.Contains(line.Kind)))!);
+        }
+    }
+
+    /// <summary>
+    /// An account's net contributions: its deposits less its withdrawals, from the posted lines grouped by account.
+    /// </summary>
+    [Name("Holdings.AccountFlow")]
+    public sealed class AccountFlowRule : Rule
+    {
+        /// <inheritdoc/>
+        public override void Define()
+        {
+            IGrouping<Guid, PostedLine> lines = default!;
+
+            this.When()
+                .Query(() => lines, query => query
+                    .Match<PostedLines>()
+                    .SelectMany(posted => posted.Lines)
+                    .Where(item => item.Kind == EventType.CashMovement)
+                    .GroupBy(item => item.AccountId));
+            this.Then()
+                .Yield(_ => new AccountFlow(lines.Key, lines.Sum(item => item.Amount ?? 0m)));
         }
     }
 }

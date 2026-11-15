@@ -7,6 +7,8 @@ namespace AtlasLedger.Client.Api
     using System;
     using System.Collections.Generic;
     using System.Globalization;
+    using System.IO;
+    using System.Runtime.CompilerServices;
     using System.Linq;
     using System.Net;
     using System.Net.Http;
@@ -109,6 +111,75 @@ namespace AtlasLedger.Client.Api
             await this.SendAsync<List<Guid>>(HttpMethod.Get, "v1/me/tenants", null, cancellationToken).ConfigureAwait(false) ?? new List<Guid>();
 
         /// <summary>
+        /// Turns a tenant's proposed allocations into orders now, as the scheduled run would.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What was written.  The server answers 409, with the reason, when nothing could be.</returns>
+        public async Task<GeneratedOrders> GenerateOrdersAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<GeneratedOrders>(HttpMethod.Post, $"v1/tenants/{tenantId}/orders/generate", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned nothing.");
+
+        /// <summary>
+        /// Gets where a tenant's scheduled jobs stand.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The jobs the server has and the tenant's schedules' states.</returns>
+        public async Task<TenantJobs> GetJobsAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantJobs>(HttpMethod.Get, $"v1/tenants/{tenantId}/jobs", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no jobs.");
+
+        /// <summary>
+        /// Gets one row of a table, by its key.
+        /// </summary>
+        /// <typeparam name="T">The table's DTO.</typeparam>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="table">The table.</param>
+        /// <param name="key">The row's key, as it appears in its route.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The row.</returns>
+        public async Task<T> GetAsync<T>(Guid tenantId, string table, string key, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<T>(HttpMethod.Get, $"{TablePath(tenantId, table)}/{Uri.EscapeDataString(key)}", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"The server returned no {table} {key}.");
+
+        /// <summary>
+        /// Asks for a task to run now, by inserting a JobRun row as Requested, and waits until it has ended or been refused.
+        /// The run stays in the tenant's log, with its outcome.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="job">The task's key.</param>
+        /// <param name="timeout">How long to wait for it to end.</param>
+        /// <param name="cancellationToken">Cancels the wait (not the run).</param>
+        /// <returns>The run as it ended (or as it stood at the timeout).</returns>
+        public async Task<JobRunDto> RunJobAsync(Guid tenantId, string job, TimeSpan timeout, CancellationToken cancellationToken = default)
+        {
+            var id = Guid.CreateVersion7();
+            await this.InsertAsync(tenantId, "JobRun", new JobRunDto { JobRunId = id, Job = job, Reason = JobRunReason.Hand, Status = JobRunStatus.Requested, RequestedTime = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+            var deadline = DateTimeOffset.UtcNow + timeout;
+            while (true)
+            {
+                var run = await this.GetAsync<JobRunDto>(tenantId, "JobRun", id.ToString(), cancellationToken).ConfigureAwait(false);
+                if (run.Status is not (JobRunStatus.Requested or JobRunStatus.Running) || DateTimeOffset.UtcNow >= deadline)
+                {
+                    return run;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Gets the state of a tenant's orders, from the rules' latest snapshot.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The orders.  The server answers 409 while the rules engine hasn't run for the tenant.</returns>
+        public async Task<TenantOrders> GetOrdersAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantOrders>(HttpMethod.Get, $"v1/tenants/{tenantId}/orders", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no orders.");
+
+        /// <summary>
         /// Gets what a tenant's events add up to: its holdings and cash, from the rules' latest snapshot.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
@@ -117,6 +188,17 @@ namespace AtlasLedger.Client.Api
         public async Task<TenantHoldings> GetHoldingsAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
             await this.SendAsync<TenantHoldings>(HttpMethod.Get, $"v1/tenants/{tenantId}/holdings", null, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The server returned no holdings.");
+
+        /// <summary>
+        /// Gets each account's performance: statistics measured from its daily returns, and its days if asked for.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="days">Whether to include each day.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The statistics.  The server answers 409 while the rules haven't run for the tenant.</returns>
+        public async Task<TenantStatistics> GetStatisticsAsync(Guid tenantId, bool days = false, CancellationToken cancellationToken = default) =>
+            await this.SendAsync<TenantStatistics>(HttpMethod.Get, $"v1/tenants/{tenantId}/statistics?days={(days ? "true" : "false")}", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no statistics.");
 
         /// <summary>
         /// Lists a table's rows in a tenant.
@@ -236,6 +318,116 @@ namespace AtlasLedger.Client.Api
         public async Task<ServiceState> SetServiceAsync(string name, bool isOn, TimeSpan? duration = null, CancellationToken cancellationToken = default) =>
             (await this.SendAsync<ServiceState>(HttpMethod.Put, $"{ServicesPath}/{Uri.EscapeDataString(name)}", new { isOn, duration }, cancellationToken).ConfigureAwait(false))!;
 
+        /// <summary>
+        /// Sends one transaction to a tenant's event log: every event committed, or none.  Sending it again is a no-op.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transaction">The transaction.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of it, once durable: committed, already committed, or refused with every problem.</returns>
+        public async Task<TransactionResult> SendTransactionAsync(Guid tenantId, TransactionMessage transaction, CancellationToken cancellationToken = default)
+        {
+            using var request = await this.CreateRequestAsync(HttpMethod.Post, EventsPath(tenantId), cancellationToken).ConfigureAwait(false);
+            request.Content = new StringContent(JsonSerializer.Serialize(transaction, EventMessages.Options), Encoding.UTF8, "application/json");
+            using var response = await this.httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity && text.Length > 0)
+            {
+                return JsonSerializer.Deserialize<TransactionResult>(text, EventMessages.Options)!;
+            }
+
+            throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Post, EventsPath(tenantId), response, text), text.Length == 0 ? null : text);
+        }
+
+        /// <summary>
+        /// Sends transactions to a tenant's event log as one stream (JSON Lines): each committed or refused by itself, in
+        /// order.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transactions">The transactions.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of each, in order, once durable.</returns>
+        public async Task<IReadOnlyList<TransactionResult>> SendTransactionsAsync(Guid tenantId, IEnumerable<TransactionMessage> transactions, CancellationToken cancellationToken = default)
+        {
+            var body = new StringBuilder();
+            foreach (var transaction in transactions)
+            {
+                body.Append(EventMessages.WriteLine(transaction)).Append('\n');
+            }
+
+            using var request = await this.CreateRequestAsync(HttpMethod.Post, EventsPath(tenantId), cancellationToken).ConfigureAwait(false);
+            request.Content = new StringContent(body.ToString(), Encoding.UTF8, EventMessages.StreamMediaType);
+            using var response = await this.httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Post, EventsPath(tenantId), response, text), text.Length == 0 ? null : text);
+            }
+
+            return text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => JsonSerializer.Deserialize<TransactionResult>(line, EventMessages.Options)!)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// Sends transactions in streams of at most a few hundred and checks that each was committed (now or before).
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="transactions">The transactions, in order.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>What became of each.</returns>
+        /// <exception cref="InvalidOperationException">A transaction was refused: its problems, and those of any other refused (the rest were committed).</exception>
+        public async Task<IReadOnlyList<TransactionResult>> CommitTransactionsAsync(Guid tenantId, IEnumerable<TransactionMessage> transactions, CancellationToken cancellationToken = default)
+        {
+            const int StreamSize = 500;
+            var results = new List<TransactionResult>();
+            foreach (var chunk in transactions.Chunk(StreamSize))
+            {
+                results.AddRange(await this.SendTransactionsAsync(tenantId, chunk, cancellationToken).ConfigureAwait(false));
+            }
+
+            var refused = results.Where(result => result.Status == TransactionStatus.Refused).ToArray();
+            if (refused.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"{refused.Length} transaction(s) refused:" + string.Concat(refused.Select(result => $"{Environment.NewLine}  {result.TransactionId}: {string.Join("; ", result.Problems)}")));
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Reads a tenant's event log as transactions, in order: every durable transaction after a sequence and, when
+        /// following, each new one as it becomes durable, until cancelled.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="after">The sequence already read (0: from the start).</param>
+        /// <param name="follow">Whether to keep reading new transactions.</param>
+        /// <param name="cancellationToken">Ends the read.</param>
+        /// <returns>The transactions.</returns>
+        public async IAsyncEnumerable<TransactionMessage> ReadTransactionsAsync(Guid tenantId, long after = 0, bool follow = false, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var path = $"{EventsPath(tenantId)}?after={after}&follow={(follow ? "true" : "false")}";
+            using var request = await this.CreateRequestAsync(HttpMethod.Get, path, cancellationToken).ConfigureAwait(false);
+            using var response = await this.httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                throw new LedgerApiException(response.StatusCode, Describe(HttpMethod.Get, path, response, text), text.Length == 0 ? null : text);
+            }
+
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), Encoding.UTF8);
+            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+            {
+                if (line.Length > 0)
+                {
+                    yield return EventMessages.ReadLine(line);
+                }
+            }
+        }
+
+        private static string EventsPath(Guid tenantId) => $"v1/tenants/{tenantId}/events";
+
         private static string TablePath(Guid tenantId, string table) => $"v1/tenants/{tenantId}/{RouteSegment(table)}";
 
         /// <summary>
@@ -260,9 +452,9 @@ namespace AtlasLedger.Client.Api
         private static string RowPath(Guid tenantId, string table, object[] key) =>
             $"{TablePath(tenantId, table)}/{string.Join("/", key.Select(column => Uri.EscapeDataString(Convert.ToString(column, CultureInfo.InvariantCulture) ?? string.Empty)))}";
 
-        private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        private async Task<HttpRequestMessage> CreateRequestAsync(HttpMethod method, string path, CancellationToken cancellationToken)
         {
-            using var request = new HttpRequestMessage(method, path);
+            var request = new HttpRequestMessage(method, path);
             Ledger.AddContractHeaders(request.Headers);
             if (this.caller != null)
             {
@@ -274,6 +466,12 @@ namespace AtlasLedger.Client.Api
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await this.accessToken(cancellationToken).ConfigureAwait(false));
             }
 
+            return request;
+        }
+
+        private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+        {
+            using var request = await this.CreateRequestAsync(method, path, cancellationToken).ConfigureAwait(false);
             if (body != null)
             {
                 request.Content = JsonContent.Create(body, body.GetType(), options: SerializerOptions);

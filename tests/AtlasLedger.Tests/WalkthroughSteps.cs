@@ -40,7 +40,14 @@ namespace AtlasLedger.Tests
             using var output = new StringWriter();
             var passed = true;
             var (firmA, firmB, firmC) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-            await Commands.ServicesAsync(operatorApi, "on", Array.Empty<string>(), TimeSpan.FromMinutes(15), output, cancellationToken);
+            // Turn on only what is off, and turn off afterwards only what was turned on here: a service the server started on
+            // (the rules engine, by default) stays on.
+            var wereOff = (await operatorApi.GetServicesAsync(cancellationToken)).Where(service => !service.IsOn).Select(service => service.Name).ToList();
+            if (wereOff.Count > 0)
+            {
+                await Commands.ServicesAsync(operatorApi, "on", wereOff, TimeSpan.FromMinutes(15), output, cancellationToken);
+            }
+
             try
             {
                 await Commands.LoadAsync(loader, firmA, SampleData.FirmA, output, cancellationToken);
@@ -65,7 +72,10 @@ namespace AtlasLedger.Tests
             }
             finally
             {
-                await Commands.ServicesAsync(operatorApi, "off", Array.Empty<string>(), null, output, CancellationToken.None);
+                if (wereOff.Count > 0)
+                {
+                    await Commands.ServicesAsync(operatorApi, "off", wereOff, null, output, CancellationToken.None);
+                }
             }
 
             return (passed, output.ToString());

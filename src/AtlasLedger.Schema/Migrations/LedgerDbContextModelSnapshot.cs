@@ -17,7 +17,7 @@ namespace AtlasLedger.Schema.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -30,8 +30,26 @@ namespace AtlasLedger.Schema.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("AccountRole")
+                        .HasColumnType("int");
+
                     b.Property<int>("AccountType")
                         .HasColumnType("int");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<string>("ExternalAccountId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("InstitutionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ModelId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
@@ -40,34 +58,6 @@ namespace AtlasLedger.Schema.Migrations
                         .HasName("PK_Account");
 
                     b.ToTable("Account", "dbo");
-                });
-
-            modelBuilder.Entity("AtlasLedger.Model.Schema.AccountConnection", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AccountConnectionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ExternalAccountId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.HasKey("TenantId", "AccountConnectionId")
-                        .HasName("PK_AccountConnection");
-
-                    b.ToTable("AccountConnection", "dbo");
                 });
 
             modelBuilder.Entity("AtlasLedger.Model.Schema.Alert", b =>
@@ -100,55 +90,102 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Alert", "dbo");
                 });
 
-            modelBuilder.Entity("AtlasLedger.Model.Schema.CashEntry", b =>
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Asset", b =>
                 {
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("CashEntryId")
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AssetType")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("PriceFactor")
+                        .HasPrecision(19, 6)
+                        .HasColumnType("decimal(19,6)");
+
+                    b.Property<decimal>("QuantityFactor")
+                        .HasPrecision(19, 6)
+                        .HasColumnType("decimal(19,6)");
+
+                    b.Property<string>("QuoteCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Asset");
+
+                    b.ToTable("Asset", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Brokerage", b =>
+                {
+                    b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("decimal(19,4)");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<int>("Kind")
+                    b.Property<int>("BrokerageType")
                         .HasColumnType("int");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
 
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
-                    b.Property<Guid?>("SecurityId")
+                    b.HasKey("TenantId", "AccountId")
+                        .HasName("PK_Brokerage");
+
+                    b.ToTable("Brokerage", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Cash", b =>
+                {
+                    b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("Source")
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CashType")
                         .HasColumnType("int");
 
-                    b.Property<string>("SourceId")
+                    b.Property<string>("CurrencyCode")
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
 
-                    b.Property<long?>("SourceSequence")
+                    b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
-                    b.HasKey("TenantId", "CashEntryId")
-                        .HasName("PK_CashEntry");
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Cash");
 
-                    b.ToTable("CashEntry", "dbo");
+                    b.ToTable("Cash", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Crypto", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CryptoType")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Crypto");
+
+                    b.ToTable("Crypto", "dbo");
                 });
 
             modelBuilder.Entity("AtlasLedger.Model.Schema.Dossier", b =>
@@ -188,6 +225,262 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Edge", "dbo");
                 });
 
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Equity", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EquityType")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Equity");
+
+                    b.ToTable("Equity", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Event", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CausationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CorrelationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("EffectiveTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<DateTimeOffset>("EnteredTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<long?>("SourceSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("TransactionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("TenantId", "EventId")
+                        .HasName("PK_Event");
+
+                    b.ToTable("Event", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.FixedIncome", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("CouponRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<int>("FixedIncomeType")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly?>("MaturityDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_FixedIncome");
+
+                    b.ToTable("FixedIncome", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Fund", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("FundType")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Fund");
+
+                    b.ToTable("Fund", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Future", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("ExpirationDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("FutureType")
+                        .HasColumnType("int");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("UnderlyingAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Future");
+
+                    b.ToTable("Future", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Institution", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InstitutionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.HasKey("TenantId", "InstitutionId")
+                        .HasName("PK_Institution");
+
+                    b.ToTable("Institution", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.JobRun", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("JobRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("EndTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("Job")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("JobScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("Reason")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("RequestedTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("StartTime")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("TenantId", "JobRunId")
+                        .HasName("PK_JobRun");
+
+                    b.ToTable("JobRun", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.JobSchedule", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("JobScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CronSchedule")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Job")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StopSchedule")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("TimeZone")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("TenantId", "JobScheduleId")
+                        .HasName("PK_JobSchedule");
+
+                    b.ToTable("JobSchedule", "dbo");
+                });
+
             modelBuilder.Entity("AtlasLedger.Model.Schema.LedgerWatermark", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -223,6 +516,32 @@ namespace AtlasLedger.Schema.Migrations
                         .HasName("PK_Member");
 
                     b.ToTable("Member", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Model", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Band")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "ModelId")
+                        .HasName("PK_Model");
+
+                    b.ToTable("Model", "dbo");
                 });
 
             modelBuilder.Entity("AtlasLedger.Model.Schema.Node", b =>
@@ -261,59 +580,37 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Node", "dbo");
                 });
 
-            modelBuilder.Entity("AtlasLedger.Model.Schema.OpeningBalance", b =>
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Option", b =>
                 {
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("OpeningBalanceId")
+                    b.Property<Guid>("AssetId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<int>("ExerciseStyle")
+                        .HasColumnType("int");
 
-                    b.Property<DateTimeOffset?>("AcquiredTime")
-                        .HasColumnType("datetimeoffset(7)");
+                    b.Property<DateOnly>("ExpirationDate")
+                        .HasColumnType("date");
 
-                    b.Property<decimal?>("CostBasis")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("decimal(19,4)");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<decimal>("Quantity")
-                        .HasPrecision(19, 6)
-                        .HasColumnType("decimal(19,6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                    b.Property<int>("OptionRight")
+                        .HasColumnType("int");
 
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
-                    b.Property<Guid>("SecurityId")
+                    b.Property<decimal>("StrikePrice")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid>("UnderlyingAssetId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
+                    b.HasKey("TenantId", "AssetId")
+                        .HasName("PK_Option");
 
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SourceSequence")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("TenantId", "OpeningBalanceId")
-                        .HasName("PK_OpeningBalance");
-
-                    b.ToTable("OpeningBalance", "dbo");
+                    b.ToTable("Option", "dbo");
                 });
 
             modelBuilder.Entity("AtlasLedger.Model.Schema.Person", b =>
@@ -336,174 +633,6 @@ namespace AtlasLedger.Schema.Migrations
                         .HasName("PK_Person");
 
                     b.ToTable("Person", "dbo");
-                });
-
-            modelBuilder.Entity("AtlasLedger.Model.Schema.PositionOverride", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PositionOverrideId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("ExpiresTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<decimal>("Quantity")
-                        .HasPrecision(19, 6)
-                        .HasColumnType("decimal(19,6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("SecurityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SourceSequence")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("TenantId", "PositionOverrideId")
-                        .HasName("PK_PositionOverride");
-
-                    b.ToTable("PositionOverride", "dbo");
-                });
-
-            modelBuilder.Entity("AtlasLedger.Model.Schema.PriceOverride", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PriceOverrideId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("ExpiresTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<decimal>("Price")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("SecurityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SourceSequence")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("TenantId", "PriceOverrideId")
-                        .HasName("PK_PriceOverride");
-
-                    b.ToTable("PriceOverride", "dbo");
-                });
-
-            modelBuilder.Entity("AtlasLedger.Model.Schema.Security", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("SecurityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("SecurityType")
-                        .HasColumnType("int");
-
-                    b.HasKey("TenantId", "SecurityId")
-                        .HasName("PK_Security");
-
-                    b.ToTable("Security", "dbo");
-                });
-
-            modelBuilder.Entity("AtlasLedger.Model.Schema.Split", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("SplitId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Denominator")
-                        .HasPrecision(19, 6)
-                        .HasColumnType("decimal(19,6)");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<decimal>("Numerator")
-                        .HasPrecision(19, 6)
-                        .HasColumnType("decimal(19,6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("SecurityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SourceSequence")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("TenantId", "SplitId")
-                        .HasName("PK_Split");
-
-                    b.ToTable("Split", "dbo");
                 });
 
             modelBuilder.Entity("AtlasLedger.Model.Schema.Symbol", b =>
@@ -531,69 +660,6 @@ namespace AtlasLedger.Schema.Migrations
                     b.ToTable("Symbol", "dbo");
                 });
 
-            modelBuilder.Entity("AtlasLedger.Model.Schema.Trade", b =>
-                {
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("TradeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("EffectiveTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<DateTimeOffset>("EnteredTime")
-                        .HasColumnType("datetimeoffset(7)");
-
-                    b.Property<decimal>("Fees")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("decimal(19,4)");
-
-                    b.Property<decimal>("NetAmount")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("decimal(19,4)");
-
-                    b.Property<decimal>("Price")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<decimal>("Quantity")
-                        .HasPrecision(19, 6)
-                        .HasColumnType("decimal(19,6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("SecurityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Side")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Source")
-                        .HasColumnType("int");
-
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long?>("SourceSequence")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("TenantId", "TradeId")
-                        .HasName("PK_Trade");
-
-                    b.ToTable("Trade", "dbo");
-                });
-
             modelBuilder.Entity("AtlasLedger.Model.Schema.User", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -619,6 +685,30 @@ namespace AtlasLedger.Schema.Migrations
                         .HasName("PK_User");
 
                     b.ToTable("User", "dbo");
+                });
+
+            modelBuilder.Entity("AtlasLedger.Model.Schema.Weight", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Fraction")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("TenantId", "ModelId", "AssetId")
+                        .HasName("PK_Weight");
+
+                    b.ToTable("Weight", "dbo");
                 });
 #pragma warning restore 612, 618
         }

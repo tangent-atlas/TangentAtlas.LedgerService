@@ -1,11 +1,15 @@
-// <copyright file="ComplianceRules.cs" company="Tangent Atlas">
+﻿// <copyright file="ComplianceRules.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
 namespace AtlasLedger.Server.Compliance
 {
     using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Holdings;
     using NRules;
     using NRules.Fluent;
     using NRules.Fluent.Dsl;
@@ -23,7 +27,7 @@ namespace AtlasLedger.Server.Compliance
         /// <summary>
         /// The scheme of a custodian's account number.
         /// </summary>
-        public const string Custodian = "Custodian";
+        public const string Custodian = SymbolScheme.Custodian;
 
         /// <summary>
         /// The rule that every account has a custodian account number.

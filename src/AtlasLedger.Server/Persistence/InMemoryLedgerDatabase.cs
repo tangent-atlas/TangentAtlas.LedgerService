@@ -87,6 +87,21 @@ namespace AtlasLedger.Server.Persistence
                 Apply(tables["Symbol"], cut.ChangedSymbols, cut.DeletedSymbols, dto => $"{dto.Scheme}/{dto.Code}");
                 Apply(tables["User"], cut.ChangedUsers, cut.DeletedUsers, dto => dto.UserId.ToString());
                 Apply(tables["Member"], cut.ChangedMembers, cut.DeletedMembers, dto => dto.UserId.ToString());
+                Apply(tables["Asset"], cut.ChangedAssets, cut.DeletedAssets, dto => dto.AssetId.ToString());
+                Apply(tables["Cash"], cut.ChangedCashes, cut.DeletedCashes, dto => dto.AssetId.ToString());
+                Apply(tables["Crypto"], cut.ChangedCryptos, cut.DeletedCryptos, dto => dto.AssetId.ToString());
+                Apply(tables["Equity"], cut.ChangedEquities, cut.DeletedEquities, dto => dto.AssetId.ToString());
+                Apply(tables["FixedIncome"], cut.ChangedFixedIncomes, cut.DeletedFixedIncomes, dto => dto.AssetId.ToString());
+                Apply(tables["Fund"], cut.ChangedFunds, cut.DeletedFunds, dto => dto.AssetId.ToString());
+                Apply(tables["Future"], cut.ChangedFutures, cut.DeletedFutures, dto => dto.AssetId.ToString());
+                Apply(tables["Option"], cut.ChangedOptions, cut.DeletedOptions, dto => dto.AssetId.ToString());
+                Apply(tables["Institution"], cut.ChangedInstitutions, cut.DeletedInstitutions, dto => dto.InstitutionId.ToString());
+                Apply(tables["Brokerage"], cut.ChangedBrokerages, cut.DeletedBrokerages, dto => dto.AccountId.ToString());
+                Apply(tables["Model"], cut.ChangedModels, cut.DeletedModels, dto => dto.ModelId.ToString());
+                Apply(tables["Weight"], cut.ChangedWeights, cut.DeletedWeights, dto => $"{dto.ModelId}/{dto.AssetId}");
+                Apply(tables["JobSchedule"], cut.ChangedJobSchedules, cut.DeletedJobSchedules, dto => dto.JobScheduleId.ToString());
+                Apply(tables["JobRun"], cut.ChangedJobRuns, cut.DeletedJobRuns, dto => dto.JobRunId.ToString());
+                Apply(tables["Event"], cut.ChangedEvents, cut.DeletedEvents, dto => dto.EventId.ToString());
                 this.watermarks[cut.TenantId] = Math.Max(cut.Sequence, this.watermarks.GetValueOrDefault(cut.TenantId));
                 this.CutCount++;
             }

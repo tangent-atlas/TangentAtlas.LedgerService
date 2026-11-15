@@ -52,21 +52,179 @@ runs only in the Development environment, with development sign-in. The programs
 
 ## Services: on while you work, off otherwise
 
-The base system (the API, persistence, and recovery) always runs.  The services on top of it, the market feed and
-compliance, run only while switched on, and every switch starts off, so an idle server does no work and its database
-can pause.  A service turned on stays on for four hours unless told otherwise (at most 24), then turns itself off.
+The base system (the API, persistence, and recovery) always runs.  The services on top of it (the market feed, market
+history, the rules engine, the broker and trading) run only while switched on.  `Services:StartOn` names those on when the server starts (on until turned
+off): by default `rules`; empty (`Services__StartOn=`) starts everything off, for diagnostics.  A service turned on
+through the API stays on for four hours unless told otherwise (at most 24).  No engine, no rules: holdings, prices and
+compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
+on rebuilds them from the log.
+
+The rules propose, continuously, the trades each account's model calls for; nothing is ordered until a scheduled
+`GenerateOrders` job or an operator (`ledger-operator trade <tenant>`) turns the proposals into orders.  The `trading`
+switch stops the whole system's scheduled order generation: while it is off, a scheduled run does nothing.  The `broker`
+service is the order router: it sends broker orders to their brokers and records what they report; nothing is sent to a
+broker while it is off.  Both start off unless `Services:StartOn` names them.  To run an account that trades itself every
+market day against the simulated broker: `Services__StartOn=rules,market-feed,trading,broker`, and load
+`joe10-jobs.json` from the test data.
 
 ```
 dotnet run --project src/AtlasLedger.Operator -- services                  # which are on, and until when
 dotnet run --project src/AtlasLedger.Operator -- services on               # all, for four hours
-dotnet run --project src/AtlasLedger.Operator -- services on compliance --for 1.5
+dotnet run --project src/AtlasLedger.Operator -- services on rules --for 1.5
 dotnet run --project src/AtlasLedger.Operator -- services off              # all
 ```
 
 With `ledger-client.json` in place the operator reaches the server in Azure; `--server` (or `ATLAS_LEDGER_SERVER`) names
-another.  The walkthrough turns the services on and off again when it finishes.  The API is `v1/system/services`, the
-one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage` application permission (the
-operator console, not the script loader) may use it, and anyone else signed in gets 404.
+another.  The walkthrough turns on the services that are off, and off again only those, when it finishes.  The API is
+`v1/system/services`, the one route outside a tenant: only an allowed tool acting as itself with the `Services.Manage`
+application permission (the operator console, not the script loader) may use it, and anyone else signed in gets 404.
+
+## Paper accounts: history at the closes, and statistics
+
+A paper account is an account at the simulated broker (an institution whose `Source` is `Simulator`).  For the paper game
+it runs on daily closes, not a live feed:
+
+- **Market history** (the `market-history` service): for each tenant's US tickers, the closes from a week before its first
+  event, its dividends and splits (EODHD), and the risk-free rate (the 13-week Treasury bill's coupon equivalent, from the
+  Treasury's daily bill rates); then each market day after 4:30 pm New York.  The vendor is asked once per ticker for what
+  no tenant has yet.  They are ephemeral tables (`ClosingPrice`, `Dividend`, `Split`, `InterestRate`): never persisted,
+  reloaded at startup.  The latest close is also each ticker's price, unless a live feed has priced it since.  The EODHD
+  token is a secret: `MarketHistory__EodhdApiToken` in the environment (or user secrets, or Key Vault), never in a file.
+- **Fills at the close:** with `Broker__SimulatedFills=AtNextClose`, the simulated broker fills a market order at the close
+  of the market day it was placed before (after the close, the next day's), once that close is loaded.
+- **Dividends and splits:** the rules credit a paper account with each dividend and split of a stock it held at the close
+  before the ex-date, as events from the paper broker (`Income`, `ReceiveAndDeliver` with reason `Split`), recorded once.
+  Accounts at real brokers get theirs from the broker.
+- **History and statistics:** the rules value every account at every close loaded and measure its daily returns, with
+  deposits and withdrawals taken out (time-weighted): value, net flows, total and annualized return, volatility, worst
+  drawdown, and the Sharpe ratio (mean daily return over the bill's daily rate, ÷ its standard deviation, × √252).  An
+  account is ranked after 20 returns.  `GET v1/tenants/{tenantId}/statistics[?days=true]`;
+  `ledger-operator statistics <tenant> [--days]`.
+
+```
+MarketHistory__EodhdApiToken=<token> Broker__SimulatedFills=AtNextClose \
+  Services__StartOn=rules,market-history,trading,broker dotnet run --project src/AtlasLedger.Server
+```
+
+### The paper account in the website, on this computer
+
+To see the Joe 10 live in TangentAtlas.Web as the test person (ledger-tester@tangentatlas.com), with real sign-in and
+nothing deployed:
+
+```
+# once, from TangentAtlas.Platform: the Website gets Ledger.Read and a development certificate
+.\Deploy-EntraApplications.ps1 -ConfigPath .\Config.Production.psd1 -SkipWebApp
+
+# the ledger, with real sign-in, market history and fills at the close, kept in this computer's SQL Server (it applies
+# the migrations first; -InMemory instead).  The EODHD token: EODHD_API_TOKEN if set, else asked for once and kept
+# encrypted for you in %APPDATA%\TangentAtlas\eodhd-token.xml
+.\tools\Start-LocalLedger.ps1 -MarketHistory
+
+# in another window: the Joe 10 in its tenant, and the test person as its user (a browser opens: sign in as them)
+.\tools\Set-Joe10.ps1 -SignOut
+```
+
+Then run the website and sign in as the test person.  The Joe 10 is the forward test's: `state\joe10.json` in
+TangentAtlas.ForwardTest, cloned beside this repository (`repos\tangent-atlas\TangentAtlas.ForwardTest`; another place
+with `-StatePath`).  `-Production` loads it into the ledger in Azure instead, for the website there.
+
+## The event log
+
+Every input is an event in one table, `Event`, and nothing in it is ever changed or deleted.  An event is its kind
+(`EventType`, a fixed number), its payload's version (`SchemaVersion`), and the payload itself: the kind's own fields as
+JSON.  The other columns are the same for every kind: who sent it (`Source`, `SourceId`, idempotent together, so a replayed
+message is recorded once), when it happened and was recorded, what it belongs to (`CorrelationId`: an order, through its
+replace chain) and what caused it (`CausationId`).  Its `RowVersion` (each row written takes the next number) orders the log, and `TransactionId` groups it: a transaction's events are contiguous.  The kinds
+and their payloads are C# records in `src/TangentAtlas/Events.cs`; `EventCodec` writes and reads them.
+
+- **Account activity** changes holdings: opening balance, cash movement, trade, income, fee, receive-and-deliver, journal
+  (between two accounts), adjustment, position override (sets holdings until it expires), and correction (what an earlier
+  event should have been; the earlier one stops counting).  Its items are its effects: asset, signed quantity, signed
+  amount, and optionally the price, opening or closing, and fee type.  Cash is an asset like any other.  A trade must
+  balance (its amounts sum to zero); a movement across the books' edge, such as a deposit, has its other side outside them.
+- **Order events** change no holdings: an order placed (one or more legs, each an asset, an instruction and each account's
+  share; optionally linked to other orders, one-cancels-other or one-triggers-other), an order replacing another, a cancel
+  request, a broker order sent, and the broker's answers (accepted, a fill, cancelled, rejected, expired).
+
+Everything else is derived by the rules, never stored: holdings (folded from account-activity items, and from fills of our
+own orders divided among accounts by the published allocation rule), order and broker-order states, prices.  An event that
+can't be read, names an account or asset that doesn't exist, or doesn't balance stays in the log, is left out of what is
+derived, and is listed under `Problems` in the holdings (and by `ledger-operator holdings`) until a correction fixes it.
+
+### Sending and reading events: transactions
+
+Events go in, and come out, as **transactions**: one or more events committed or refused as a unit, keyed by a
+`transactionId` the sender supplies.  One resource does both, `v1/tenants/{tenantId}/events`, in one shape: a transaction
+is `{ "transactionId", "events": [ { "eventId", "eventType", "schemaVersion", "source", "sourceId", "sourceSequence",
+"effectiveTime", "enteredTime", "correlationId", "causationId", "payload": { ... } } ] }`, the payload nested JSON in the
+kind's own fields (IDs, not tickers).  `EventMessages` (in `src/TangentAtlas/EventMessages.cs`) writes and reads it.
+
+- **`POST`, `application/json`**: one transaction.  It is checked whole under the tenant's lock: every payload reads as
+  its kind; 1 to 1,000 events; no event ID or source ID twice; the accounts and assets it names exist; a trade balances;
+  what it corrects, replaces, cancels or answers is in the log or earlier in the same transaction.  Then every event is
+  written, or none.  The answer waits until the commit is durable: 200 `Committed` (or `AlreadyCommitted`: the same
+  transaction sent again), 409 when its key or one of its events was already used for something else, 422 listing every
+  problem.
+- **`POST`, `application/x-ndjson`** (JSON Lines): one transaction per line, each committed or refused by itself; one
+  answer line per transaction, with its line number, sent once durable.  For loading many.
+- **`GET`, `application/x-ndjson`**: the log as transactions, one per line, each event with its `sequence`; `?after=n`
+  reads only what came later, `&follow=true` keeps the response open and sends each transaction as it becomes durable.
+  An event written through the table API, without a transaction, reads as a transaction by itself.
+
+`script-loader` takes a transaction script (a JSON array of transactions, or a `.jsonl` file) as readily as a table
+script, and loading one again changes nothing.  `ledger-operator events <tenant> --json` writes the log as JSON Lines,
+which load as they are; `--follow` keeps showing new transactions.  The server's own writers use transactions too: each
+order-generator run is one, and so is each batch of a broker order's answers.
+
+## Jobs
+
+A job is a class with a `[Job("key")]` attribute (`src/AtlasLedger.Server/Jobs`), of one of two kinds:
+
+- a **task** (`ITenantJob`) runs to completion, such as `GenerateOrders`;
+- a **service** (`ITenantService`) runs until stopped, such as a stream of a customer's prices.  One that ends or fails
+  while it should be on is started again after `Jobs:RestartDelay` (30 seconds).
+
+The server finds them at start-up; two with one key, or a class that is neither kind, stop it starting.  Each tenant's
+`JobSchedule` rows say what each job is to do.  Every schedule belongs to a tenant: there are no system-wide jobs (the
+service switches are the system's stops, not schedules).
+
+| Status | A task | A service |
+| --- | --- | --- |
+| `Off` | doesn't run on its own (it can still be run by hand) | stopped |
+| `On` | not allowed: run it by hand instead | runs now, until the status changes |
+| `Scheduled` | runs at each `CronSchedule` time | on from each `CronSchedule` time to the next `StopSchedule` time; on at once if set inside its window |
+
+`CronSchedule` and `StopSchedule` are Quartz cron expressions (seconds first: `0 45 15 ? * MON-FRI` is 3:45 pm on
+weekdays), read in `TimeZone` (IANA, such as `America/New_York`).  A job marked for market days skips the NYSE's
+holidays (listed through 2028 in `MarketCalendar`; early closings still run).  A time missed while the server was down is
+skipped, not made up.
+
+The scheduler is driven by the ledger's commits, not a timer: it waits on each tenant's commit signal (the one the rules
+engine uses) and after each commit compares the tenant's rows with what it has acted on, so a change takes effect at
+once.  Turning a row off, changing it or deleting it stops what it started: a task's run in progress is cancelled (its
+cancellation token fires; it stops at its next safe point, and a ledger transaction is never cut in half), and a service
+is stopped.  At most one run of a job per tenant at a time, however it was started.
+
+Every run is recorded in the tenant's `JobRun` log: the job, why it ran (`Hand`, `Schedule`, `Window`, `Restart`), when it
+was requested, started and ended, its status (`Requested`, `Running`, `Succeeded`, `Stopped`, `Failed`, `Cancelled`,
+`Refused`, `Interrupted`) and its outcome.  A run by hand is a `JobRun` row inserted as `Requested` (the caller supplies
+its key); the scheduler takes it up after the commit and runs it once, or refuses it, with the reason, if the job is
+unknown, a service, off (every schedule of it `Off`) or already running.  Each start of a service is its own run, so a
+failure and the restart after it are both in the log.  A run still `Requested` or `Running` when the server starts is
+marked `Interrupted`, never run again.  Known gap: a task's work and the row recording how it ended are separate
+commits, so a crash between them leaves the work done and the run `Interrupted`.
+
+```
+ledger-operator jobs <tenant>                            # every job, every schedule, and the latest runs
+ledger-operator jobs run <tenant> GenerateOrders         # run a task now (unless it is off); recorded in JobRun
+ledger-operator jobs set <tenant> <job> off|on|scheduled # set the status of every schedule of the job
+```
+
+The API is `v1/tenants/{id}/jobs`; schedules and runs are written through the `JobSchedule` and `JobRun` tables.
+
+| Job | Kind | Market days | Does |
+| --- | --- | --- | --- |
+| `GenerateOrders` | task | yes | Turns the tenant's proposed trades into orders (while the `trading` switch is on). |
 
 ## License
 

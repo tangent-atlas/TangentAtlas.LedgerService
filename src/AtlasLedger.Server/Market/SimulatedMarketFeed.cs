@@ -11,6 +11,7 @@ namespace AtlasLedger.Server.Market
     using System.Threading.Tasks;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Events;
     using AtlasLedger.Server.Holdings;
     using AtlasLedger.Server.Switches;
     using Microsoft.Extensions.Hosting;
@@ -40,7 +41,10 @@ namespace AtlasLedger.Server.Market
 
         private readonly ILogger<SimulatedMarketFeed> logger;
 
-        private readonly Dictionary<(string Scheme, string Code), decimal> prices = new Dictionary<(string Scheme, string Code), decimal>();
+        private readonly Dictionary<(string Scheme, string Code, string Currency), decimal> prices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
+
+        // Events never change, so each is read once.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid TenantId, Guid EventId), LedgerEvent> decoded = new System.Collections.Concurrent.ConcurrentDictionary<(Guid TenantId, Guid EventId), LedgerEvent>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SimulatedMarketFeed"/> class.
@@ -106,30 +110,61 @@ namespace AtlasLedger.Server.Market
         private bool Tick(DateTimeOffset now, bool isBadPrint)
         {
             // Who holds what, read under each tenant's lock and released before publishing.  A ticker the feed hasn't
-            // priced yet starts from its security's last trade, so a tenant loaded with history isn't valued at $100 a share.
-            var holders = new Dictionary<(string Scheme, string Code), List<LedgerPartition>>();
-            var openingPrices = new Dictionary<(string Scheme, string Code), decimal>();
+            // priced yet starts from its asset's last purchase or sale, so a tenant loaded with history isn't valued at $100 a share.
+            var holders = new Dictionary<(string Scheme, string Code, string Currency), List<LedgerPartition>>();
+            var openingPrices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
             foreach (var partition in this.ledger.Partitions)
             {
                 lock (partition.SyncRoot)
                 {
-                    var lastTrades = new Dictionary<Guid, Trade>();
-                    foreach (var trade in partition.Trades)
+                    // The last purchase or sale of each asset: a trade item's amount ÷ (quantity × factors), or a fill's price.
+                    var lastTrades = new Dictionary<Guid, (DateTimeOffset EffectiveTime, decimal Price)>();
+                    void Consider(Guid assetId, DateTimeOffset time, decimal price)
                     {
-                        if (!lastTrades.TryGetValue(trade.SecurityId, out var latest) || trade.EffectiveTime > latest.EffectiveTime)
+                        if (!lastTrades.TryGetValue(assetId, out var latest) || time > latest.EffectiveTime)
                         {
-                            lastTrades[trade.SecurityId] = trade;
+                            lastTrades[assetId] = (time, price);
                         }
                     }
 
+                    var events = partition.Events.Select(row => this.decoded.GetOrAdd((partition.TenantId, row.EventId), _ => EventRows.Read(row))).ToArray();
+                    var legs = events.OfType<OrderPlacedEvent>().SelectMany(order => order.Legs.Select(leg => (order.OrderId, leg.LegId, leg.AssetId))).ToDictionary(item => (item.OrderId, item.LegId), item => item.AssetId);
+                    foreach (var value in events)
+                    {
+                        if (value is TradeEvent trade)
+                        {
+                            foreach (var item in trade.Items)
+                            {
+                                var asset = partition.FindAsset(item.AssetId);
+                                var units = asset is null ? 0m : item.Quantity * asset.QuantityFactor * asset.PriceFactor;
+                                if (asset is { AssetType: not AssetType.Cash } && units != 0m && item.Amount is { } amount)
+                                {
+                                    Consider(item.AssetId, trade.Envelope.EffectiveTime, Math.Abs(amount / units));
+                                }
+                            }
+                        }
+                        else if (value is ExecutionReportedEvent fill && legs.TryGetValue((fill.OrderId, fill.LegId), out var assetId))
+                        {
+                            Consider(assetId, fill.ReportTime, fill.Price);
+                        }
+                    }
+
+                    var quoteCurrencies = partition.Assets.ToDictionary(asset => asset.AssetId, asset => asset.QuoteCurrency);
                     foreach (var symbol in partition.Symbols)
                     {
-                        if (symbol.Scheme == SymbolSchemes.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
+                        // A currency's price comes from the initial prices, not the market; a symbol of anything but an
+                        // asset has no quote currency to be priced in.
+                        if (symbol.Scheme == SymbolScheme.Currency || !quoteCurrencies.TryGetValue(symbol.NodeId, out var currency))
                         {
-                            openingPrices.TryAdd((symbol.Scheme, symbol.Code), lastTrade.Price);
+                            continue;
                         }
 
-                        var key = (symbol.Scheme, symbol.Code);
+                        var key = (symbol.Scheme, symbol.Code, currency);
+                        if (symbol.Scheme == SymbolScheme.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
+                        {
+                            openingPrices.TryAdd(key, Math.Round(lastTrade.Price, 2));
+                        }
+
                         if (!holders.TryGetValue(key, out var list))
                         {
                             holders[key] = list = new List<LedgerPartition>();
@@ -152,7 +187,7 @@ namespace AtlasLedger.Server.Market
                 last = Math.Max(0.01m, Math.Round(last * (1m + ((decimal)Random.Shared.NextDouble() - 0.5m) / 100m), 2));
                 this.prices[key] = last;
                 var isBad = isBadPrint && key == badSymbol;
-                var price = new Price { Scheme = key.Scheme, Code = key.Code, Last = isBad ? 0m : last, AsOf = now };
+                var price = new Price { Scheme = key.Scheme, Code = key.Code, Currency = key.Currency, Last = isBad ? 0m : last, AsOf = now };
                 foreach (var partition in partitions)
                 {
                     partition.PublishPrice(price);

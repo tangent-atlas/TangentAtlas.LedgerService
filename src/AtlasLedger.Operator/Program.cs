@@ -13,6 +13,7 @@ namespace AtlasLedger.Operator
     using System.Threading.Tasks;
     using AtlasLedger.Client;
     using AtlasLedger.Client.Api;
+    using AtlasLedger.Model;
 
     /// <summary>
     /// ledger-operator: the operator's console.
@@ -34,10 +35,34 @@ namespace AtlasLedger.Operator
               alerts <tenant> --wait-cleared <rule> [--timeout <seconds>]
                                               Wait until there is no such alert.
               mirror <tenant>                 Copy a tenant locally and show its accounts, symbols, and alerts.
+              events <tenant> [--after <seq>] [--last <n>] [--order <id>] [--follow] [--json]
+                                              Show the tenant's event log in commit order, transaction by
+                                              transaction, each event's payload under it: all (or after a
+                                              sequence), the latest n transactions, or one order's (its replace
+                                              chain).  --follow keeps showing new transactions (Ctrl+C stops);
+                                              --json writes JSON Lines, one transaction per line: the same
+                                              format the events endpoint takes, so the output can be loaded.
               holdings <tenant>               Show what the tenant's events add up to: each account's holdings,
                                               valued at their prices, and its cash.  The rules derive them, so
-                                              compliance must be on.
-              services                        Show the server's optional services (market feed, compliance).
+                                              the rules engine must be on.
+              statistics <tenant> [--days]    Show each account's performance at the closes: its value, net
+                                              flows, total and annualized return, volatility, worst drawdown
+                                              and Sharpe ratio against the 13-week Treasury bill (needs the
+                                              rules and market-history services on); --days adds each day.
+              orders <tenant>                 Show what each account's model proposes, and each order's state: its
+                                              allocations, broker orders and fills.
+              trade <tenant>                  Turn the proposals into orders now, as the scheduled run would.
+              jobs <tenant>                   Show the tenant's jobs (running or not, and what each last did) and
+                                              its schedules (off, on or scheduled, and when each next starts and
+                                              stops).
+              jobs run <tenant> <job>         Run a task now, whatever its schedules say (unless it is off); the
+                                              run is recorded in the tenant's JobRun log.
+              jobs set <tenant> <job> off|on|scheduled
+                                              Set the status of every schedule of the job: off (it doesn't run on
+                                              its own), on (a service runs until turned off) or scheduled.
+              weights <tenant> <script.json>  Replace the weights of each model the script names with the script's
+                                              Weight rows: changes, removes and adds rows to match, in one batch.
+              services                        Show the server's optional services (market feed, rules engine).
               services on [name...] [--for <hours>]
                                               Turn services on (all, if none named) for a while (default 4 hours;
                                               hours like 4 or 0.5, or h:mm); they turn themselves off.
@@ -62,6 +87,12 @@ namespace AtlasLedger.Operator
             string? waitCleared = null;
             var timeout = TimeSpan.FromSeconds(10);
             var watch = false;
+            var follow = false;
+            var json = false;
+            var days = false;
+            var after = 0L;
+            int? last = null;
+            Guid? order = null;
             var positional = new List<string>();
             for (var index = 0; index < args.Length; index++)
             {
@@ -73,6 +104,12 @@ namespace AtlasLedger.Operator
                     case "--wait-cleared" when index + 1 < args.Length: waitCleared = args[++index]; break;
                     case "--timeout" when index + 1 < args.Length: timeout = TimeSpan.FromSeconds(double.Parse(args[++index], CultureInfo.InvariantCulture)); break;
                     case "--watch": watch = true; break;
+                    case "--follow": follow = true; break;
+                    case "--json": json = true; break;
+                    case "--days": days = true; break;
+                    case "--after" when index + 1 < args.Length: after = long.Parse(args[++index], CultureInfo.InvariantCulture); break;
+                    case "--last" when index + 1 < args.Length: last = int.Parse(args[++index], CultureInfo.InvariantCulture); break;
+                    case "--order" when index + 1 < args.Length: order = Guid.Parse(args[++index]); break;
                     case "--help" or "-h" or "-?": Console.WriteLine(Usage); return 0;
                     default: positional.Add(args[index]); break;
                 }
@@ -103,6 +140,39 @@ namespace AtlasLedger.Operator
                         return await Commands.WaitForAlertAsync(api, Guid.Parse(positional[1]), rule, waitFor is not null, timeout, output, token).ConfigureAwait(false) ? 0 : 1;
                     case "alerts" when positional.Count == 2:
                         await Commands.AlertsAsync(api, Guid.Parse(positional[1]), watch, output, token).ConfigureAwait(false);
+                        return 0;
+                    case "trade" when positional.Count == 2:
+                        await Commands.TradeAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "events" when positional.Count == 2:
+                        await Commands.EventsAsync(
+                            api,
+                            Guid.Parse(positional[1]),
+                            after,
+                            last,
+                            order,
+                            follow,
+                            json,
+                            output,
+                            token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 2:
+                        await Commands.JobsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 4 && positional[1] == "run":
+                        await Commands.RunJobAsync(api, Guid.Parse(positional[2]), positional[3], output, token).ConfigureAwait(false);
+                        return 0;
+                    case "jobs" when positional.Count == 5 && positional[1] == "set" && Enum.TryParse<JobStatus>(positional[4], ignoreCase: true, out var jobStatus) && Enum.IsDefined(jobStatus):
+                        await Commands.SetJobStatusAsync(api, Guid.Parse(positional[2]), positional[3], jobStatus, output, token).ConfigureAwait(false);
+                        return 0;
+                    case "orders" when positional.Count == 2:
+                        await Commands.OrdersAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);
+                        return 0;
+                    case "weights" when positional.Count == 3:
+                        await Commands.ReplaceWeightsAsync(api, Guid.Parse(positional[1]), positional[2], output, token).ConfigureAwait(false);
+                        return 0;
+                    case "statistics" when positional.Count == 2:
+                        await Commands.StatisticsAsync(api, Guid.Parse(positional[1]), days, output, token).ConfigureAwait(false);
                         return 0;
                     case "holdings" when positional.Count == 2:
                         await Commands.HoldingsAsync(api, Guid.Parse(positional[1]), output, token).ConfigureAwait(false);

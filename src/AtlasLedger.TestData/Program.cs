@@ -1,4 +1,4 @@
-// <copyright file="Program.cs" company="Tangent Atlas">
+﻿// <copyright file="Program.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -20,25 +20,46 @@ namespace AtlasLedger.TestData
     internal static class Program
     {
         private const string Usage = """
-            Usage: test-data joe10 --state <joe10.json> [--deposit <dollars>] [--out <folder>]
+            Usage: test-data joe10 [--state <joe10.json>] [--deposit <dollars>] [--out <folder>]
 
-            Writes a test account holding the Joe 10, as two scripts for script-loader:
-              joe10-reference.json   the account, its connection, the ten securities and their tickers (rows)
-              joe10-history.json     a cash deposit, then one purchase per company at the last close (events)
+            Writes a test account holding the Joe 10, as scripts for script-loader:
+              joe10-reference.json   the account, its institution and model, and its assets (US dollars and the
+                                     ten companies) with their names (rows)
+              joe10-history.json     a deposit of dollars, then one purchase per company at the last close
+                                     (events: a cash movement, then a trade per company, each an exchange of
+                                     dollars for shares whose items balance)
+              joe10-trading.json     the same deposit and purchases as the trading events behind them: per
+                                     company an order placed, its broker order sent, the broker's acceptance
+                                     and a fill at the last close (the largest split into two broker orders,
+                                     each filled in two parts); the rules post the fills to the holdings.
+                                     Load the history or the trading script, not both.
+              joe10-opening.json     the deposit only, for an account the rules rebalance: with the
+                                     the weights, the rules propose buying the Joe 10, and the order
+                                     generator (its scheduled job, or ledger-operator trade) orders it
+              joe10-weights.json     the close's weights (each company's weight times the share in stocks) as
+                                     the Joe 10 model's weights: load it once, then each day replace them with
+                                     ledger-operator weights <tenant> joe10-weights.json
+              joe10-jobs.json        the schedule that generates the account's orders: 3:45 pm New York on
+                                     market days, while the trading switch is on (ledger-operator jobs <tenant>)
 
-              --state <joe10.json>   The forward test's state file (tangent-atlas/forward-test, state/joe10.json):
+              --state <joe10.json>   Optional. Without it, a generic Joe 10: ten large US companies at equal
+                                     weights, half the account in stocks, each at $100 (where the simulated
+                                     feed starts), at the last weekday close; nothing licensed in it.
+                                     With it, the forward test's state file (tangent-atlas/TangentAtlas.ForwardTest, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
               --deposit <dollars>    The opening deposit (default 1000000).
               --out <folder>         Where to write (default: artifacts/test-data, which git ignores).
 
-            The prices come from EODHD through the forward test and are licensed, not ours to publish: keep the
-            files out of public repositories.
+            With --state, the prices come from EODHD through the forward test and are licensed, not ours to
+            publish: keep those files out of public repositories.
 
             Then, against a local server (development sign-in):
-              ledger-operator services on
+              (the rules engine starts on; otherwise: ledger-operator services on rules)
               script-loader <tenant> joe10-reference.json
-              script-loader <tenant> joe10-history.json
+              script-loader <tenant> joe10-history.json      (or joe10-trading.json)
               ledger-operator holdings <tenant>
+              ledger-operator orders <tenant>                (after the trading script)
+              ledger-operator events <tenant>                the event log, in commit order
 
             Exit codes: 0 written; 2 the command line or the state file is wrong.
             """;
@@ -61,7 +82,7 @@ namespace AtlasLedger.TestData
                 }
             }
 
-            if (positional is not ["joe10"] || statePath is null)
+            if (positional is not ["joe10"])
             {
                 Console.Error.WriteLine(Usage);
                 return 2;
@@ -70,7 +91,7 @@ namespace AtlasLedger.TestData
             Joe10State state;
             try
             {
-                state = Joe10State.Read(statePath);
+                state = statePath is null ? Joe10State.Generic() : Joe10State.Read(statePath);
             }
             catch (Exception exception) when (exception is IOException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
             {
@@ -81,8 +102,16 @@ namespace AtlasLedger.TestData
             Directory.CreateDirectory(folder);
             var referencePath = Path.Combine(folder, "joe10-reference.json");
             var historyPath = Path.Combine(folder, "joe10-history.json");
+            var tradingPath = Path.Combine(folder, "joe10-trading.json");
+            var openingPath = Path.Combine(folder, "joe10-opening.json");
+            var weightsPath = Path.Combine(folder, "joe10-weights.json");
+            var jobsPath = Path.Combine(folder, "joe10-jobs.json");
             await WriteAsync(Joe10Account.Reference(state), referencePath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.History(state, deposit), historyPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Trading(state, deposit), tradingPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Opening(state, deposit), openingPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Weights(state), weightsPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Account.Jobs(), jobsPath).ConfigureAwait(false);
 
             var english = CultureInfo.GetCultureInfo("en-US");
             var purchases = Joe10Account.Purchases(state, deposit);
@@ -93,10 +122,13 @@ namespace AtlasLedger.TestData
                 Console.WriteLine(string.Format(english, "  Buy {0,6:#,0} {1,-6} at {2,10:C2} = {3,14:C2}", purchase.Shares, purchase.Ticker, purchase.Price, purchase.Shares * purchase.Price));
             }
 
-            Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; cash left {2:C2}.", deposit, spent, deposit - spent));
-            Console.WriteLine($"Wrote {referencePath} and {historyPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
+            Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
+            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath}, {weightsPath} and {jobsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }
+
+        private static Task WriteAsync(IReadOnlyList<AtlasLedger.Model.TransactionMessage> transactions, string path) =>
+            File.WriteAllTextAsync(path, AtlasLedger.Model.EventMessages.WriteScript(transactions));
 
         private static async Task WriteAsync(AtlasLedger.Client.Scripts.LedgerScript script, string path)
         {

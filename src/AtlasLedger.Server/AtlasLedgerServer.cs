@@ -12,9 +12,12 @@ namespace AtlasLedger.Server
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Compliance;
     using AtlasLedger.Server.Holdings;
+    using AtlasLedger.Server.Jobs;
     using AtlasLedger.Server.Market;
     using AtlasLedger.Server.Persistence;
     using AtlasLedger.Server.Security;
+    using AtlasLedger.Server.Brokers;
+    using AtlasLedger.Server.Orders;
     using AtlasLedger.Server.Switches;
     using Bellerophon.Rules;
     using Bellerophon.Runtime;
@@ -102,6 +105,7 @@ namespace AtlasLedger.Server
             }
 
             builder.Services.AddHostedService<LedgerRecovery>();
+            builder.Services.AddHostedService<InitialPriceService>();   // after recovery: every loaded tenant gets the constants
             builder.Services.AddHostedService<LedgerFlusher>();
 
             // The services on top of the base system (the market feed and compliance) run only while switched on, through
@@ -111,8 +115,8 @@ namespace AtlasLedger.Server
             builder.Services.AddSingleton<ServiceSwitchboard>();
             builder.Services.Configure<ServiceSwitchOptions>(configuration.GetSection(ServiceSwitchOptions.SectionName));
 
-            // The rules (compliance and holdings): compiled once; each tenant gets its own engine and one NRules session
-            // holding every rule.  After each cycle the holdings the rules derived are published for the API to read.
+            // The rules engine (holdings and compliance): a service on its own switch; compiled once; each tenant gets its own
+            // engine and one NRules session holding every rule.  After each cycle the holdings the rules derived are published for the API to read.
             builder.Services.Configure<ComplianceOptions>(configuration.GetSection(ComplianceOptions.SectionName));
             builder.Services.AddSingleton<HoldingsStore>();
             builder.Services.AddSingleton(services =>
@@ -126,11 +130,42 @@ namespace AtlasLedger.Server
                     new RulesEngineOptions { MinimumInterval = compliance.MinimumInterval },
                     compliance.MaximumConcurrentCycles);
             });
-            builder.Services.AddHostedService<ComplianceService>();
+            builder.Services.AddHostedService<RulesService>();
 
             // Market data: simulated until a real feed is connected.  Its switch decides whether it runs.
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));
             builder.Services.AddHostedService<SimulatedMarketFeed>();
+
+            // Closing prices, dividends and splits (EODHD) and the risk-free rate (the Treasury), loaded into each tenant on the
+            // market-history switch: ephemeral, reloaded at startup.
+            builder.Services.Configure<MarketHistoryOptions>(configuration.GetSection(MarketHistoryOptions.SectionName));
+            builder.Services.AddHttpClient<IMarketHistorySource, EodhdTreasurySource>(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("TangentAtlas-Ledger/1.0");   // some public data sites stall requests that name no agent
+            });
+            builder.Services.AddSingleton<MarketHistoryService>();
+            builder.Services.AddHostedService(services => services.GetRequiredService<MarketHistoryService>());
+
+            // Brokers: the order router sends broker orders and records the reports, while its switch is on.  The simulated
+            // broker trades against each tenant's own prices; a real broker is another IBroker.
+            builder.Services.Configure<BrokerOptions>(configuration.GetSection(BrokerOptions.SectionName));
+            builder.Services.AddSingleton<IBroker, SimulatedBroker>();
+            builder.Services.AddHostedService<OrderRouter>();
+
+            // The order generator: turns the rules' proposed allocations into orders, when its job runs or on demand.
+            builder.Services.AddSingleton<OrderGenerator>();
+
+            // Jobs: tasks and services, each a class with a [Job("key")] attribute, found here.  Each tenant's JobSchedule
+            // rows say which are off, on or scheduled; the scheduler acts on them after every commit, from after recovery.
+            // Quartz.NET (in memory) keeps the times; the scheduler makes it itself, not through Quartz's DI package, whose
+            // logging is process-wide.
+            builder.Services.Configure<JobOptions>(configuration.GetSection(JobOptions.SectionName));
+            var jobs = JobRegistry.Discover(typeof(AtlasLedgerServer).Assembly);
+            builder.Services.AddSingleton(jobs);
+            builder.Services.AddSingleton<JobRunner>();
+            builder.Services.AddSingleton<JobScheduler>();
+            builder.Services.AddHostedService(services => services.GetRequiredService<JobScheduler>());
 
             // Callers: bearer tokens from the identity provider (Microsoft Entra External ID) when one is configured;
             // otherwise development sign-in, in the Development environment only.  With neither, the server does not start:

@@ -21,11 +21,16 @@ namespace AtlasLedger.ScriptLoader
         private const string Usage = """
             Usage: script-loader <tenant> <script.json> [--server <url>]
 
-            Reads the script and sends it to the server, into the tenant, as one batch (several, if it is larger than
-            the server's batch limit). Every operation commits, or none does.
+            Reads the script and sends it to the server, into the tenant. A table script goes in as one batch
+            (several, if it is larger than the server's batch limit): every operation commits, or none does. A
+            transaction script goes to the event log: each transaction commits or is refused by itself, and loading
+            it again changes nothing.
 
               <tenant>          The tenant's ID (a GUID). A new ID makes a new tenant.
-              <script.json>     The script: { "operations": [ { "action": "Insert", "table": "Node", "row": { ... } } ] }
+              <script.json>     A table script: { "operations": [ { "action": "Insert", "table": "Node", "row": { ... } } ] }
+                                or a transaction script: [ { "transactionId": ..., "events": [ { "eventId": ...,
+                                "eventType": "Trade", ..., "payload": { ... } } ] } ], or the same as JSON Lines (.jsonl:
+                                one transaction per line).
               --server <url>    The server (default: ATLAS_LEDGER_SERVER, else the settings file's, else
                                 http://127.0.0.1:5180).
 

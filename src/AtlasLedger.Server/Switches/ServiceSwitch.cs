@@ -82,6 +82,16 @@ namespace AtlasLedger.Server.Switches
         }
 
         /// <summary>
+        /// Turns the service on with no end: it stays on until it is turned off.  How a service the settings start on starts.
+        /// </summary>
+        public void TurnOnUntilTurnedOff() => this.Set(DateTimeOffset.MaxValue);
+
+        /// <summary>
+        /// Gets a value indicating whether the service is on with no end (until it is turned off).
+        /// </summary>
+        public bool IsOnUntilTurnedOff => this.OnUntil == DateTimeOffset.MaxValue;
+
+        /// <summary>
         /// Turns the service off now.
         /// </summary>
         public void TurnOff() => this.Set(null);
@@ -102,7 +112,7 @@ namespace AtlasLedger.Server.Switches
             }
 
             // Off, or on with its time already run out (which is off): only a turn on or off is a change.
-            var remaining = until is { } time ? time - this.timeProvider.GetUtcNow() : Timeout.InfiniteTimeSpan;
+            var remaining = until is { } time && time != DateTimeOffset.MaxValue ? time - this.timeProvider.GetUtcNow() : Timeout.InfiniteTimeSpan;
             if (remaining != Timeout.InfiniteTimeSpan && remaining <= TimeSpan.Zero)
             {
                 remaining = Timeout.InfiniteTimeSpan;

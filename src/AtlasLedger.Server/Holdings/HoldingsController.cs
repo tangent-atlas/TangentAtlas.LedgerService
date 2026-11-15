@@ -7,7 +7,9 @@ namespace AtlasLedger.Server.Holdings
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
+    using AtlasLedger.Server.Orders;
     using Microsoft.AspNetCore.Authorization;
     using Microsoft.AspNetCore.Http;
     using Microsoft.AspNetCore.Mvc;
@@ -16,26 +18,76 @@ namespace AtlasLedger.Server.Holdings
     /// A holding as the API returns it, valued at its effective price.
     /// </summary>
     /// <param name="AccountId">The account.</param>
-    /// <param name="SecurityId">The security.</param>
-    /// <param name="Quantity">The number of shares.</param>
-    /// <param name="CostBasis">The total paid, fees included; null when unknown.</param>
-    /// <param name="IsOverridden">True when an operator's override set the quantity.</param>
-    /// <param name="Price">The effective price, if the security has one.</param>
+    /// <param name="AssetId">The asset.</param>
+    /// <param name="AssetType">The asset's type.</param>
+    /// <param name="Quantity">The quantity held.</param>
+    /// <param name="CostBasis">The cost of what is held; null when unknown.</param>
+    /// <param name="IsOverridden">True when an override in force set the quantity.</param>
+    /// <param name="Price">The effective price, as quoted, if the asset has one.</param>
+    /// <param name="QuoteCurrency">The currency the price is in.</param>
     /// <param name="PriceSource">Where the price came from.</param>
-    /// <param name="MarketValue">Quantity times price, if there is a price.</param>
-    public sealed record HoldingDto(Guid AccountId, Guid SecurityId, decimal Quantity, decimal? CostBasis, bool IsOverridden, decimal? Price, PriceSource? PriceSource, decimal? MarketValue);
+    /// <param name="Currency">The account's currency: the cost basis and market value are in it.</param>
+    /// <param name="MarketValue">Quantity × QuantityFactor × price × PriceFactor × the price of the quote currency in the
+    /// account's currency, if there is a price and a rate.</param>
+    /// <param name="Weight">Its share of the account's value, if every holding has a value.</param>
+    /// <param name="TargetWeight">Its weight in the account's model, if the account has a model (none for cash, which is what
+    /// the weights leave over).</param>
+    public sealed record HoldingDto(
+        Guid AccountId,
+        Guid AssetId,
+        AssetType AssetType,
+        decimal Quantity,
+        decimal? CostBasis,
+        bool IsOverridden,
+        decimal? Price,
+        string QuoteCurrency,
+        PriceSource? PriceSource,
+        string Currency,
+        decimal? MarketValue,
+        decimal? Weight,
+        decimal? TargetWeight);
 
     /// <summary>
-    /// A tenant's holdings, cash and prices at the end of the last rules cycle.
+    /// An account's totals, for the dashboard.
+    /// </summary>
+    /// <param name="AccountId">The account.</param>
+    /// <param name="Currency">The account's currency: every amount is in it.</param>
+    /// <param name="MarketValue">Every holding's value, cash included; null while a holding has no value.</param>
+    /// <param name="Cash">The value of its cash.</param>
+    /// <param name="NetContributions">Deposits less withdrawals.</param>
+    /// <param name="Gain">Market value less net contributions.</param>
+    /// <param name="ModelId">The account's model; null when it is not rebalanced.</param>
+    /// <param name="ModelName">The model's name.</param>
+    /// <param name="TargetCash">The share the model's weights leave in cash, if it has a model.</param>
+    /// <param name="ProposedTrades">How many trades its model calls for now, if it has a model.</param>
+    /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
+    public sealed record AccountSummaryDto(
+        Guid AccountId,
+        string Currency,
+        decimal? MarketValue,
+        decimal Cash,
+        decimal NetContributions,
+        decimal? Gain,
+        Guid? ModelId,
+        string? ModelName,
+        decimal? TargetCash,
+        int? ProposedTrades,
+        bool IsWaiting);
+
+    /// <summary>
+    /// A tenant's holdings and prices at the end of the last rules cycle.
     /// </summary>
     /// <param name="AsOf">When the rules last ran.</param>
-    /// <param name="Holdings">The holdings with any shares (zero holdings are left out).</param>
-    /// <param name="Cash">Each account's cash.</param>
-    /// <param name="Prices">Each priced security's effective price.</param>
-    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<CashState> Cash, IReadOnlyList<EffectivePrice> Prices);
+    /// <param name="Holdings">The holdings with any quantity (zero holdings are left out), each valued in its account's
+    /// currency.</param>
+    /// <param name="Prices">Each priced asset's effective price.</param>
+    /// <param name="Rates">Each published rate between currencies.</param>
+    /// <param name="Accounts">Each account's totals.</param>
+    /// <param name="Problems">Events left out of these holdings, and why.</param>
+    public sealed record HoldingsDto(DateTimeOffset AsOf, IReadOnlyList<HoldingDto> Holdings, IReadOnlyList<EffectivePrice> Prices, IReadOnlyList<CurrencyRate> Rates, IReadOnlyList<AccountSummaryDto> Accounts, IReadOnlyList<EventProblem> Problems);
 
     /// <summary>
-    /// Serves what the tenant's events add up to: the rules' published snapshot, never the ledger's tables.
+    /// Serves what the tenant's transactions add up to: the rules' published snapshot, never the ledger's tables.
     /// </summary>
     [ApiController]
     [Authorize]
@@ -57,9 +109,9 @@ namespace AtlasLedger.Server.Holdings
         /// Gets the tenant's holdings.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>
-        /// <returns>The holdings, or 409 when the rules haven't run for the tenant (the compliance switch is off).</returns>
+        /// <returns>The holdings, or 409 when the rules engine hasn't run for the tenant (it is switched off, or just starting).</returns>
         [HttpGet]
-        [Authorize(Policy = LedgerAccessPolicies.TradeRead)]
+        [Authorize(Policy = LedgerAccessPolicies.EventRead)]
         public ActionResult<HoldingsDto> Get(Guid tenantId)
         {
             if (this.store.Find(tenantId) is not { } snapshot)
@@ -67,29 +119,92 @@ namespace AtlasLedger.Server.Holdings
                 return this.Problem(
                     statusCode: StatusCodes.Status409Conflict,
                     title: "No holdings yet.",
-                    detail: "The rules haven't run for this tenant since the server started. Switch the rules on (services on compliance) and try again.");
+                    detail: "The rules engine hasn't run for this tenant since it was switched on. Switch it on (services on rules) and try again.");
             }
 
-            var prices = snapshot.Prices.ToDictionary(price => price.SecurityId);
-            var holdings = snapshot.Positions
-                .Where(position => position.Quantity != 0m)
+            var prices = snapshot.Prices.ToDictionary(price => price.AssetId);
+            var rates = snapshot.Rates.ToDictionary(rate => (rate.FromCurrency, rate.ToCurrency), rate => rate.Rate);
+            var held = snapshot.Positions.Where(position => position.Quantity != 0m).ToArray();
+            var values = held.ToDictionary(position => (position.AccountId, position.AssetId), position => HoldingFold.MarketValue(position, prices.GetValueOrDefault(position.AssetId), rates));
+            var accountIds = held.Select(position => position.AccountId)
+                .Concat(snapshot.Flows.Select(flow => flow.AccountId))
+                .Concat(snapshot.Accounts.Select(account => account.AccountId))
+                .Distinct()
+                .OrderBy(accountId => accountId)
+                .ToArray();
+            var totals = accountIds.ToDictionary(
+                accountId => accountId,
+                accountId =>
+                {
+                    var accountValues = held.Where(position => position.AccountId == accountId).Select(position => values[(position.AccountId, position.AssetId)]).ToArray();
+                    return accountValues.Any(value => value is null) ? (decimal?)null : accountValues.Sum(value => value!.Value);
+                });
+            var accountFacts = snapshot.Accounts.ToDictionary(account => account.AccountId);
+            var models = snapshot.Models.ToDictionary(model => model.ModelId);
+            var weights = accountIds.ToDictionary(
+                accountId => accountId,
+                accountId => accountFacts.TryGetValue(accountId, out var account) && account.ModelId is { } modelId ? Rebalancing.WeightsOf(snapshot.Weights, modelId) : new Dictionary<Guid, decimal>());
+
+            var holdings = held
                 .OrderBy(position => position.AccountId)
-                .ThenBy(position => position.SecurityId)
+                .ThenBy(position => position.AssetType)
+                .ThenBy(position => position.AssetId)
                 .Select(position =>
                 {
-                    var price = prices.GetValueOrDefault(position.SecurityId);
+                    var price = prices.GetValueOrDefault(position.AssetId);
+                    var value = values[(position.AccountId, position.AssetId)];
+                    var total = totals[position.AccountId];
+                    var targets = weights[position.AccountId];
                     return new HoldingDto(
                         position.AccountId,
-                        position.SecurityId,
+                        position.AssetId,
+                        position.AssetType,
                         position.Quantity,
                         position.CostBasis,
                         position.IsOverridden,
                         price?.Price,
+                        position.QuoteCurrency,
                         price?.Source,
-                        price is null ? null : position.Quantity * price.Price);
+                        position.AccountCurrency,
+                        value,
+                        value is { } worth && total is > 0m ? worth / total.Value : null,
+                        accountFacts.GetValueOrDefault(position.AccountId)?.ModelId is null || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
                 })
                 .ToArray();
-            return this.Ok(new HoldingsDto(snapshot.AsOf, holdings, snapshot.Cash.OrderBy(cash => cash.AccountId).ToArray(), snapshot.Prices.OrderBy(price => price.SecurityId).ToArray()));
+
+            var accounts = accountIds
+                .Select(accountId =>
+                {
+                    var positions = held.Where(position => position.AccountId == accountId).ToArray();
+                    var currency = positions.FirstOrDefault()?.AccountCurrency ?? (accountFacts.TryGetValue(accountId, out var found) ? found.Currency : string.Empty);
+                    var cash = positions.Where(position => position.AssetType == AssetType.Cash).Sum(position => values[(position.AccountId, position.AssetId)] ?? 0m);
+                    var contributions = snapshot.Flows.FirstOrDefault(flow => flow.AccountId == accountId)?.NetContributions ?? 0m;
+                    var total = totals[accountId];
+                    var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : null;
+                    var targets = weights[accountId];
+                    var proposal = snapshot.Proposals.FirstOrDefault(item => item.AccountId == accountId);
+                    return new AccountSummaryDto(
+                        accountId,
+                        currency,
+                        total,
+                        cash,
+                        contributions,
+                        total - contributions,
+                        modelId,
+                        modelId is { } id && models.TryGetValue(id, out var model) ? model.Name : null,
+                        modelId is null ? null : 1m - targets.Values.Sum(),
+                        proposal?.Trades.Count,
+                        proposal?.IsWaiting ?? false);
+                })
+                .ToArray();
+
+            return this.Ok(new HoldingsDto(
+                snapshot.AsOf,
+                holdings,
+                snapshot.Prices.OrderBy(price => price.AssetId).ToArray(),
+                snapshot.Rates.OrderBy(rate => rate.FromCurrency, StringComparer.Ordinal).ThenBy(rate => rate.ToCurrency, StringComparer.Ordinal).ToArray(),
+                accounts,
+                snapshot.Problems.OrderBy(problem => problem.EventId).ToArray()));
         }
     }
 }

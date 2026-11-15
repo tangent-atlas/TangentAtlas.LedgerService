@@ -7,7 +7,7 @@ namespace AtlasLedger.Client.Api
     using System;
 
     /// <summary>
-    /// One of the server's optional services (the market feed, compliance) and whether it is on.
+    /// One of the server's optional services (the market feed, the rules engine) and whether it is on.
     /// </summary>
     public sealed class ServiceState
     {
@@ -27,7 +27,7 @@ namespace AtlasLedger.Client.Api
         public bool IsOn { get; set; }
 
         /// <summary>
-        /// Gets or sets when the service turns itself off; null when it is off.
+        /// Gets or sets when the service turns itself off; null when it is off, or on until turned off.
         /// </summary>
         public DateTimeOffset? OnUntil { get; set; }
     }

@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <!-- The generator.  A development dependency: it runs in the compiler and ships nothing at run time. -->
+    <PackageReference Include="Quartz" />
     <PackageReference Include="Bellerophon" />
     <PackageReference Include="Bellerophon.Runtime" />
     <!-- Referencing these makes the generator emit the rules adapters and the SQL Server writer and loader. -->
@@ -25,6 +26,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TangentAtlas\TangentAtlas.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Prices the feed doesn't supply (a currency's price in itself), published into every tenant at startup. -->
+    <EmbeddedResource Include="Market\initial-prices.json" LogicalName="AtlasLedger.Server.Market.initial-prices.json" />
   </ItemGroup>
 
 </Project>

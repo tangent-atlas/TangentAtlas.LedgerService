@@ -106,6 +106,26 @@ MarketHistory__EodhdApiToken=<token> Broker__SimulatedFills=AtNextClose \
   Services__StartOn=rules,market-history,trading,broker dotnet run --project src/AtlasLedger.Server
 ```
 
+### The paper account in the website, on this computer
+
+To see the Joe 10 live in TangentAtlas.Web as the test person (ledger-tester@tangentatlas.com), with real sign-in and
+nothing deployed:
+
+```
+# once, from TangentAtlas.Platform: the Website gets Ledger.Read and a development certificate
+.\Deploy-EntraApplications.ps1 -ConfigPath .\Config.Production.psd1 -SkipWebApp
+
+# the ledger, with real sign-in, market history and fills at the close (asks for the EODHD token, hidden, not stored)
+dotnet ef database update --project src\AtlasLedger.Schema
+.\tools\Start-LocalLedger.ps1 -MarketHistory
+
+# in another window: the Joe 10 in its tenant, and the test person as its user (a browser opens: sign in as them)
+.\tools\Set-LocalJoe10.ps1 -StatePath ..\forward-test\state\joe10.json -SignOut
+```
+
+Then run the website and sign in as the test person.  Use the forward test's state (`-StatePath`): the generic Joe 10
+buys at $100 a share, which the real closes would value as a large gain or loss.
+
 ## The event log
 
 Every input is an event in one table, `Event`, and nothing in it is ever changed or deleted.  An event is its kind

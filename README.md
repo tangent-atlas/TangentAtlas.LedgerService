@@ -115,7 +115,8 @@ nothing deployed:
 # once, from TangentAtlas.Platform: the Website gets Ledger.Read and a development certificate
 .\Deploy-EntraApplications.ps1 -ConfigPath .\Config.Production.psd1 -SkipWebApp
 
-# the ledger, with real sign-in, market history and fills at the close (asks for the EODHD token, hidden, not stored)
+# the ledger, with real sign-in, market history and fills at the close (the EODHD token: EODHD_API_TOKEN if set, else
+# asked for once and kept encrypted for you in %APPDATA%\TangentAtlas\eodhd-token.xml)
 dotnet ef database update --project src\AtlasLedger.Schema
 .\tools\Start-LocalLedger.ps1 -MarketHistory
 

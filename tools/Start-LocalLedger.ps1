@@ -12,8 +12,10 @@
     real (Set-LocalJoe10.ps1 does).
 
     The services: rules, broker and trading are on; with -MarketHistory, market-history too, and the paper broker fills
-    at the next close.  The EODHD token is asked for (typed hidden), given to the server's process only, and not
-    stored.
+    at the next close.  The EODHD token comes from the EODHD_API_TOKEN environment variable if it is set (as
+    TangentAtlas.BackTest reads it); otherwise from %APPDATA%\TangentAtlas\eodhd-token.xml, where it is kept encrypted
+    by Windows for this user on this computer (DPAPI: no other account or computer can read it); otherwise it is asked
+    for once (typed hidden) and kept there.  It is given to the server's process only.
 
     The database is the server's Development connection (appsettings.Development.json: the local SQL Server).  Ctrl+C
     stops the server.
@@ -27,6 +29,9 @@
 .PARAMETER NoBuild
     Run the server as last built.
 
+.PARAMETER ReplaceToken
+    Ask for the EODHD token again and keep the new one (after it changes at EODHD).
+
 .EXAMPLE
     .\tools\Start-LocalLedger.ps1 -MarketHistory
 #>
@@ -34,7 +39,8 @@
 param(
     [ValidateRange(1024, 65535)][int]$Port = 5180,
     [switch]$MarketHistory,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$ReplaceToken
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,8 +75,20 @@ $environment = [ordered]@{
     Services__StartOn = 'rules,broker,trading'
 }
 if ($MarketHistory) {
-    $token = Read-Host -AsSecureString 'EODHD API token (hidden; given to the server only, not stored)'
-    $environment.MarketHistory__EodhdApiToken = [Net.NetworkCredential]::new('', $token).Password
+    $tokenPath = Join-Path $folder 'eodhd-token.xml'
+    if ($env:EODHD_API_TOKEN -and -not $ReplaceToken) {
+        $plain = $env:EODHD_API_TOKEN
+        Write-Host 'The EODHD token: from the EODHD_API_TOKEN environment variable.' -ForegroundColor Cyan
+    } else {
+        if ($ReplaceToken -or -not (Test-Path $tokenPath)) {
+            # Export-Clixml keeps a SecureString encrypted with Windows' data protection, for this user on this computer.
+            Read-Host -AsSecureString 'EODHD API token (typed hidden; kept encrypted for you on this computer)' | Export-Clixml -Path $tokenPath
+            Write-Host "Kept the EODHD token, encrypted, in $tokenPath (-ReplaceToken asks again)." -ForegroundColor Cyan
+        }
+        $plain = [Net.NetworkCredential]::new('', (Import-Clixml -Path $tokenPath)).Password
+    }
+    if (-not $plain) { throw 'The EODHD token is empty: run again with -ReplaceToken.' }
+    $environment.MarketHistory__EodhdApiToken = $plain
     $environment.Services__StartOn = 'rules,broker,trading,market-history'
     $environment.Broker__SimulatedFills = 'AtNextClose'
 }

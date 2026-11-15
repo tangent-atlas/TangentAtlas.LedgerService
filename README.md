@@ -121,12 +121,12 @@ nothing deployed:
 .\tools\Start-LocalLedger.ps1 -MarketHistory
 
 # in another window: the Joe 10 in its tenant, and the test person as its user (a browser opens: sign in as them)
-.\tools\Set-LocalJoe10.ps1 -SignOut
+.\tools\Set-Joe10.ps1 -SignOut
 ```
 
 Then run the website and sign in as the test person.  The Joe 10 is the forward test's: `state\joe10.json` in
 TangentAtlas.ForwardTest, cloned beside this repository (`repos\tangent-atlas\TangentAtlas.ForwardTest`; another place
-with `-StatePath`).
+with `-StatePath`).  `-Production` loads it into the ledger in Azure instead, for the website there.
 
 ## The event log
 

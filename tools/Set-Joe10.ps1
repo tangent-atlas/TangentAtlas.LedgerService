@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-    Loads the Joe 10 paper account into a tenant of the ledger on this computer and makes the test person a user of it,
-    so the website shows it live when they sign in.
+    Loads the Joe 10 paper account into a tenant of the ledger (the one on this computer, or with -Production the one in
+    Azure) and makes the test person a user of it, so the website shows it live when they sign in.
 
 .DESCRIPTION
-    Against the server Start-LocalLedger.ps1 runs (its settings, %APPDATA%\TangentAtlas\ledger-client.local.json):
+    Against the server Start-LocalLedger.ps1 runs (its settings, %APPDATA%\TangentAtlas\ledger-client.local.json), or
+    with -Production the server in Azure (%APPDATA%\TangentAtlas\ledger-client.json, which TangentAtlas.Platform's
+    Deploy-EntraApplications.ps1 writes; the tools sign in with their certificate, from this computer's address):
       1. test-data joe10 writes the Joe 10's scripts (from -StatePath, the forward test's state, or a generic Joe 10).
       2. script-loader loads the reference (the account at the simulated broker, its model and assets), the history
          (the deposit and the purchases at the state's close), the jobs (orders at 3:45 pm New York on market days) and
@@ -28,11 +30,17 @@
 .PARAMETER NoBuild
     Use the programs as last built.
 
+.PARAMETER Production
+    Load it into the ledger in Azure instead of the one on this computer.
+
 .PARAMETER SignOut
     Forget access-test's remembered sign-in first, so the browser opens and you can sign in as the test person.
 
 .EXAMPLE
-    .\tools\Set-LocalJoe10.ps1 -SignOut
+    .\tools\Set-Joe10.ps1 -SignOut
+
+.EXAMPLE
+    .\tools\Set-Joe10.ps1 -Production
 #>
 [CmdletBinding()]
 param(
@@ -40,16 +48,19 @@ param(
     [string]$StatePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'TangentAtlas.ForwardTest\state\joe10.json'),
     [switch]$Generic,
     [switch]$NoBuild,
+    [switch]$Production,
     [switch]$SignOut
 )
 
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
-$localPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'TangentAtlas\ledger-client.local.json'
-if (-not (Test-Path $localPath)) {
-    throw "$localPath is missing: run .\tools\Start-LocalLedger.ps1 first (it writes it)."
+$settingsPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) "TangentAtlas\$(if ($Production) { 'ledger-client.json' } else { 'ledger-client.local.json' })"
+if (-not (Test-Path $settingsPath)) {
+    throw "$settingsPath is missing: $(if ($Production) { "run TangentAtlas.Platform's Deploy-EntraApplications.ps1 (it writes it)" } else { 'run .\tools\Start-LocalLedger.ps1 first (it writes it)' })."
 }
-$env:ATLAS_LEDGER_CLIENT_SETTINGS = $localPath
+$server = (Get-Content $settingsPath -Raw | ConvertFrom-Json).server
+Write-Host "The ledger: $server" -ForegroundColor Cyan
+$env:ATLAS_LEDGER_CLIENT_SETTINGS = $settingsPath
 
 $programs = @{
     TestData = @{ Project = 'AtlasLedger.TestData'; Assembly = 'test-data' }

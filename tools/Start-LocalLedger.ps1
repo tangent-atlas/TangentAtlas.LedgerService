@@ -9,7 +9,7 @@
     the external tenant's tokens for the Ledger API, with the operator and the script loader as its tools.  Writes
     %APPDATA%\TangentAtlas\ledger-client.local.json, the same settings pointed at this server: set
     ATLAS_LEDGER_CLIENT_SETTINGS to it and script-loader, ledger-operator and access-test sign in to this server for
-    real (Set-LocalJoe10.ps1 does).
+    real (Set-Joe10.ps1 does).
 
     The services: rules, broker and trading are on; with -MarketHistory, market-history too, and the paper broker fills
     at the next close.  The EODHD token comes from the EODHD_API_TOKEN environment variable if it is set (as

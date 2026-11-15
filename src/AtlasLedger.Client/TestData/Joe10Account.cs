@@ -119,7 +119,8 @@ namespace AtlasLedger.Client.TestData
         public static readonly Guid ModelId = KeyFor("model");
 
         /// <summary>
-        /// The institution the account is held at: the simulated broker.
+        /// The institution the account is held at: the simulated broker, presented as a fictional brokerage (paper money
+        /// only; no real firm).
         /// </summary>
         public static readonly Guid InstitutionId = KeyFor("institution/simulator");
 
@@ -128,7 +129,12 @@ namespace AtlasLedger.Client.TestData
         /// </summary>
         public static readonly Guid GenerateOrdersScheduleId = KeyFor("job/GenerateOrders");
 
-        private const string ExternalAccountNumber = "JOE10-TEST";
+        /// <summary>
+        /// The fictional brokerage's name: Tangent Atlas's own paper-trading broker, the simulator.
+        /// </summary>
+        public const string PaperBrokerageName = "Tangent Atlas Paper Brokerage";
+
+        private const string ExternalAccountNumber = "PAPER-100010";
 
         /// <summary>
         /// Builds the reference script: rows that say how things are.
@@ -140,9 +146,9 @@ namespace AtlasLedger.Client.TestData
         {
             ArgumentNullException.ThrowIfNull(state);
             var script = new LedgerScript()
-                .Insert("Institution", new InstitutionDto { InstitutionId = InstitutionId, Name = broker == EventSource.Simulator ? "Simulated broker" : broker.ToString(), Source = broker })
+                .Insert("Institution", new InstitutionDto { InstitutionId = InstitutionId, Name = broker == EventSource.Simulator ? PaperBrokerageName : broker.ToString(), Source = broker })
                 .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10", Band = 0.005m })
-                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 test account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
+                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 paper account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
                 .Insert("Account", new AccountDto { AccountId = AccountId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber, ModelId = ModelId })
                 .Insert("Brokerage", new BrokerageDto { AccountId = AccountId, BrokerageType = BrokerageType.Taxable })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })

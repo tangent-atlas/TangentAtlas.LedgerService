@@ -8,7 +8,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- A PackageVersion below also pins the package where it comes in transitively (security fixes). -->
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
-    <BellerophonVersion>0.5.0-preview.3</BellerophonVersion>
+    <BellerophonVersion>0.5.0-preview.4</BellerophonVersion>
   </PropertyGroup>
   <ItemGroup>
     <!-- Bellerophon, from nuget.org. -->

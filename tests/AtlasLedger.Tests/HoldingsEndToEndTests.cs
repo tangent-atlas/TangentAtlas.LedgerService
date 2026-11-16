@@ -193,6 +193,49 @@ namespace AtlasLedger.Tests
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);   // the server writes derived tables; clients only read them
         }
 
+        /// <summary>
+        /// The website's sync, as the person it signs in: the tables its pages read (TangentAtlas.Web's LiveLedgers.Tables)
+        /// in a tenant where the person is a user, with Ledger.Read; and a 404 for a tenant where they are not.
+        /// </summary>
+        /// <returns>A task.</returns>
+        [Fact]
+        public async Task APersonSyncsTheWebsitesTablesInTheirOwnTenantOnly()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var person = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Advisor);
+            var (theirs, another) = (Guid.NewGuid(), Guid.NewGuid());
+            var state = ReadState();
+            await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
+            foreach (var tenantId in new[] { theirs, another })
+            {
+                await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+                await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            }
+
+            await tool.ApplyAsync(theirs, Joe10Account.Weights(state), cancellationToken);
+            await tool.ApplyAsync(theirs, new LedgerScript().Insert("User", new client::AtlasLedger.Model.UserDto { UserId = Guid.NewGuid(), IdentityIssuer = DevelopmentCallers.Issuer, IdentitySubject = DevelopmentCallers.AdvisorSubject }), cancellationToken);
+            await WaitForAsync(tool, theirs, found => found.Holdings.Count == 3, cancellationToken);
+
+            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution"];
+            var sync = person.Sync(new client::AtlasLedger.Model.Ledger(), theirs, website);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (sync.Partition.Positions.Count < 3 && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            Assert.Equal(3, sync.Partition.Positions.Count);
+            Assert.NotEmpty(sync.Partition.CurrencyRates);
+            Assert.NotEmpty(sync.Partition.Weights);
+            Assert.Equal(Joe10Account.AccountId, sync.Partition.Accounts.Single().AccountId);
+            Assert.Empty(sync.Partition.Events);   // only what the website asked for
+
+            var elsewhere = person.Sync(new client::AtlasLedger.Model.Ledger(), another, website);
+            var refused = await Assert.ThrowsAsync<client::AtlasLedger.Model.Replica.LedgerSyncException>(() => elsewhere.SyncAsync(TimeSpan.Zero, cancellationToken));
+            Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
+        }
+
         [Fact]
         public async Task TradingThroughOrdersReachesTheSameHoldingsAsBookingThePurchases()
         {

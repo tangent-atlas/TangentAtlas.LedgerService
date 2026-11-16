@@ -1,9 +1,10 @@
 <Project>
 
   <!--
-    Ships in the AtlasLedger.Model package: adds the ledger's model file to the referencing project, which then generates
-    the role it declares (<BellerophonRole>Replica</BellerophonRole>) with the Bellerophon package.  A project with its own
-    bellerophon.json keeps it.
+    Ships in the AtlasLedger.Model package's build folder, so only a project that references the package itself gets it:
+    adds the ledger's model file to that project, which then generates the role it declares
+    (<BellerophonRole>Replica</BellerophonRole>) with the Bellerophon package.  A project with its own bellerophon.json
+    keeps it.
   -->
   <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\bellerophon.json')">
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)..\model\bellerophon.json" />

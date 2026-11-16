@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <None Include="..\AtlasLedger.Server\bellerophon.json" Pack="true" PackagePath="model\bellerophon.json" Visible="false" />
-    <None Include="build\AtlasLedger.Model.props" Pack="true" PackagePath="buildTransitive\AtlasLedger.Model.props" />
+    <None Include="build\AtlasLedger.Model.props" Pack="true" PackagePath="build\AtlasLedger.Model.props" />
   </ItemGroup>
 
 </Project>

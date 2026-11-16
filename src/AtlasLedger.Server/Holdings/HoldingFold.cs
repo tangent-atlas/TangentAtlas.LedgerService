@@ -161,8 +161,8 @@ namespace AtlasLedger.Server.Holdings
         }
 
         /// <summary>
-        /// The market value of a quantity at a quoted price, in the account's currency: quantity × QuantityFactor × price ×
-        /// PriceFactor × the price of the quote currency in the account's currency.  The same formula for every asset.
+        /// The market value of a quantity at a quoted price, in the account's currency (<see cref="Valuation.MarketValue"/>,
+        /// which clients share).
         /// </summary>
         /// <param name="quantity">The quantity.</param>
         /// <param name="quantityFactor">The units one quantity stands for.</param>
@@ -171,7 +171,7 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="currencyRate">The price of one unit of the quote currency in the account's currency.</param>
         /// <returns>The value, in the account's currency.</returns>
         public static decimal MarketValue(decimal quantity, decimal quantityFactor, decimal price, decimal priceFactor, decimal currencyRate) =>
-            quantity * quantityFactor * price * priceFactor * currencyRate;
+            Valuation.MarketValue(quantity, quantityFactor, price, priceFactor, currencyRate);
 
         /// <summary>
         /// A holding's market value in its account's currency, or null when there is no price or no rate to convert it with:

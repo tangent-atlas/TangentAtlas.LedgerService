@@ -5,6 +5,7 @@
 namespace AtlasLedger.Server.Compliance
 {
     using System;
+    using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
@@ -42,6 +43,10 @@ namespace AtlasLedger.Server.Compliance
 
         private readonly SemaphoreSlim partitionCreated = new SemaphoreSlim(0);
 
+        private readonly JournalWindow journalWindow;
+
+        private readonly TimeProvider time;
+
         private bool isRunning;
 
         private readonly ILogger<RulesService> logger;
@@ -54,13 +59,15 @@ namespace AtlasLedger.Server.Compliance
         /// <param name="options">The compliance settings.</param>
         /// <param name="switchboard">The services' switches.</param>
         /// <param name="logger">The logger.</param>
-        public RulesService(Ledger ledger, RulesEngineHost host, IOptions<ComplianceOptions> options, ServiceSwitchboard switchboard, HoldingsStore holdings, ILogger<RulesService> logger)
+        public RulesService(Ledger ledger, RulesEngineHost host, IOptions<ComplianceOptions> options, ServiceSwitchboard switchboard, HoldingsStore holdings, TimeProvider time, ILogger<RulesService> logger)
         {
             this.ledger = ledger;
             this.host = host;
             this.options = options.Value;
             this.serviceSwitch = switchboard[ServiceSwitchboard.Rules];
             this.holdings = holdings;
+            this.time = time;
+            this.journalWindow = new JournalWindow(this.options.JournalWindow);
             this.logger = logger;
         }
 
@@ -160,13 +167,17 @@ namespace AtlasLedger.Server.Compliance
         }
 
         /// <summary>
-        /// Discards journal history no engine needs; without it, deleted rows would stay in memory forever.  With no engine,
-        /// nothing needs any of it.  (The flusher writes from its own set of changed rows, not from the journal.)
+        /// Discards journal history no engine needs and older than the sync clients' window; without it, deleted rows would
+        /// stay in memory forever.  With no engine, only the window is kept.  (The flusher writes from its own set of changed
+        /// rows, not from the journal.)
         /// </summary>
         private void TrimJournals()
         {
+            var now = this.time.GetUtcNow();
+            var present = new HashSet<Guid>();
             foreach (var partition in this.ledger.Partitions)
             {
+                present.Add(partition.TenantId);
                 if (partition.IsFaulted)
                 {
                     continue;
@@ -174,16 +185,18 @@ namespace AtlasLedger.Server.Compliance
 
                 try
                 {
+                    // Never past what the sync clients' window keeps.
+                    var windowStart = this.journalWindow.Mark(partition.TenantId, partition.CommittedSequence, now);
                     if (this.host.FindEngine(partition.TenantId) is { } engine)
                     {
-                        if (engine.AppliedSequence > 0)
+                        if (engine.AppliedSequence > 0 && windowStart > 0)
                         {
-                            partition.TrimJournal(engine.AppliedSequence);
+                            partition.TrimJournal(Math.Min(engine.AppliedSequence, windowStart));
                         }
                     }
-                    else if (!this.serviceSwitch.IsOn)
+                    else if (!this.serviceSwitch.IsOn && windowStart > 0)
                     {
-                        partition.TrimJournal(long.MaxValue);
+                        partition.TrimJournal(windowStart);
                     }
                 }
                 catch (InvalidOperationException)
@@ -191,6 +204,8 @@ namespace AtlasLedger.Server.Compliance
                     // The partition is loading or has just faulted: trim it next time.
                 }
             }
+
+            this.journalWindow.Keep(present);
         }
 
         private void OnCycleCompleted(object? sender, RulesCycleEventArgs eventArgs)

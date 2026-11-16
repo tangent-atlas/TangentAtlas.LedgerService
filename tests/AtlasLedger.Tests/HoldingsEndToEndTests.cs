@@ -1,4 +1,4 @@
-// <copyright file="HoldingsEndToEndTests.cs" company="Tangent Atlas">
+﻿// <copyright file="HoldingsEndToEndTests.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -136,6 +136,104 @@ namespace AtlasLedger.Tests
             holdings = await WaitForAsync(tool, tenantId, found => Quantity(found, Joe10Account.AssetIdOf("AAA")) == 2_500m, cancellationToken);
             Assert.True(holdings.Holdings.Single(holding => holding.AssetId == Joe10Account.AssetIdOf("AAA")).IsOverridden);
             Assert.Equal(6_000m, Quantity(holdings, Joe10Account.AssetIdOf("BBB")));
+        }
+
+        /// <summary>
+        /// What the rules derive is in the model's derived tables, which a client's Replica follows through sync: the
+        /// positions, prices and net contributions arrive, an override changes the position in the Replica, and a client
+        /// can't write them.
+        /// </summary>
+        /// <returns>A task.</returns>
+        [Fact]
+        public async Task TheDerivedTablesReachAReplicaThroughSync()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await WaitForAsync(tool, tenantId, found => found.Holdings.Count == 3, cancellationToken);
+
+            var replica = new client::AtlasLedger.Model.Ledger();
+            var sync = tool.Sync(replica, tenantId, new[] { "Position", "EffectivePrice", "AccountFlow" });
+            Assert.Contains("Asset", sync.Tables);   // the positions' parents come with them
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (sync.Partition.Positions.Count < 3 && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            decimal Held(Guid assetId) => sync.Partition.Positions.Single(position => position.AssetId == assetId).Quantity;
+            Assert.Equal(3_000m, Held(Joe10Account.AssetIdOf("AAA")));
+            Assert.Equal(500_020m, Held(Joe10Account.DollarId));
+            Assert.Equal(1m, sync.Partition.EffectivePrices.Single(price => price.AssetId == Joe10Account.DollarId).Price);
+            Assert.Equal(1_000_000m, sync.Partition.AccountFlows.Single().NetContributions);
+
+            var now = DateTimeOffset.UtcNow;
+            var overriding = new PositionOverrideEvent
+            {
+                AccountId = Joe10Account.AccountId,
+                TradeDate = DateOnly.FromDateTime(now.UtcDateTime),
+                ExpiresTime = now.AddHours(1),
+                Reason = "A test of the Replica following a change.",
+                Items = [new ActivityItem(Joe10Account.AssetIdOf("AAA"), 2_500m, null)],
+            };
+            await tool.ApplyAsync(tenantId, new LedgerScript().AppendEvent(overriding, Guid.NewGuid(), EventSource.Operator, "override-replica", now.AddMinutes(-5), now), cancellationToken);
+            deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (Held(Joe10Account.AssetIdOf("AAA")) != 2_500m && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            Assert.Equal(2_500m, Held(Joe10Account.AssetIdOf("AAA")));
+            Assert.Equal(6_000m, Held(Joe10Account.AssetIdOf("BBB")));
+            var refused = await Assert.ThrowsAsync<LedgerApiException>(() => tool.ApplyAsync(tenantId, new LedgerScript().Insert("AccountFlow", new client::AtlasLedger.Model.AccountFlowDto { AccountId = Joe10Account.AccountId, NetContributions = 1m }), cancellationToken));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);   // the server writes derived tables; clients only read them
+        }
+
+        /// <summary>
+        /// The website's sync, as the person it signs in: the tables its pages read (TangentAtlas.Web's LiveLedgers.Tables)
+        /// in a tenant where the person is a user, with Ledger.Read; and a 404 for a tenant where they are not.
+        /// </summary>
+        /// <returns>A task.</returns>
+        [Fact]
+        public async Task APersonSyncsTheWebsitesTablesInTheirOwnTenantOnly()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var person = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Advisor);
+            var (theirs, another) = (Guid.NewGuid(), Guid.NewGuid());
+            var state = ReadState();
+            await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
+            foreach (var tenantId in new[] { theirs, another })
+            {
+                await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+                await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            }
+
+            await tool.ApplyAsync(theirs, Joe10Account.Weights(state), cancellationToken);
+            await tool.ApplyAsync(theirs, new LedgerScript().Insert("User", new client::AtlasLedger.Model.UserDto { UserId = Guid.NewGuid(), IdentityIssuer = DevelopmentCallers.Issuer, IdentitySubject = DevelopmentCallers.AdvisorSubject }), cancellationToken);
+            await WaitForAsync(tool, theirs, found => found.Holdings.Count == 3, cancellationToken);
+
+            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution"];
+            var sync = person.Sync(new client::AtlasLedger.Model.Ledger(), theirs, website);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (sync.Partition.Positions.Count < 3 && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            Assert.Equal(3, sync.Partition.Positions.Count);
+            Assert.NotEmpty(sync.Partition.CurrencyRates);
+            Assert.NotEmpty(sync.Partition.Weights);
+            Assert.Equal(Joe10Account.AccountId, sync.Partition.Accounts.Single().AccountId);
+            Assert.Empty(sync.Partition.Events);   // only what the website asked for
+
+            var elsewhere = person.Sync(new client::AtlasLedger.Model.Ledger(), another, website);
+            var refused = await Assert.ThrowsAsync<client::AtlasLedger.Model.Replica.LedgerSyncException>(() => elsewhere.SyncAsync(TimeSpan.Zero, cancellationToken));
+            Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
         }
 
         [Fact]

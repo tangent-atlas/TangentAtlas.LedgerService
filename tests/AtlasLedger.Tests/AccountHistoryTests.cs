@@ -20,6 +20,7 @@ namespace AtlasLedger.Tests
     using server::AtlasLedger.Model.Primary;
     using server::AtlasLedger.Server.Brokers;
     using server::AtlasLedger.Server.Holdings;
+    using EffectivePrice = server::AtlasLedger.Server.Holdings.EffectivePrice;
     using server::AtlasLedger.Server.Jobs;
     using server::AtlasLedger.Server.Market;
     using Xunit;

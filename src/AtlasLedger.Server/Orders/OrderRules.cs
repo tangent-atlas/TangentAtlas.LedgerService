@@ -1,4 +1,4 @@
-// <copyright file="OrderRules.cs" company="Tangent Atlas">
+﻿// <copyright file="OrderRules.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -11,6 +11,8 @@ namespace AtlasLedger.Server.Orders
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Compliance;
     using AtlasLedger.Server.Holdings;
+    using EffectivePrice = AtlasLedger.Server.Holdings.EffectivePrice;
+    using CurrencyRate = AtlasLedger.Server.Holdings.CurrencyRate;
     using NRules.Fluent.Dsl;
 
     /// <summary>

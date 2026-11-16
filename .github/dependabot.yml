@@ -1,14 +1,27 @@
-# Dependabot: weekly pull requests for out-of-date NuGet packages and GitHub Actions.
-# Security updates for known vulnerabilities are separate and immediate (turned on in the repository's settings).
+# Dependabot: weekly pull requests for out-of-date NuGet packages and GitHub Actions, one pull request per ecosystem
+# (packages that release together, such as .NET's, move together).  Major versions of .NET's own packages and tools are
+# ignored: the solution is on .NET 10 until we decide to move.  Security updates for known vulnerabilities are separate
+# and immediate (turned on in the repository's settings).
 version: 2
 updates:
   - package-ecosystem: "nuget"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    groups:
+      nuget:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "Microsoft.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "System.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet-ef"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

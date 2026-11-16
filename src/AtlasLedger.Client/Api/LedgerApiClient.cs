@@ -452,6 +452,38 @@ namespace AtlasLedger.Client.Api
         private static string RowPath(Guid tenantId, string table, object[] key) =>
             $"{TablePath(tenantId, table)}/{string.Join("/", key.Select(column => Uri.EscapeDataString(Convert.ToString(column, CultureInfo.InvariantCulture) ?? string.Empty)))}";
 
+        /// <summary>
+        /// Signs a request in as this client's caller: the development caller's header, or a bearer token.  The generated sync
+        /// client calls it for each of its requests.
+        /// </summary>
+        /// <param name="request">The request.</param>
+        /// <param name="cancellationToken">Cancels getting a token.</param>
+        /// <returns>A task that completes when the request is signed in.</returns>
+        public async ValueTask AuthorizeAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            if (this.caller != null)
+            {
+                request.Headers.Add(DevelopmentCallers.Header, this.caller);
+            }
+
+            if (this.accessToken != null)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await this.accessToken(cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        /// <summary>
+        /// Creates the generated sync client for a tenant, signed in as this client's caller: it keeps the tables a view needs in
+        /// a Replica, current with the server.
+        /// </summary>
+        /// <param name="ledger">The Replica.</param>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="tables">The tables (their parents are added); null for every table the caller may read.</param>
+        /// <returns>The sync client.</returns>
+        public AtlasLedger.Model.Replica.LedgerSyncClient Sync(Ledger ledger, Guid tenantId, IEnumerable<string>? tables = null) =>
+            new AtlasLedger.Model.Replica.LedgerSyncClient(this.httpClient, ledger, tenantId, tables, this.AuthorizeAsync, SerializerOptions);
+
         private async Task<HttpRequestMessage> CreateRequestAsync(HttpMethod method, string path, CancellationToken cancellationToken)
         {
             var request = new HttpRequestMessage(method, path);

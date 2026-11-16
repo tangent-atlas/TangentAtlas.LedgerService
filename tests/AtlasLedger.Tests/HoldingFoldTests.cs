@@ -1,4 +1,4 @@
-// <copyright file="HoldingFoldTests.cs" company="Tangent Atlas">
+﻿// <copyright file="HoldingFoldTests.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -13,6 +13,7 @@ namespace AtlasLedger.Tests
     using server::AtlasLedger.Model;
     using server::AtlasLedger.Model.Primary;
     using server::AtlasLedger.Server.Holdings;
+    using EffectivePrice = server::AtlasLedger.Server.Holdings.EffectivePrice;
     using Xunit;
 
     /// <summary>

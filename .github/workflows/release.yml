@@ -1,0 +1,57 @@
+# Publishes the AtlasLedger.Model package (the ledger's bellerophon.json and the types it names) to nuget.org when a
+# model tag is pushed:
+#
+#   git tag model-v1.0.0
+#   git push origin model-v1.0.0
+#
+# The tag is the version (model-v1.0.0 publishes 1.0.0; model-v1.1.0-preview.1 publishes a prerelease).  The website
+# generates its Replica from this package, and the server refuses a client whose model fingerprint differs (426), so tag
+# the commit that is deployed to production, and move the website to the new version in the same release.
+#
+# No API key is stored: nuget.org's trusted publishing exchanges this workflow's GitHub token for a key that lasts one
+# hour.  It needs a trusted publishing policy on nuget.org (owner tangent-atlas, repository TangentAtlas.LedgerService,
+# workflow release.yml) and the repository secret NUGET_USER, the nuget.org profile name that owns the package.
+name: Release model
+
+on:
+  push:
+    tags: ['model-v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write   # lets the job ask GitHub for the token nuget.org trusts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#model-v}" >> "$GITHUB_ENV"
+
+      # The whole solution builds and tests first: the model in the package is the one the server was tested with.
+      - name: Build
+        run: dotnet build TangentAtlas.LedgerService.sln --configuration Release
+
+      - name: Test
+        run: dotnet test --solution TangentAtlas.LedgerService.sln --configuration Release --no-build
+
+      - name: Pack
+        run: dotnet pack src/TangentAtlas --configuration Release --output artifacts -p:Version=$VERSION
+
+      - name: Sign in to nuget.org
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # --skip-duplicate makes re-running a release harmless.
+      - name: Publish
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

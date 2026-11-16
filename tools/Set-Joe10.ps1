@@ -8,11 +8,12 @@
     with -Production the server in Azure (%APPDATA%\TangentAtlas\ledger-client.json, which TangentAtlas.Platform's
     Deploy-EntraApplications.ps1 writes; the tools sign in with their certificate, from this computer's address):
       1. test-data joe10 writes the Joe 10's scripts (from -StatePath, the forward test's state, or a generic Joe 10).
-      2. script-loader loads the reference (the account at the simulated broker, its model and assets), the history
+      2. access-test whoami signs the test person in (a browser opens the first time: sign in as the test person,
+         ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant, first, so a page they have open
+         shows the account as it loads (within the website's tenant refresh, ten seconds).
+      3. script-loader loads the reference (the account at the simulated broker, its model and assets), the history
          (the deposit and the purchases at the state's close), the jobs (orders at 3:45 pm New York on market days) and
          the model's weights.
-      3. access-test whoami signs the test person in (a browser opens the first time: sign in as the test person,
-         ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant.
     It loads a new tenant: if the tenant already has events, it stops and says so (name another with -TenantId, or
     start from an empty database).
 
@@ -95,28 +96,26 @@ try {
     }
     Invoke-Program $programs.TestData $testDataArguments
 
-    Write-Host "`n== Loading tenant $TenantId" -ForegroundColor Cyan
+    Write-Host "`n== Tenant $TenantId" -ForegroundColor Cyan
     # A new tenant answers 404 here, which is what we want: its message isn't shown.
     $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1 2>$null) -join ''
     if ($LASTEXITCODE -eq 0 -and $existing.Trim()) {
         throw "Tenant $TenantId already has events: it is loaded.  Name another with -TenantId, or start from an empty database."
     }
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
-
     Write-Host "`n== The test person signs in; they become a user of the tenant" -ForegroundColor Cyan
     if ($SignOut) { Invoke-Program $programs.AccessTest @('sign-out') }
     $identity = (& dotnet $programs.AccessTest.Path whoami) -join '' | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or -not $identity.subject) { throw 'access-test whoami failed.' }
     Write-Host "   Signed in: $($identity.subject) ($($identity.issuer))"
-
     $member = Join-Path $work 'member.json'
     @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = [guid]::NewGuid(); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
         ConvertTo-Json -Depth 5 | Set-Content -Path $member -Encoding utf8
     Invoke-Program $programs.Loader @("$TenantId", $member)
-
+    Write-Host "`n== Loading the Joe 10" -ForegroundColor Cyan
+    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
+    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'))
+    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
+    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
     Write-Host "`nDone: the Joe 10 is tenant $TenantId, and $($identity.subject) is its user.  Sign in to the website as the test person." -ForegroundColor Green
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

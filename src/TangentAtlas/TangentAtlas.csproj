@@ -3,9 +3,27 @@
   <!--
     The enums and custom types the model's datatypes name.  Bellerophon does not generate these; it resolves them by name
     from whatever the project references.
+
+    Packed as AtlasLedger.Model: these types and the model file (the server's bellerophon.json), so a project elsewhere (the
+    website) generates its Replica exactly as the server generates its Primary: the Bellerophon package, this package, and
+    its role.  The model file is added to that project's AdditionalFiles by the package's build props.  The ledger's own
+    projects reference this project directly and keep using the server's file.
   -->
   <PropertyGroup>
     <RootNamespace>AtlasLedger.Model</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>AtlasLedger.Model</PackageId>
+    <Authors>Tangent Atlas</Authors>
+    <Description>The Tangent Atlas ledger's data model: its bellerophon.json and the types it names. With Bellerophon and a BellerophonRole, a project generates its role of the model (a Replica for a client).</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/tangent-atlas/TangentAtlas.LedgerService</RepositoryUrl>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix>dev</VersionSuffix>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\AtlasLedger.Server\bellerophon.json" Pack="true" PackagePath="model\bellerophon.json" Visible="false" />
+    <None Include="build\AtlasLedger.Model.props" Pack="true" PackagePath="buildTransitive\AtlasLedger.Model.props" />
+  </ItemGroup>
 
 </Project>

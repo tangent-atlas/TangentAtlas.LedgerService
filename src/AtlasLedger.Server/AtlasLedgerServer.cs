@@ -131,6 +131,7 @@ namespace AtlasLedger.Server
                     compliance.MaximumConcurrentCycles);
             });
             builder.Services.AddHostedService<RulesService>();
+            builder.Services.AddHostedService<DerivedTablesGate>();   // after the rules start: no traffic until each tenant's tables are derived
 
             // Market data: simulated until a real feed is connected.  Its switch decides whether it runs.
             builder.Services.Configure<MarketFeedOptions>(configuration.GetSection(MarketFeedOptions.SectionName));

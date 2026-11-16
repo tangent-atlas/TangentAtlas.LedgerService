@@ -80,6 +80,33 @@ namespace AtlasLedger.Tests
         /// the server: recovery discards what it loaded and starts over, and the server comes up with every tenant whole.
         /// </summary>
         /// <returns>A task that completes when the test is done.</returns>
+        /// <summary>
+        /// After a restart with the rules on, the tables the rules derive (kept in memory only) are rebuilt before the server
+        /// takes traffic: a client's first snapshot already holds the account's positions.
+        /// </summary>
+        /// <returns>A task.</returns>
+        [Fact]
+        public async Task AfterARestartTheDerivedTablesAreBuiltBeforeTraffic()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var database = new InMemoryLedgerDatabase();
+            var tenant = Guid.NewGuid();
+            var state = client::AtlasLedger.Client.TestData.Joe10State.Generic();
+            await using (var first = await StartAsync(database, cancellationToken, "--Services:StartOn=rules"))
+            {
+                var tool = Tool(first);
+                await tool.ApplyAsync(tenant, client::AtlasLedger.Client.TestData.Joe10Account.Reference(state), cancellationToken);
+                await tool.CommitTransactionsAsync(tenant, client::AtlasLedger.Client.TestData.Joe10Account.History(state, 1_000_000m), cancellationToken);
+                await first.StopAsync(cancellationToken);
+            }
+
+            await using var second = await StartAsync(database, cancellationToken, "--Services:StartOn=rules");
+            var sync = Tool(second).Sync(new client::AtlasLedger.Model.Ledger(), tenant, new[] { "Position" });
+            await sync.SyncAsync(TimeSpan.Zero, cancellationToken);   // the first request after the restart, with no waiting
+
+            Assert.NotEmpty(sync.Partition.Positions);
+        }
+
         [Fact]
         public async Task RecoveryStartsOverWhenTheDatabaseFailsPartway()
         {
@@ -135,9 +162,9 @@ namespace AtlasLedger.Tests
             Assert.Contains("stored rows are inconsistent", failure.Message, StringComparison.Ordinal);
         }
 
-        private static async Task<WebApplication> StartAsync(InMemoryLedgerDatabase database, CancellationToken cancellationToken)
+        private static async Task<WebApplication> StartAsync(InMemoryLedgerDatabase database, CancellationToken cancellationToken, params string[] extraSettings)
         {
-            var application = AtlasLedgerServer.Build(Settings, services => services.AddSingleton<ILedgerDatabase>(database));
+            var application = AtlasLedgerServer.Build([.. Settings, .. extraSettings], services => services.AddSingleton<ILedgerDatabase>(database));
             await application.StartAsync(cancellationToken);
             return application;
         }

@@ -37,5 +37,11 @@ namespace AtlasLedger.Server.Compliance
         /// rather than a snapshot.
         /// </summary>
         public TimeSpan JournalWindow { get; set; } = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// Gets or sets how long the server waits at startup, when the rules start on, for each tenant's rules to derive its
+        /// tables (positions, prices, statistics) before it accepts traffic anyway.
+        /// </summary>
+        public TimeSpan StartupWait { get; set; } = TimeSpan.FromMinutes(1);
     }
 }

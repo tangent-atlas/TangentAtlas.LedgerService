@@ -31,10 +31,20 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME#model-v}" >> "$GITHUB_ENV"
+
+      # A tag on the wrong commit publishes the wrong model under a version nuget.org can never take back: the tag must
+      # name the version the commit itself declares (VersionPrefix in src/TangentAtlas/TangentAtlas.csproj).
+      - name: The tag matches the commit's version
+        run: |
+          declared=$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' src/TangentAtlas/TangentAtlas.csproj)
+          if [ "${VERSION%%-*}" != "$declared" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME is on a commit that declares version $declared. Tag the commit that declares ${VERSION%%-*}."
+            exit 1
+          fi
 
       # The whole solution builds and tests first: the model in the package is the one the server was tested with.
       - name: Build

@@ -20,7 +20,8 @@ namespace AtlasLedger.Server.Jobs
     using Quartz;
     using Quartz.Impl;
     using Quartz.Impl.Calendar;
-    using Quartz.Spi;
+    using Quartz.Extensibility;
+    using JobRunStatus = AtlasLedger.Model.JobRunStatus;
 
     /// <summary>
     /// Settings for jobs.
@@ -143,7 +144,7 @@ namespace AtlasLedger.Server.Jobs
             var calendar = new HolidayCalendar { TimeZone = Exchange };
             foreach (var day in MarketCalendar.Holidays)
             {
-                calendar.AddExcludedDate(day.ToDateTime(TimeOnly.MinValue));
+                calendar.AddExcludedDay(day);
             }
 
             return calendar;
@@ -159,11 +160,16 @@ namespace AtlasLedger.Server.Jobs
         /// <returns>The time, or null if it never fires again.</returns>
         public static DateTimeOffset? NextTime(string cron, TimeZoneInfo zone, ICalendar? calendar, DateTimeOffset after)
         {
-            var trigger = (IOperableTrigger)TriggerBuilder.Create()
-                .StartAt(after.AddMilliseconds(1))
-                .WithSchedule(CronScheduleBuilder.CronSchedule(cron).InTimeZone(zone))
-                .Build();
-            return trigger.ComputeFirstFireTimeUtc(calendar);
+            // Read straight from the expression (a trigger built for the purpose starts no earlier than now, so it can't
+            // answer for a moment in the past), stepping over the days the calendar excludes.
+            var expression = new CronExpression(cron, zone);
+            var next = expression.GetNextValidTimeAfter(after);
+            while (next is { } time && calendar is not null && !calendar.IsTimeIncluded(time))
+            {
+                next = expression.GetNextValidTimeAfter(time);
+            }
+
+            return next;
         }
 
         /// <summary>
@@ -201,7 +207,7 @@ namespace AtlasLedger.Server.Jobs
             {
                 var start = await quartz.GetTrigger(TriggerOf(StartKey(tenantId, state.JobScheduleId)), cancellationToken).ConfigureAwait(false);
                 var stop = await quartz.GetTrigger(TriggerOf(StopKey(tenantId, state.JobScheduleId)), cancellationToken).ConfigureAwait(false);
-                states.Add(state with { NextStart = start?.GetNextFireTimeUtc(), NextStop = stop?.GetNextFireTimeUtc() });
+                states.Add(state with { NextStart = start?.NextFireTimeUtc, NextStop = stop?.NextFireTimeUtc });
             }
 
             return states;
@@ -225,16 +231,14 @@ namespace AtlasLedger.Server.Jobs
             try
             {
                 // Quartz keeps schedulers by name, process-wide: each server gets its own.
-                var factory = new StdSchedulerFactory(new NameValueCollection
-                {
-                    ["quartz.scheduler.instanceName"] = $"AtlasLedger-{Guid.NewGuid():N}",
-                    ["quartz.threadPool.maxConcurrency"] = "4",
-                });
-                var quartz = await factory.GetScheduler(stoppingToken).ConfigureAwait(false);
-                quartz.JobFactory = new ServiceJobFactory(this.services);
+                var quartz = await QuartzSchedulerBuilder
+                    .Create(builder => builder.UseDefaultThreadPool(4).UseJobFactory(new ServiceJobFactory(this.services)))
+                    .UseProperties(new NameValueCollection { ["quartz.scheduler.instanceName"] = $"AtlasLedger-{Guid.NewGuid():N}" })
+                    .BuildScheduler(stoppingToken)
+                    .ConfigureAwait(false);
                 if (this.options.MarketHolidays)
                 {
-                    await quartz.AddCalendar(MarketCalendarName, MarketHolidays(), replace: true, updateTriggers: true, stoppingToken).ConfigureAwait(false);
+                    await quartz.AddCalendar(MarketCalendarName, MarketHolidays(), AddCalendarOptions.ReplacingAndUpdatingTriggers, stoppingToken).ConfigureAwait(false);
                     if (this.timeProvider.GetUtcNow().Year >= MarketCalendar.LastYear)
                     {
                         this.LogCalendarEnding(MarketCalendar.LastYear);
@@ -507,12 +511,12 @@ namespace AtlasLedger.Server.Jobs
                     return ($"{row.Status} is not a status.", null);
             }
 
-            if (row.CronSchedule is not { } cron || !CronExpression.IsValidExpression(cron))
+            if (row.CronSchedule is not { } cron || !CronExpression.TryParse(cron, out _))
             {
                 return ($"CronSchedule \"{row.CronSchedule}\" is not a Quartz cron expression (seconds minutes hours day-of-month month day-of-week, such as 0 45 15 ? * MON-FRI).", null);
             }
 
-            if (job.Kind == JobKind.Service && (row.StopSchedule is not { } stop || !CronExpression.IsValidExpression(stop)))
+            if (job.Kind == JobKind.Service && (row.StopSchedule is not { } stop || !CronExpression.TryParse(stop, out _)))
             {
                 return ($"{job.Key} is a service: its schedule needs a StopSchedule, a Quartz cron expression for when it stops (\"{row.StopSchedule}\" is not one).", null);
             }
@@ -546,13 +550,13 @@ namespace AtlasLedger.Server.Jobs
             var trigger = TriggerBuilder.Create()
                 .WithIdentity(TriggerOf(key))
                 .ForJob(key)
-                .WithSchedule(CronScheduleBuilder.CronSchedule(cron).InTimeZone(zone).WithMisfireHandlingInstructionDoNothing());
+                .WithSchedule(CronScheduleBuilder.Create(cron).InTimeZone(zone).WithMisfireInstruction(CronTriggerMisfireInstruction.DoNothing));
             if (job.MarketDaysOnly && this.options.MarketHolidays)
             {
-                trigger = trigger.ModifiedByCalendar(MarketCalendarName);
+                trigger = trigger.WithCalendarName(MarketCalendarName);
             }
 
-            return await quartz.ScheduleJob(detail, trigger.Build(), cancellationToken).ConfigureAwait(false);
+            return await quartz.ScheduleJob(detail, trigger.Build(), default, cancellationToken).ConfigureAwait(false);
         }
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Jobs: scheduler started with {Count} job(s): {Jobs}.")]
@@ -588,14 +592,18 @@ namespace AtlasLedger.Server.Jobs
     internal sealed class ServiceJobFactory(IServiceProvider services) : IJobFactory
     {
         /// <inheritdoc/>
-        public IJob NewJob(TriggerFiredBundle bundle, IScheduler scheduler)
+        public ValueTask<JobScope> CreateJob(TriggerFiredBundle bundle, IScheduler scheduler, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(bundle);
-            return (IJob)ActivatorUtilities.CreateInstance(services, bundle.JobDetail.JobType);
+            return ValueTask.FromResult(new JobScope((IJob)ActivatorUtilities.CreateInstance(services, bundle.JobDetail.JobType.Type), null));
         }
 
         /// <inheritdoc/>
-        public void ReturnJob(IJob job) => (job as IDisposable)?.Dispose();
+        public ValueTask ReturnJob(JobScope scope, CancellationToken cancellationToken)
+        {
+            (scope.Job as IDisposable)?.Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>
@@ -641,7 +649,7 @@ namespace AtlasLedger.Server.Jobs
         }
 
         /// <inheritdoc/>
-        public Task Execute(IJobExecutionContext context)
+        public ValueTask Execute(IJobExecutionContext context, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(context);
             var data = context.MergedJobDataMap;
@@ -664,7 +672,7 @@ namespace AtlasLedger.Server.Jobs
                 }
             }
 
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
     }
 }

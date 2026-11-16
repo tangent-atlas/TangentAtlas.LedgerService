@@ -19,6 +19,7 @@ namespace AtlasLedger.Tests
     using client::AtlasLedger.Model;
     using Microsoft.Extensions.DependencyInjection;
     using Quartz;
+    using JobRunStatus = AtlasLedger.Model.JobRunStatus;
     using server::AtlasLedger.Server;
     using server::AtlasLedger.Server.Jobs;
     using server::AtlasLedger.Server.Persistence;

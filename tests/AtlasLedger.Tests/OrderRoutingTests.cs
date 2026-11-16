@@ -276,7 +276,10 @@ namespace AtlasLedger.Tests
             var (market, resting) = (Guid.NewGuid(), Guid.NewGuid());
             await tool.ApplyAsync(tenantId, ManualOrder(resting, 5m, brokerOrders: [(Guid.NewGuid(), 5m, OrderType.Limit, 0.01m)]), cancellationToken);
             await tool.ApplyAsync(tenantId, ManualOrder(market, 5m, link: new OrderLink(OrderLinkType.OneCancelsOther, [resting]), brokerOrders: [(Guid.NewGuid(), 5m, OrderType.Market, null)]), cancellationToken);
-            var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.SingleOrDefault(order => order.OrderId == resting)?.BrokerOrders.Single().Status == "Cancelled");
+            // The cancellation and the fill arrive in separate rules cycles: wait for both, then check them.
+            var orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found =>
+                found.Orders.SingleOrDefault(order => order.OrderId == resting)?.BrokerOrders.Single().Status == "Cancelled" &&
+                found.Orders.SingleOrDefault(order => order.OrderId == market)?.Status == "Filled");
             Assert.Equal("Filled", orders.Orders.Single(order => order.OrderId == market).Status);
 
             // One triggers other: the child is held while its trigger (a limit far below) works, and is never sent.
@@ -289,7 +292,9 @@ namespace AtlasLedger.Tests
 
             // Its trigger cancelled without filling, the child is refused.
             await tool.ApplyAsync(tenantId, new LedgerScript().AppendEvent(new CancelRequestedEvent { OrderId = trigger }, Guid.NewGuid(), EventSource.Operator, $"cancel-{trigger:N}", DateTimeOffset.UtcNow, correlationId: trigger), cancellationToken);
-            orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.Single(order => order.OrderId == child).BrokerOrders.Single().Status == "Rejected");
+            orders = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found =>
+                found.Orders.Single(order => order.OrderId == child).BrokerOrders.Single().Status == "Rejected" &&
+                found.Orders.Single(order => order.OrderId == trigger).Status == "Cancelled");
             Assert.Equal("Cancelled", orders.Orders.Single(order => order.OrderId == trigger).Status);
 
             // With a trigger that fills, the child is sent and fills.

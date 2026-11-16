@@ -70,7 +70,7 @@ $programs = @{
     AccessTest = @{ Project = 'AtlasLedger.AccessTest'; Assembly = 'access-test' }
 }
 foreach ($program in $programs.Values) {
-    $program.Path = Join-Path $repository "src/$($program.Project)/bin/Release/net10.0/$($program.Assembly).dll"
+    $program.Path = Join-Path $repository "src/$($program.Project)/bin/Release/net11.0/$($program.Assembly).dll"
     if (-not $NoBuild) {
         dotnet build (Join-Path $repository "src/$($program.Project)") --configuration Release --nologo --verbosity quiet
         if ($LASTEXITCODE -ne 0) { throw "Building $($program.Project) failed." }

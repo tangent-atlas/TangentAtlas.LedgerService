@@ -57,9 +57,9 @@ $programs = @{
     AccessTest = @{ Project = 'AtlasLedger.AccessTest'; Assembly = 'access-test' }
 }
 foreach ($program in $programs.Values) {
-    $program.Path = Join-Path $repository "src/$($program.Project)/bin/Release/net10.0/$($program.Assembly).dll"
+    $program.Path = Join-Path $repository "src/$($program.Project)/bin/Release/net11.0/$($program.Assembly).dll"
 }
-$data = Join-Path $repository 'src/AtlasLedger.ScriptLoader/bin/Release/net10.0/Data'
+$data = Join-Path $repository 'src/AtlasLedger.ScriptLoader/bin/Release/net11.0/Data'
 $work = Join-Path ([IO.Path]::GetTempPath()) "ledger-walkthrough-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $serverArguments = if ($Server) { @('--server', $Server) } else { @() }
 $script:failures = 0

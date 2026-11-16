@@ -26,7 +26,7 @@ Architecture, roadmap, decisions, and the deployment runbook are kept in the pri
 
 Package versions are in `Directory.Packages.props`. The generator (`Bellerophon`) and its libraries are released together,
 so they share one property, `BellerophonVersion`; change it to move to a new release. The build writes the generated code
-to `obj/<configuration>/net10.0/generated/` in each project.
+to `obj/<configuration>/net11.0/generated/` in each project.
 
 ## Build, test, run
 

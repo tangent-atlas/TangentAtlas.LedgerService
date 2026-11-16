@@ -1,4 +1,4 @@
-// <copyright file="Rebalancing.cs" company="Tangent Atlas">
+﻿// <copyright file="Rebalancing.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -10,6 +10,7 @@ namespace AtlasLedger.Server.Orders
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Holdings;
+    using EffectivePrice = AtlasLedger.Server.Holdings.EffectivePrice;
 
     /// <summary>
     /// One trade an account's model calls for now: whole units of one asset, bought or sold.

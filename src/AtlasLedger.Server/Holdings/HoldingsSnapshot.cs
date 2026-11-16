@@ -1,4 +1,4 @@
-// <copyright file="HoldingsSnapshot.cs" company="Tangent Atlas">
+﻿// <copyright file="HoldingsSnapshot.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -104,7 +104,8 @@ namespace AtlasLedger.Server.Holdings
         public IRulesSession CreateSession(IRulesTenant tenant)
         {
             ArgumentNullException.ThrowIfNull(tenant);
-            return new HoldingsSession((NRulesSession)this.inner.CreateSession(tenant), tenant.TenantId, this.store, this.timeProvider);
+            var actions = (LedgerRuleActions?)tenant.GetService(typeof(LedgerRuleActions)) ?? throw new InvalidOperationException("The rules tenant serves no rule actions.");
+            return new HoldingsSession((NRulesSession)this.inner.CreateSession(tenant), tenant.TenantId, this.store, actions, this.timeProvider);
         }
 
         private sealed class HoldingsSession : IRulesSession
@@ -115,15 +116,18 @@ namespace AtlasLedger.Server.Holdings
 
             private readonly HoldingsStore store;
 
+            private readonly LedgerRuleActions actions;
+
             private readonly TimeProvider timeProvider;
 
             private ClockFact? clock;
 
-            public HoldingsSession(NRulesSession inner, Guid tenantId, HoldingsStore store, TimeProvider timeProvider)
+            public HoldingsSession(NRulesSession inner, Guid tenantId, HoldingsStore store, LedgerRuleActions actions, TimeProvider timeProvider)
             {
                 this.inner = inner;
                 this.tenantId = tenantId;
                 this.store = store;
+                this.actions = actions;
                 this.timeProvider = timeProvider;
             }
 
@@ -159,6 +163,12 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<WeightFact>().ToArray(),
                     session.Query<Orders.ProposedAllocations>().ToArray(),
                     session.Query<EventProblem>().ToArray(),
+                    session.Query<AccountHistory>().ToArray()));
+                this.actions.Add(DerivedTables.Materialize(
+                    session.Query<PositionState>().ToArray(),
+                    session.Query<EffectivePrice>().ToArray(),
+                    session.Query<CurrencyRate>().ToArray(),
+                    session.Query<AccountFlow>().ToArray(),
                     session.Query<AccountHistory>().ToArray()));
                 return fired;
             }

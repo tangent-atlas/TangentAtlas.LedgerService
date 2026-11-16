@@ -1,4 +1,4 @@
-// <copyright file="HoldingFacts.cs" company="Tangent Atlas">
+﻿// <copyright file="HoldingFacts.cs" company="Tangent Atlas">
 //    Copyright © Tangent Atlas. All rights reserved.
 // </copyright>
 // <author>Donald Airey</author>
@@ -8,18 +8,6 @@ namespace AtlasLedger.Server.Holdings
     using System.Collections.Generic;
     using AtlasLedger.Model;
     using AtlasLedger.Model.Primary;
-
-    /// <summary>
-    /// Where an effective price came from.
-    /// </summary>
-    public enum PriceSource
-    {
-        /// <summary>The market's latest price.</summary>
-        Market,
-
-        /// <summary>No market price yet: the price of the last purchase or sale.</summary>
-        LastTrade,
-    }
 
     /// <summary>
     /// One movement of one asset in one account, as an event posts it: what the holdings fold.  Derived from account-activity

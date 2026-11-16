@@ -28,6 +28,7 @@
     "nodeType": "AtlasLedger.Model.NodeType",
     "optionRight": "AtlasLedger.Model.OptionRight",
     "price": { "precision": 18, "scale": 6, "type": "System.Decimal" },
+    "priceSource": "AtlasLedger.Model.PriceSource",
     "quantity": { "precision": 19, "scale": 6, "type": "System.Decimal" },
     "rate": { "precision": 9, "scale": 6, "type": "System.Decimal" },
     "string": "System.String",
@@ -367,6 +368,115 @@
       "references": {
         "Model": { "columns": ["ModelId"] },
         "Asset": { "columns": ["AssetId"] }
+      }
+    },
+    "Position": {
+      "description": "A holding: what an account's events add up to for one asset, derived by the rules after every change. Ephemeral and written only by the server: rebuilt from the events at startup, read through the API and client sync, never in the database. Its market value is Quantity × QuantityFactor × the asset's effective price × PriceFactor × the rate from QuoteCurrency to AccountCurrency.",
+      "key": ["AccountId", "AssetId"],
+      "columns": {
+        "AccountCurrency": { "maxLength": 3, "type": "string" },
+        "AccountId": "guid",
+        "AssetId": "guid",
+        "AssetType": "assetType",
+        "CostBasis": "money?",
+        "IsOverridden": "bool",
+        "LastEffectiveTime": "time",
+        "PriceFactor": "quantity",
+        "Quantity": "quantity",
+        "QuantityFactor": "quantity",
+        "QuoteCurrency": { "maxLength": 3, "type": "string" }
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Account": { "columns": ["AccountId"], "onDelete": "Cascade" },
+        "Asset": { "columns": ["AssetId"], "onDelete": "Cascade" }
+      }
+    },
+    "EffectivePrice": {
+      "description": "The price the rules use for an asset, as quoted, in its quote currency: the market's latest, or else the last purchase or sale. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["AssetId"],
+      "columns": {
+        "AsOf": "time",
+        "AssetId": "guid",
+        "Currency": { "maxLength": 3, "type": "string" },
+        "Price": "price",
+        "Source": "priceSource"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Asset": { "columns": ["AssetId"], "onDelete": "Cascade" }
+      }
+    },
+    "CurrencyRate": {
+      "description": "The price of one unit of a currency in another (1 for a currency in itself). Derived by the rules; ephemeral, written only by the server.",
+      "key": ["FromCurrency", "ToCurrency"],
+      "columns": {
+        "FromCurrency": { "maxLength": 3, "type": "string" },
+        "Rate": "price",
+        "ToCurrency": { "maxLength": 3, "type": "string" }
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false
+    },
+    "AccountFlow": {
+      "description": "An account's net contributions: its deposits less its withdrawals. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "NetContributions": "money"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Account": { "columns": ["AccountId"], "onDelete": "Cascade" }
+      }
+    },
+    "AccountDay": {
+      "description": "An account at one market day's close: its value, the day's deposits and withdrawals, its time-weighted return and the risk-free rate's. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["AccountId", "Date"],
+      "columns": {
+        "AccountId": "guid",
+        "Date": "date",
+        "Flow": "money",
+        "Return": "price?",
+        "RiskFreeReturn": "price?",
+        "Value": "money?"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Account": { "columns": ["AccountId"], "onDelete": "Cascade" }
+      }
+    },
+    "AccountStatistic": {
+      "description": "An account's performance measured from its daily returns: total and annualized return, volatility, Sharpe ratio and worst drawdown; ranked after 20 returns. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["AccountId"],
+      "columns": {
+        "AccountId": "guid",
+        "AnnualizedReturn": "price?",
+        "From": "date?",
+        "IsRanked": "bool",
+        "MaximumDrawdown": "price?",
+        "NetFlows": "money",
+        "Returns": "int",
+        "SharpeRatio": "price?",
+        "Through": "date?",
+        "TotalReturn": "price?",
+        "Value": "money?",
+        "Volatility": "price?"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Account": { "columns": ["AccountId"], "onDelete": "Cascade" }
       }
     },
     "JobRun": {

@@ -422,4 +422,16 @@ namespace AtlasLedger.Model
         /// <summary>Sets the holding to its quantity (an override).</summary>
         SetTo,
     }
+
+    /// <summary>
+    /// Where an effective price came from.
+    /// </summary>
+    public enum PriceSource
+    {
+        /// <summary>The market's latest price.</summary>
+        Market = 0,
+
+        /// <summary>No market price yet: the price of the last purchase or sale.</summary>
+        LastTrade = 1,
+    }
 }

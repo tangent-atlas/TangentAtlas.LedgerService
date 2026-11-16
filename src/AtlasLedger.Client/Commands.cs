@@ -562,7 +562,8 @@ namespace AtlasLedger.Client
         }
 
         /// <summary>
-        /// Exports every table the caller may read, parents first, as a script of inserts that loads into any tenant.
+        /// Exports every table the caller may read and write, parents first, as a script of inserts that loads into any tenant.
+        /// What the server derives (positions, daily values, statistics) is left out: loading the rest derives it again.
         /// </summary>
         /// <param name="api">The API.</param>
         /// <param name="tenantId">The tenant.</param>
@@ -572,7 +573,7 @@ namespace AtlasLedger.Client
         {
             ArgumentNullException.ThrowIfNull(api);
             var script = new LedgerScript();
-            foreach (var table in Ledger.TablesInDependencyOrder)
+            foreach (var table in Ledger.WritableTablesInDependencyOrder)
             {
                 try
                 {
@@ -701,7 +702,7 @@ namespace AtlasLedger.Client
         {
             ArgumentNullException.ThrowIfNull(output);
             var ledger = new Ledger();
-            var forbidden = await LedgerMirror.RefreshAsync(api, ledger, tenantId, cancellationToken).ConfigureAwait(false);
+            await LedgerMirror.RefreshAsync(api, ledger, tenantId, cancellationToken).ConfigureAwait(false);
             var partition = ledger.GetPartition(tenantId);
             lock (partition.SyncRoot)
             {
@@ -718,11 +719,6 @@ namespace AtlasLedger.Client
                         output.WriteLine($"  alert {alert.Rule}: {alert.Message}");
                     }
                 }
-            }
-
-            if (forbidden.Count > 0)
-            {
-                output.WriteLine($"Not copied (not allowed): {string.Join(", ", forbidden)}.");
             }
         }
 

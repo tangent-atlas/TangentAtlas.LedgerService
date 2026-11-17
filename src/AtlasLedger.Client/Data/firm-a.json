@@ -1,8 +1,9 @@
 {
   "operations": [
+    { "action": "Insert", "table": "Institution", "row": { "institutionId": "5a000000-0000-0000-0000-0000000000b1", "name": "Paper brokerage", "source": "Simulator" } },
     { "action": "Insert", "table": "Node", "row": { "nodeId": "5a000000-0000-0000-0000-000000000001", "displayName": "Smith Trust", "fullName": "Smith Family Trust", "nodeStatus": "Active", "nodeType": "Account" } },
     { "action": "Insert", "table": "Node", "row": { "nodeId": "5a000000-0000-0000-0000-000000000002", "displayName": "Lee 401k", "fullName": "Lee Family 401(k) Plan", "nodeStatus": "Active", "nodeType": "Account" } },
-    { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000001", "accountRole": "ManagedAccount", "accountType": "Brokerage", "currency": "USD" } },
+    { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000001", "accountRole": "ManagedAccount", "accountType": "Brokerage", "currency": "USD", "institutionId": "5a000000-0000-0000-0000-0000000000b1" } },
     { "action": "Insert", "table": "Account", "row": { "accountId": "5a000000-0000-0000-0000-000000000002", "accountRole": "GroupAccount", "accountType": "RetirementPlan", "currency": "USD" } },
     { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "1234-5678", "nodeId": "5a000000-0000-0000-0000-000000000001" } },
     { "action": "Insert", "table": "Symbol", "row": { "scheme": "Custodian", "code": "5555-0101", "nodeId": "5a000000-0000-0000-0000-000000000002" } },

@@ -74,9 +74,12 @@ dotnet run --project src/AtlasLedger.Operator -- services on rules --for 1.5
 dotnet run --project src/AtlasLedger.Operator -- services off              # all
 ```
 
-The market feed is a simulation until a broker's feed is connected: each second it moves some held symbols' prices a
-few pennies (`MarketFeed:MoveChance`, `MarketFeed:MaximumMove`) from where they stand (the last close, which the market
-history publishes after each market day), and the website shows each move as it happens.  For a demonstration,
+The market feed is the simulated broker's market, the same in development and production: in a tenant with an account at
+a simulated institution (`Institution.Source` = `Simulator`), each second it moves some prices a few pennies
+(`MarketFeed:MoveChance`, `MarketFeed:MaximumMove`) from where they stand (the last close, which the market history
+publishes after each market day), and the website shows each move as it happens.  A tenant with no simulated account is
+never priced by it, nor is anything held at a real institution.  Its bad prints (`MarketFeed:BadPrintInterval`) go only
+to a symbol nobody holds, such as the deployment test's sample stock.  For a demonstration,
 `tools/Set-MarketFeed.ps1 -On -Production` starts it for four hours (`-Hours` for more or less) and `-Off` stops it.
 
 With `ledger-client.json` in place the operator reaches the server in Azure; `--server` (or `ATLAS_LEDGER_SERVER`) names

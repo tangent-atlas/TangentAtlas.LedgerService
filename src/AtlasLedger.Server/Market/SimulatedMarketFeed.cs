@@ -19,8 +19,10 @@ namespace AtlasLedger.Server.Market
     using Microsoft.Extensions.Options;
 
     /// <summary>
-    /// Stands in for the market data feed: prices every symbol any tenant holds with a random walk (a ticker starting from its last trade), and now and then sends
-    /// a bad print.  It runs only while its switch (<see cref="ServiceSwitchboard.MarketFeed"/>) is on.
+    /// Stands in for the market data feed: moves the prices of the symbols any tenant holds a few pennies at a time, a few
+    /// symbols on each tick, from wherever the market left them (the last close the market history published; else the
+    /// ticker's last trade; else $100).  Now and then, if asked, it sends a bad print.  It runs only while its switch
+    /// (<see cref="ServiceSwitchboard.MarketFeed"/>) is on.
     /// </summary>
     /// <remarks>
     /// A real feed replaces this class and nothing else.  Prices go straight into each holding tenant's lock-free price
@@ -183,11 +185,23 @@ namespace AtlasLedger.Server.Market
             var badSymbol = isBadPrint ? holders.Keys.ElementAt(Random.Shared.Next(holders.Count)) : default;
             foreach (var (key, partitions) in holders)
             {
-                var last = this.prices.TryGetValue(key, out var previous) ? previous : openingPrices.GetValueOrDefault(key, OpeningPrice);
-                last = Math.Max(0.01m, Math.Round(last * (1m + ((decimal)Random.Shared.NextDouble() - 0.5m) / 100m), 2));
-                this.prices[key] = last;
+                // Where the price is now: what the tenants were last sent (a close, or this feed's last tick), unless that was a
+                // bad print; then what this feed last sent; then the opening price.  A symbol no tenant has a price for is
+                // priced at once, and a bad print is corrected on the next tick; any other symbol moves only by chance.
+                var published = partitions[0].FindPrice(key.Scheme, key.Code, key.Currency)?.Last;
+                var isUnpriced = published is null;
+                var wasBad = published is <= 0m;
+                var current = published is > 0m ? published.Value : this.prices.TryGetValue(key, out var previous) ? previous : openingPrices.GetValueOrDefault(key, OpeningPrice);
                 var isBad = isBadPrint && key == badSymbol;
-                var price = new Price { Scheme = key.Scheme, Code = key.Code, Currency = key.Currency, Last = isBad ? 0m : last, AsOf = now };
+                var moves = Random.Shared.NextDouble() < this.options.MoveChance;
+                if (!isUnpriced && !wasBad && !isBad && !moves)
+                {
+                    continue;
+                }
+
+                var next = moves ? Math.Max(0.01m, Math.Round(current + Move(), 2)) : current;
+                this.prices[key] = next;
+                var price = new Price { Scheme = key.Scheme, Code = key.Code, Currency = key.Currency, Last = isBad ? 0m : next, AsOf = now };
                 foreach (var partition in partitions)
                 {
                     partition.PublishPrice(price);
@@ -200,6 +214,16 @@ namespace AtlasLedger.Server.Market
             }
 
             return isBadPrint;
+        }
+
+        /// <summary>
+        /// One move: a whole number of pennies (the smallest price step) from one up to the most allowed, up or down.
+        /// </summary>
+        private decimal Move()
+        {
+            var steps = Math.Max(1, (int)Math.Floor(this.options.MaximumMove * 100m));
+            var size = Random.Shared.Next(1, steps + 1) / 100m;
+            return Random.Shared.Next(2) == 0 ? -size : size;
         }
 
         [LoggerMessage(Level = LogLevel.Information, Message = "Market feed: switched on until {OnUntil}.")]

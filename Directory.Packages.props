@@ -20,6 +20,8 @@
     <!-- The schema project's Entity Framework model and migrations. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="11.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="7.1.2" />
+    <PackageVersion Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="7.1.2" />
     <!-- Sign-in: bearer tokens from Microsoft Entra External ID. -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.92.0" />

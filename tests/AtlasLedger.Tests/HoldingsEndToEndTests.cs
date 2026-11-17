@@ -194,6 +194,53 @@ namespace AtlasLedger.Tests
         }
 
         /// <summary>
+        /// The simulated market feed moves prices a few pennies at a time from where they stand, and each move reaches a
+        /// client's Replica through sync like any other change: what the website's pages show as prices tick.
+        /// </summary>
+        /// <returns>A task.</returns>
+        [Fact]
+        public async Task TheMarketFeedMovesPricesByPenniesThroughSync()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(["--Services:StartOn=rules,market-feed", "--MarketFeed:TickInterval=00:00:00.100", "--MarketFeed:MoveChance=1", "--MarketFeed:MaximumMove=0.05"]);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(ReadState()), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(ReadState(), 1_000_000m), cancellationToken);
+
+            var replica = new client::AtlasLedger.Model.Ledger();
+            var sync = tool.Sync(replica, tenantId, new[] { "EffectivePrice" });
+            var aaa = Joe10Account.AssetIdOf("AAA");
+            decimal? PriceOf(Guid assetId) => sync.Partition.EffectivePrices.SingleOrDefault(price => price.AssetId == assetId)?.Price;
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (PriceOf(aaa) is null && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            var seen = new List<decimal> { PriceOf(aaa) ?? throw new InvalidOperationException("AAA was never priced.") };
+            var started = DateTimeOffset.UtcNow;
+            deadline = started.AddSeconds(15);
+            while (seen.Count < 6 && DateTimeOffset.UtcNow < deadline)
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+                if (PriceOf(aaa) is { } now && now != seen[^1])
+                {
+                    seen.Add(now);
+                }
+            }
+
+            // Several moves arrived, each a whole number of pennies, and the price stayed within a few pennies a tick of
+            // where it started (sync can fold several ticks into one change, so a change may be more than one move).
+            Assert.True(seen.Count >= 6, $"Only {seen.Count - 1} price changes reached the Replica: {string.Join(", ", seen)}.");
+            var ticks = (decimal)Math.Ceiling((DateTimeOffset.UtcNow - started).TotalMilliseconds / 100) + 2;
+            Assert.All(seen.Zip(seen.Skip(1)), pair => Assert.Equal(0m, (pair.Second - pair.First) % 0.01m));
+            Assert.All(seen, price => Assert.InRange(Math.Abs(price - seen[0]), 0m, ticks * 0.05m));
+            Assert.Equal(1m, PriceOf(Joe10Account.DollarId));   // a currency's price is fixed: one dollar is a dollar
+        }
+
+        /// <summary>
         /// The website's sync, as the person it signs in: the tables its pages read (TangentAtlas.Web's LiveLedgers.Tables)
         /// in a tenant where the person is a user, with Ledger.Read; and a 404 for a tenant where they are not.
         /// </summary>

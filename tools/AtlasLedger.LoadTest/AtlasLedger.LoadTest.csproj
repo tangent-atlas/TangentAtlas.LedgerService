@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    ledger-load: a load test for a running ledger server.  It stands in for the market data vendor (EODHD's closes and the
+    Treasury's bill rates, synthetic and unlicensed), loads synthetic tenants with years of history at the simulated broker,
+    and runs sync clients like the website's, measuring how long a price move takes to reach them and what the server costs.
+    Development sign-in only: run it against a server in the Development environment.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ledger-load</AssemblyName>
+    <RootNamespace>AtlasLedger.LoadTest</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AtlasLedger.Client\AtlasLedger.Client.csproj" />
+  </ItemGroup>
+
+</Project>

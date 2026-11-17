@@ -195,7 +195,8 @@ namespace AtlasLedger.Tests
 
         /// <summary>
         /// The simulated market feed moves prices a few pennies at a time from where they stand, and each move reaches a
-        /// client's Replica through sync like any other change: what the website's pages show as prices tick.
+        /// client's Replica through sync like any other change: what the website's pages show as prices tick.  It is the
+        /// simulated broker's feed: the same account at a real broker (Schwab) is not priced by it.
         /// </summary>
         /// <returns>A task.</returns>
         [Fact]
@@ -205,12 +206,15 @@ namespace AtlasLedger.Tests
             await using var server = ServerFixture.With(["--Services:StartOn=rules,market-feed", "--MarketFeed:TickInterval=00:00:00.100", "--MarketFeed:MoveChance=1", "--MarketFeed:MaximumMove=0.05"]);
             await server.InitializeAsync();
             var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
-            var tenantId = Guid.NewGuid();
+            var (tenantId, atSchwab) = (Guid.NewGuid(), Guid.NewGuid());
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(ReadState()), cancellationToken);
             await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(ReadState(), 1_000_000m), cancellationToken);
+            await tool.ApplyAsync(atSchwab, Joe10Account.Reference(ReadState(), EventSource.Schwab), cancellationToken);
+            await tool.CommitTransactionsAsync(atSchwab, Joe10Account.History(ReadState(), 1_000_000m), cancellationToken);
 
             var replica = new client::AtlasLedger.Model.Ledger();
             var sync = tool.Sync(replica, tenantId, new[] { "EffectivePrice" });
+            var real = tool.Sync(new client::AtlasLedger.Model.Ledger(), atSchwab, new[] { "EffectivePrice" });
             var aaa = Joe10Account.AssetIdOf("AAA");
             decimal? PriceOf(Guid assetId) => sync.Partition.EffectivePrices.SingleOrDefault(price => price.AssetId == assetId)?.Price;
             var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
@@ -238,6 +242,14 @@ namespace AtlasLedger.Tests
             Assert.All(seen.Zip(seen.Skip(1)), pair => Assert.Equal(0m, (pair.Second - pair.First) % 0.01m));
             Assert.All(seen, price => Assert.InRange(Math.Abs(price - seen[0]), 0m, ticks * 0.05m));
             Assert.Equal(1m, PriceOf(Joe10Account.DollarId));   // a currency's price is fixed: one dollar is a dollar
+
+            // At Schwab, the feed leaves AAA alone: its price is its last trade's, as it was, however long the feed runs.
+            await real.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            var lastTrade = real.Partition.EffectivePrices.Single(price => price.AssetId == aaa);
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            await real.SyncAsync(TimeSpan.FromMilliseconds(500), cancellationToken);
+            var after = real.Partition.EffectivePrices.Single(price => price.AssetId == aaa);
+            Assert.Equal((PriceSource.LastTrade, lastTrade.Price), (after.Source, after.Price));
         }
 
         /// <summary>

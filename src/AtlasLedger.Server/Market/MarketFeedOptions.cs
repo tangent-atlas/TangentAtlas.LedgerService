@@ -35,8 +35,9 @@ namespace AtlasLedger.Server.Market
 
         /// <summary>
         /// Gets or sets how often the feed sends a bad print (a price of zero for one symbol, corrected on the next tick), as
-        /// real feeds occasionally do; zero (the default) sends none.
+        /// real feeds occasionally do; zero sends none.  It goes only to a symbol nobody holds, so a holding on a person's
+        /// page never jumps; the deployment test watches it raise and clear InvalidPrice on its sample stock.
         /// </summary>
-        public TimeSpan BadPrintInterval { get; set; } = TimeSpan.Zero;
+        public TimeSpan BadPrintInterval { get; set; } = TimeSpan.FromSeconds(20);
     }
 }

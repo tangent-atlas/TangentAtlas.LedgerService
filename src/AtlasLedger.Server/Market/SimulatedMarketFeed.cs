@@ -19,12 +19,16 @@ namespace AtlasLedger.Server.Market
     using Microsoft.Extensions.Options;
 
     /// <summary>
-    /// Stands in for the market data feed: moves the prices of the symbols any tenant holds a few pennies at a time, a few
-    /// symbols on each tick, from wherever the market left them (the last close the market history published; else the
+    /// Stands in for the market data feed of the simulated broker: in the tenants with an account at a simulated institution
+    /// (one whose Source is <see cref="EventSource.Simulator"/>), moves the prices of what that broker could trade a few
+    /// pennies at a time, a few symbols on each tick, from wherever the market left them (the last close the market history published; else the
     /// ticker's last trade; else $100).  Now and then, if asked, it sends a bad print.  It runs only while its switch
     /// (<see cref="ServiceSwitchboard.MarketFeed"/>) is on.
     /// </summary>
     /// <remarks>
+    /// It is the simulated broker's feed, wherever it runs, in development or in production: a tenant with no account at a
+    /// simulated institution is never priced by it, and neither is an asset held at a real institution.  Prices are a
+    /// tenant's, by symbol, so in a tenant with both, an asset held at both takes the real market's price.
     /// A real feed replaces this class and nothing else.  Prices go straight into each holding tenant's lock-free price
     /// store: no transaction, no API, never persisted.  The rules engine reads them conflated, so the tick rate does not
     /// drive the cost of compliance.
@@ -106,7 +110,7 @@ namespace AtlasLedger.Server.Market
         }
 
         /// <summary>
-        /// Prices every held symbol once.
+        /// Moves the simulated broker's prices once: some of them, by chance, and any not priced yet.
         /// </summary>
         /// <returns>True if a bad print was sent.</returns>
         private bool Tick(DateTimeOffset now, bool isBadPrint)
@@ -115,6 +119,7 @@ namespace AtlasLedger.Server.Market
             // priced yet starts from its asset's last purchase or sale, so a tenant loaded with history isn't valued at $100 a share.
             var holders = new Dictionary<(string Scheme, string Code, string Currency), List<LedgerPartition>>();
             var openingPrices = new Dictionary<(string Scheme, string Code, string Currency), decimal>();
+            var held = new HashSet<(string Scheme, string Code, string Currency)>();
             foreach (var partition in this.ledger.Partitions)
             {
                 lock (partition.SyncRoot)
@@ -151,12 +156,24 @@ namespace AtlasLedger.Server.Market
                         }
                     }
 
+                    // The simulated broker's market: only a tenant with an account at a simulated institution, and in it
+                    // anything the simulated broker could trade except what is held at a real institution, whose price is
+                    // the real market's (the last close).
+                    var simulatedAccounts = partition.Accounts.Where(account => account.Institution?.Source == EventSource.Simulator).Select(account => account.AccountId).ToHashSet();
+                    if (simulatedAccounts.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var heldAtRealInstitutions = partition.Positions.Where(position => position.Quantity != 0m && !simulatedAccounts.Contains(position.AccountId)).Select(position => position.AssetId).ToHashSet();
+                    var heldAnywhere = partition.Positions.Where(position => position.Quantity != 0m).Select(position => position.AssetId).ToHashSet();
                     var quoteCurrencies = partition.Assets.ToDictionary(asset => asset.AssetId, asset => asset.QuoteCurrency);
                     foreach (var symbol in partition.Symbols)
                     {
                         // A currency's price comes from the initial prices, not the market; a symbol of anything but an
-                        // asset has no quote currency to be priced in.
-                        if (symbol.Scheme == SymbolScheme.Currency || !quoteCurrencies.TryGetValue(symbol.NodeId, out var currency))
+                        // asset has no quote currency to be priced in; an asset held at a real institution is the real
+                        // market's to price.
+                        if (symbol.Scheme == SymbolScheme.Currency || !quoteCurrencies.TryGetValue(symbol.NodeId, out var currency) || heldAtRealInstitutions.Contains(symbol.NodeId))
                         {
                             continue;
                         }
@@ -165,6 +182,11 @@ namespace AtlasLedger.Server.Market
                         if (symbol.Scheme == SymbolScheme.Ticker && lastTrades.TryGetValue(symbol.NodeId, out var lastTrade))
                         {
                             openingPrices.TryAdd(key, Math.Round(lastTrade.Price, 2));
+                        }
+
+                        if (heldAnywhere.Contains(symbol.NodeId))
+                        {
+                            held.Add(key);
                         }
 
                         if (!holders.TryGetValue(key, out var list))
@@ -182,7 +204,11 @@ namespace AtlasLedger.Server.Market
                 return false;
             }
 
-            var badSymbol = isBadPrint ? holders.Keys.ElementAt(Random.Shared.Next(holders.Count)) : default;
+            // A bad print goes only to a symbol nobody holds (as the deployment test's sample stock), so it is never a holding
+            // a person sees jump; with none, it waits for the next tick.
+            var unheld = holders.Keys.Where(key => !held.Contains(key)).ToArray();
+            isBadPrint &= unheld.Length > 0;
+            var badSymbol = isBadPrint ? unheld[Random.Shared.Next(unheld.Length)] : default;
             foreach (var (key, partitions) in holders)
             {
                 // Where the price is now: what the tenants were last sent (a close, or this feed's last tick), unless that was a

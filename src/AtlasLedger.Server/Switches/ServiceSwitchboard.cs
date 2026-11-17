@@ -53,7 +53,7 @@ namespace AtlasLedger.Server.Switches
             ArgumentNullException.ThrowIfNull(options);
             this.switches = new[]
             {
-                new ServiceSwitch(MarketFeed, "Prices every held symbol (simulated until a broker feed is connected).", timeProvider),
+                new ServiceSwitch(MarketFeed, "The simulated broker's market: moves its prices a few pennies at a time, in the tenants with an account at a simulated institution.", timeProvider),
                 new ServiceSwitch(Rules, "Runs the rules engine for every tenant: derives holdings, prices, orders and proposed allocations, books fills, and raises and clears alerts.", timeProvider),
                 new ServiceSwitch(Broker, "Sends broker orders to the brokers and records their reports. Nothing is sent while it is off.", timeProvider),
                 new ServiceSwitch(MarketHistory, "Loads each tenant's closing prices, dividends and splits (EODHD) and the risk-free rate (the Treasury's 13-week bill) for its history, then each market day after the close.", timeProvider),

@@ -9,6 +9,7 @@ namespace AtlasLedger.Tests
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
     using System.Net;
     using System.Net.Http;
@@ -17,6 +18,7 @@ namespace AtlasLedger.Tests
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
+    using client::AtlasLedger.Client;
     using client::AtlasLedger.Client.Api;
     using client::AtlasLedger.Client.Scripts;
     using client::AtlasLedger.Model;
@@ -174,6 +176,27 @@ namespace AtlasLedger.Tests
             Assert.Equal(2, (await operatorConsole.ListAsync<AccountDto>(tenant, "Account", cancellationToken)).Count);
             Assert.NotEmpty(await operatorConsole.GetServicesAsync(cancellationToken));
             Assert.Equal(HttpStatusCode.Forbidden, await StatusOf(() => operatorConsole.ApplyAsync(Guid.NewGuid(), Firm(), cancellationToken)));
+        }
+
+        /// <summary>
+        /// Clearing a tenant needs both halves: it reads as the operator and writes as the script loader, so it works with
+        /// each program's own token, as in production, where neither tool may do both.
+        /// </summary>
+        /// <returns>A task that completes when the test is done.</returns>
+        [Fact]
+        public async Task ClearingReadsAsTheOperatorAndWritesAsTheScriptLoader()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var loader = this.Client(this.server.ToolToken(LoaderClientId, roles: LoaderPermissions));
+            var operatorConsole = this.Client(this.server.ToolToken(OperatorClientId, roles: OperatorPermissions));
+            var tenant = Guid.NewGuid();
+            await operatorConsole.SetServiceAsync("rules", isOn: true, TimeSpan.FromMinutes(5), cancellationToken);
+            await loader.ApplyAsync(tenant, Firm(), cancellationToken);
+
+            await TenantClearing.ClearAsync(operatorConsole, loader, tenant, holdingsOnly: false, removeUsers: true, TimeSpan.Zero, TextWriter.Null, cancellationToken);
+
+            Assert.Empty(await operatorConsole.ListAsync<AccountDto>(tenant, "Account", cancellationToken));
+            Assert.Empty(await operatorConsole.ListAsync<UserDto>(tenant, "User", cancellationToken));
         }
 
         /// <summary>

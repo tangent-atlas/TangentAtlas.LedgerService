@@ -15,6 +15,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- clear-database: deletes the load test's tenants from the ledger's database (the ledger stopped). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AtlasLedger.Client\AtlasLedger.Client.csproj" />
   </ItemGroup>
 

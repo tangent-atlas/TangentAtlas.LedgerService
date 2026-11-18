@@ -16,7 +16,9 @@
          MissingCustodian; script-loader adds the number; the alert clears.
       7. ledger-operator waits for the market feed's bad print (InvalidPrice) and its correction.
       8. ledger-operator shows its local copy of firm A.
-      9. ledger-operator turns the services off (always, even after a failure).
+      9. script-loader clears firms A, B and C (holdings out, accounts deleted) and removes their users, so the test
+         person's dashboard doesn't collect a copy of the sample accounts every run (always, even after a failure).
+     10. ledger-operator turns the services off (always, even after a failure).
     Each run uses new tenants, so it can run against the same server any number of times.
 
     Against a server on this computer (no settings file, or -Server naming another server), every program uses
@@ -83,6 +85,15 @@ function Invoke-Step {
     }
 }
 
+# The test person's user row in a tenant: its key derived from who they are, so making them a user twice is one row.
+function Get-UserId {
+    param([Parameter(Mandatory)][string]$Issuer, [Parameter(Mandatory)][string]$Subject)
+    $hash = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("tangent-atlas/user/$Issuer/$Subject"))
+    $hash[6] = ($hash[6] -band 0x0F) -bor 0x80; $hash[8] = ($hash[8] -band 0x3F) -bor 0x80
+    $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
+    [guid]"$($hex.Substring(0, 8))-$($hex.Substring(8, 4))-$($hex.Substring(12, 4))-$($hex.Substring(16, 4))-$($hex.Substring(20, 12))"
+}
+
 # Rows per table in an exported script, leaving out alerts, which the rules raise and clear on their own.
 function Get-RowCount {
     param([Parameter(Mandatory)][string]$Path)
@@ -118,7 +129,7 @@ try {
         if ($LASTEXITCODE -ne 0) { return }
         Write-Host "   Signed in: $($identity.subject) ($($identity.issuer))"
         $member = Join-Path $work 'member.json'
-        @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = [guid]::NewGuid(); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
+        @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = (Get-UserId $identity.issuer $identity.subject); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
             ConvertTo-Json -Depth 5 | Set-Content -Path $member -Encoding utf8
         Invoke-Program $programs.Loader @("$firmA", $member)
     }
@@ -152,6 +163,14 @@ try {
 
     Invoke-Step "The operator's local copy of firm A" { Invoke-Program $programs.Operator @('mirror', "$firmA") }
 } finally {
+    # The walkthrough's tenants are test data: without this, every run would add firm A's and firm C's accounts (the
+    # export copies the test person's user row into firm C) to the test person's dashboard.
+    Invoke-Step "The script loader clears the walkthrough's tenants and removes their users" {
+        foreach ($firm in @($firmA, $firmB, $firmC)) {
+            Invoke-Program $programs.Loader @('clear', "$firm", '--remove-users')
+            if ($LASTEXITCODE -ne 0) { return }
+        }
+    }
     Invoke-Step 'The operator turns the services off' { Invoke-Program $programs.Operator @('services', 'off') }
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }

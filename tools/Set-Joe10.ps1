@@ -77,6 +77,15 @@ foreach ($program in $programs.Values) {
     }
 }
 
+# The test person's user row in a tenant: its key derived from who they are, so making them a user twice is one row.
+function Get-UserId {
+    param([Parameter(Mandatory)][string]$Issuer, [Parameter(Mandatory)][string]$Subject)
+    $hash = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("tangent-atlas/user/$Issuer/$Subject"))
+    $hash[6] = ($hash[6] -band 0x0F) -bor 0x80; $hash[8] = ($hash[8] -band 0x3F) -bor 0x80
+    $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
+    [guid]"$($hex.Substring(0, 8))-$($hex.Substring(8, 4))-$($hex.Substring(12, 4))-$($hex.Substring(16, 4))-$($hex.Substring(20, 12))"
+}
+
 function Invoke-Program {
     param([Parameter(Mandatory)][hashtable]$Program, [Parameter(Mandatory)][string[]]$Arguments)
     & dotnet $Program.Path @Arguments
@@ -108,7 +117,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $identity.subject) { throw 'access-test whoami failed.' }
     Write-Host "   Signed in: $($identity.subject) ($($identity.issuer))"
     $member = Join-Path $work 'member.json'
-    @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = [guid]::NewGuid(); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
+    @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = (Get-UserId $identity.issuer $identity.subject); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
         ConvertTo-Json -Depth 5 | Set-Content -Path $member -Encoding utf8
     Invoke-Program $programs.Loader @("$TenantId", $member)
     Write-Host "`n== Loading the Joe 10" -ForegroundColor Cyan

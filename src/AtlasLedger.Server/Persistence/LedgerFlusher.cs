@@ -5,8 +5,11 @@
 namespace AtlasLedger.Server.Persistence
 {
     using System;
+    using System.Collections;
     using System.Collections.Concurrent;
+    using System.Diagnostics.Metrics;
     using System.Linq;
+    using System.Reflection;
     using System.Threading;
     using System.Threading.Tasks;
     using AtlasLedger.Model;
@@ -26,6 +29,23 @@ namespace AtlasLedger.Server.Persistence
     /// </remarks>
     internal sealed partial class LedgerFlusher : BackgroundService
     {
+        /// <summary>
+        /// The meter the flusher reports on: how many cuts and rows reach the database (dotnet-counters, or any metrics
+        /// exporter), so the database's load can be watched and prices proven never to reach it.
+        /// </summary>
+        public const string MeterName = "AtlasLedger.Persistence";
+
+        private static readonly Meter Meter = new Meter(MeterName);
+
+        private static readonly Counter<long> CutsWritten = Meter.CreateCounter<long>("atlas.ledger.persistence.cuts", unit: "{cut}", description: "Cuts written to the database (one database transaction each).");
+
+        private static readonly Counter<long> RowsWritten = Meter.CreateCounter<long>("atlas.ledger.persistence.rows", unit: "{row}", description: "Rows written to or deleted from the database.");
+
+        // Every list of changed or deleted rows a cut carries, one per persisted table.
+        private static readonly PropertyInfo[] CutLists = typeof(LedgerCut).GetProperties()
+            .Where(property => property.PropertyType.IsGenericType && property.PropertyType.GetGenericTypeDefinition() == typeof(System.Collections.Generic.IReadOnlyList<>))
+            .ToArray();
+
         private readonly Ledger ledger;
 
         private readonly ILedgerDatabase database;
@@ -108,8 +128,18 @@ namespace AtlasLedger.Server.Persistence
                 }
 
                 partition.MarkDurable(cut.Sequence);
+                CutsWritten.Add(1);
+                RowsWritten.Add(RowsIn(cut));
             }
         }
+
+        private static long RowsIn(LedgerCut cut) =>
+            CutLists.Sum(list => list.GetValue(cut) switch
+            {
+                ICollection rows => rows.Count,
+                IEnumerable rows => rows.Cast<object>().LongCount(),
+                _ => 0L,
+            });
 
         /// <summary>
         /// Writes a cut, retrying with backoff; stops the tenant if every attempt fails.

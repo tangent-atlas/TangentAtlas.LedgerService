@@ -23,8 +23,10 @@ switch (command)
         return await LoadAsync();
     case "measure":
         return await MeasureAsync();
+    case "clear-database":
+        return await ClearDatabaseAsync();
     default:
-        Console.Error.WriteLine("ledger-load vendor [--port 5199] | load --server URL --from I --to J [--years 3] [--trades-per-week 3] | measure --server URL --tenants N [--clients 1] [--seconds 60] [--pid P] [--label L] [--out FILE]");
+        Console.Error.WriteLine("ledger-load vendor [--port 5199] | clear-database [--connection CS] [--server URL] [--all] [--dry-run] | load --server URL --from I --to J [--years 3] [--trades-per-week 3] | measure --server URL --tenants N [--clients 1] [--seconds 60] [--pid P] [--label L] [--out FILE]");
         return 2;
 }
 
@@ -47,6 +49,32 @@ static async Task RunVendorAsync(int port)
     app.MapGet("/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all", (int year) => Results.Text(Market.TreasuryCsv(year), "text/csv"));
     Console.WriteLine($"Vendor on http://127.0.0.1:{port}");
     await app.RunAsync();
+}
+
+// Deletes the load test's tenants (or, with --all, every tenant) from a stopped ledger's database.
+async Task<int> ClearDatabaseAsync()
+{
+    var connection = Option("connection", "Server=localhost;Database=AtlasLedger;Trusted_Connection=True;TrustServerCertificate=True");
+    var servers = args.Contains("--server") ? [Option("server", "")] : new[] { "http://127.0.0.1:5180", "http://127.0.0.1:5100" };
+    foreach (var server in servers)
+    {
+        if (await LoadTestDatabase.IsServerRunningAsync(server))
+        {
+            Console.Error.WriteLine($"A ledger answers at {server}: stop it first (it holds every tenant in memory, and would go on serving what is deleted).");
+            return 1;
+        }
+    }
+
+    try
+    {
+        await LoadTestDatabase.ClearAsync(connection, args.Contains("--all"), args.Contains("--dry-run"), Console.Out);
+        return 0;
+    }
+    catch (Exception exception) when (exception is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+    {
+        Console.Error.WriteLine($"Clearing the database failed (nothing was deleted): {exception.Message}");
+        return 1;
+    }
 }
 
 async Task<int> LoadAsync()

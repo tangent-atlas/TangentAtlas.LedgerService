@@ -25,6 +25,8 @@ namespace AtlasLedger.AccessTest
               whoami                          Sign in (a browser opens the first time) and print who you are as the
                                               server sees you, as JSON: { "issuer": ..., "subject": ... }. A tenant's
                                               user row with that issuer and subject makes you a user of the tenant.
+              tenants                         Sign in and list the tenants you are a user of (the ones the website shows
+                                              you), one per line.
               run --member <tenant> --other <tenant>
                                               Check what you may and may not do: your firm (--member, loaded from
                                               firm-a.json, with you as a user), a firm you do not belong to (--other),
@@ -89,6 +91,13 @@ namespace AtlasLedger.AccessTest
                             ? await person.GetIdentityAsync(cancellation.Token).ConfigureAwait(false)
                             : (DevelopmentCallers.Issuer, DevelopmentCallers.AdvisorSubject);
                         Console.WriteLine(JsonSerializer.Serialize(new { issuer, subject }));
+                        return 0;
+                    case "tenants":
+                        foreach (var tenant in await connection.Api.GetTenantsAsync(cancellation.Token).ConfigureAwait(false))
+                        {
+                            Console.WriteLine(tenant);
+                        }
+
                         return 0;
                     case "run" when member is { } memberFirm && other is { } otherFirm:
                         var checks = new AccessChecks(connection.Api, connection.Anonymous, Console.Out);

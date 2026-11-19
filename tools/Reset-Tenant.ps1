@@ -75,10 +75,10 @@ $tenantArguments = if ($All) { @('--all') } else { @($TenantId | ForEach-Object 
 $which = if ($All) { 'EVERY tenant' } else { "tenant(s) $($TenantId -join ', ')" }
 
 function Invoke-Delete {
-    param([Parameter(Mandatory)][string]$ConnectionString, [string]$Server)
+    param([Parameter(Mandatory)][string]$ConnectionString, [string]$Server, [switch]$Count)
     $arguments = @('clear-database', '--connection', $ConnectionString) + $tenantArguments
     if ($Server) { $arguments += @('--server', $Server) }
-    if ($DryRun) { $arguments += '--dry-run' }
+    if ($DryRun -or $Count) { $arguments += '--dry-run' }
     # Captured, both streams, and shown here: some terminals drop or reorder a child program's output.
     $said = @(& dotnet $tool @arguments 2>&1 | ForEach-Object { "$_" })
     $exitCode = $LASTEXITCODE
@@ -112,6 +112,8 @@ foreach ($pair in $setting.Value -split ';') {
 }
 foreach ($key in 'Authentication', 'User ID', 'UserID', 'UID') { $parts.Remove($key) }
 $parts['Authentication'] = 'Active Directory Default'
+# Azure SQL's free offer pauses an idle database; resuming takes up to a minute, longer than the default 15 seconds.
+$parts['Connect Timeout'] = '120'
 $databaseConnection = ($parts.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ';'
 $sqlAddress = if ($parts.Contains('Server')) { $parts['Server'] } elseif ($parts.Contains('Data Source')) { $parts['Data Source'] } else { '' }
 $databaseName = if ($parts.Contains('Database')) { $parts['Database'] } elseif ($parts.Contains('Initial Catalog')) { $parts['Initial Catalog'] } else { '' }
@@ -135,8 +137,10 @@ if (-not $rule -or $rule.StartIpAddress -ne $myIp) {
     Start-Sleep -Seconds 20
 }
 
+# Count first, with the ledger still running: it shows what will go, and wakes a paused database before the ledger stops.
+Write-Host "`n== What would be deleted (the ledger is still running)" -ForegroundColor Cyan
+Invoke-Delete -ConnectionString $databaseConnection -Count
 if ($DryRun) {
-    Invoke-Delete -ConnectionString $databaseConnection
     return
 }
 
@@ -144,14 +148,19 @@ function Test-Ledger {
     try { (Invoke-WebRequest -Uri "$server/version" -TimeoutSec 10 -UseBasicParsing).StatusCode -eq 200 } catch { $false }
 }
 
+# Waits until the ledger answers (or, stopping, has stopped answering: three checks in a row, 5 seconds apart, since an App
+# Service being stopped can miss one answer and then answer again while it shuts down).
 function Wait-Ledger {
     param([Parameter(Mandatory)][bool]$Answering, [Parameter(Mandatory)][int]$Seconds)
     $deadline = (Get-Date).AddSeconds($Seconds)
-    while ((Test-Ledger) -ne $Answering) {
+    $needed = if ($Answering) { 1 } else { 3 }
+    $inARow = 0
+    while ($true) {
+        $inARow = if ((Test-Ledger) -eq $Answering) { $inARow + 1 } else { 0 }
+        if ($inARow -ge $needed) { return $true }
         if ((Get-Date) -gt $deadline) { return $false }
         Start-Sleep -Seconds 5
     }
-    return $true
 }
 
 $what = "Stop the production ledger ($appName), delete $which from $databaseName, and start it again"
@@ -163,9 +172,19 @@ if (-not $PSCmdlet.ShouldContinue("$what?  It is down for a few minutes.", 'Rese
 Write-Host "`n== Stopping the ledger" -ForegroundColor Cyan
 Stop-AzWebApp -ResourceGroupName $app.ResourceGroup -Name $app.Name | Out-Null
 try {
-    if (-not (Wait-Ledger -Answering $false -Seconds 120)) { throw 'The ledger still answers two minutes after stopping: nothing was deleted.' }
+    if (-not (Wait-Ledger -Answering $false -Seconds 180)) { throw 'The ledger still answers three minutes after stopping: nothing was deleted.' }
     Write-Host "`n== Deleting the tenants" -ForegroundColor Cyan
-    Invoke-Delete -ConnectionString $databaseConnection -Server $server
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-Delete -ConnectionString $databaseConnection -Server $server
+            break
+        } catch {
+            # The tool refuses while the ledger answers: still shutting down.  Wait for it, then try again.
+            if ($attempt -ge 6 -or "$_" -notmatch 'A ledger answers at') { throw }
+            Write-Host "   The ledger is still shutting down; trying again in 15 seconds (attempt $attempt of 6)."
+            Start-Sleep -Seconds 15
+        }
+    }
 } finally {
     Write-Host "`n== Starting the ledger (it loads every tenant first: a few minutes)" -ForegroundColor Cyan
     Start-AzWebApp -ResourceGroupName $app.ResourceGroup -Name $app.Name | Out-Null

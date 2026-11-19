@@ -16,10 +16,10 @@
          MissingCustodian; script-loader adds the number; the alert clears.
       7. ledger-operator waits for the market feed's bad print (InvalidPrice) and its correction.
       8. ledger-operator shows its local copy of firm A.
-      9. script-loader clears firms A, B and C (holdings out, accounts deleted) and removes their users, so the test
-         person's dashboard doesn't collect a copy of the sample accounts every run (always, even after a failure).
-     10. ledger-operator turns the services off (always, even after a failure).
-    Each run uses new tenants, so it can run against the same server any number of times.
+      9. ledger-operator turns the services off (always, even after a failure).
+    Each run uses new tenants, so it can run against the same server any number of times.  They stay, and the test
+    person is a user of firms A and C, so their accounts show on the test person's dashboard: clear them out with
+    .\tools\Reset-Tenant.ps1 -All (with -Production for Azure), then load the Joe 10 again.
 
     Against a server on this computer (no settings file, or -Server naming another server), every program uses
     development sign-in instead, and access-test acts as the development advisor.
@@ -163,14 +163,6 @@ try {
 
     Invoke-Step "The operator's local copy of firm A" { Invoke-Program $programs.Operator @('mirror', "$firmA") }
 } finally {
-    # The walkthrough's tenants are test data: without this, every run would add firm A's and firm C's accounts (the
-    # export copies the test person's user row into firm C) to the test person's dashboard.
-    Invoke-Step "The script loader clears the walkthrough's tenants and removes their users" {
-        foreach ($firm in @($firmA, $firmB, $firmC)) {
-            Invoke-Program $programs.Loader @('clear', "$firm", '--remove-users')
-            if ($LASTEXITCODE -ne 0) { return }
-        }
-    }
     Invoke-Step 'The operator turns the services off' { Invoke-Program $programs.Operator @('services', 'off') }
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }

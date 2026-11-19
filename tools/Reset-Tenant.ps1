@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Empties tenants of the ledger in its database, so they can be loaded again from their scripts and watched as they
-    load: maintenance, with the ledger stopped.  By default, the Joe 10's tenant.
+    load: maintenance, with the ledger stopped.  By default, the Joe 10's tenant; with -All, every tenant, which leaves
+    a known, empty environment after load, stress and health tests.
 
 .DESCRIPTION
     The event log is append-only: no API deletes an event.  So this deletes the tenants' rows in the database itself,
@@ -26,6 +27,11 @@
 .PARAMETER TenantId
     The tenants to empty (default: the Joe 10's, 4a6f6531-3020-7061-7065-720000000001).
 
+.PARAMETER All
+    Empty every tenant in the database: every artifact of every test (load-test tenants, the health test's firms, the
+    Joe 10).  The schema stays.  Then load the Joe 10 again: Set-Joe10.ps1 -Account, then -Holdings.  While there are no
+    customers this is safe; it must be removed or locked down before the first real account data.
+
 .PARAMETER DryRun
     Count what would be deleted, table by table; delete nothing, stop nothing.
 
@@ -39,6 +45,9 @@
     Empty the tenants in Azure.
 
 .EXAMPLE
+    .\tools\Reset-Tenant.ps1 -Production -All -DryRun
+
+.EXAMPLE
     .\tools\Reset-Tenant.ps1 -Production -DryRun
 
 .EXAMPLE
@@ -47,6 +56,7 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [guid[]]$TenantId = @('4a6f6531-3020-7061-7065-720000000001'),
+    [switch]$All,
     [switch]$DryRun,
     [string]$Connection = 'Server=localhost;Database=AtlasLedger;Trusted_Connection=True;TrustServerCertificate=True',
     [switch]$NoBuild,
@@ -61,7 +71,8 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Building ledger-load failed.' }
 }
 $tool = Join-Path $project 'bin/Release/net11.0/ledger-load.dll'
-$tenantArguments = @($TenantId | ForEach-Object { '--tenant', "$_" })
+$tenantArguments = if ($All) { @('--all') } else { @($TenantId | ForEach-Object { '--tenant', "$_" }) }
+$which = if ($All) { 'EVERY tenant' } else { "tenant(s) $($TenantId -join ', ')" }
 
 function Invoke-Delete {
     param([Parameter(Mandatory)][string]$ConnectionString, [string]$Server)
@@ -77,7 +88,7 @@ function Invoke-Delete {
 
 if (-not $Production) {
     Invoke-Delete -ConnectionString $Connection
-    if (-not $DryRun) { Write-Host "`nDone.  Start the ledger again (.\tools\Start-LocalLedger.ps1), then load: .\tools\Set-Joe10.ps1" -ForegroundColor Green }
+    if (-not $DryRun) { Write-Host "`nDone.  Start the ledger again (.\tools\Start-LocalLedger.ps1), then load: .\tools\Set-Joe10.ps1 -Account, then -Holdings" -ForegroundColor Green }
     return
 }
 
@@ -143,7 +154,7 @@ function Wait-Ledger {
     return $true
 }
 
-$what = "Stop the production ledger ($appName), delete tenant(s) $($TenantId -join ', ') from $databaseName, and start it again"
+$what = "Stop the production ledger ($appName), delete $which from $databaseName, and start it again"
 if (-not $PSCmdlet.ShouldContinue("$what?  It is down for a few minutes.", 'Reset tenants in production')) {
     Write-Host 'Nothing done.'
     return
@@ -165,4 +176,4 @@ try {
     }
 }
 
-Write-Host "`nDone.  The service switches are back to their start-up settings.  Reload the dashboard, then load: .\tools\Set-Joe10.ps1 -Production" -ForegroundColor Green
+Write-Host "`nDone.  The service switches are back to their start-up settings.  Reload the dashboard, then load: .\tools\Set-Joe10.ps1 -Production -Account, then -Holdings" -ForegroundColor Green

@@ -304,6 +304,7 @@ namespace AtlasLedger.Tests
                     "--environment", "Production",
                     "--urls", "http://127.0.0.1:0",
                     "--Logging:LogLevel:Default=None",
+                    "--Logging:LogLevel:Bellerophon.Runtime=None",   // appsettings.json raises it; tests stay quiet
                     $"--IdentityProvider:Authority={Authority}",
                     $"--IdentityProvider:Audiences:0={ApiClientId}",
                     $"--Tools:ClientIds:0={ToolClientId}",

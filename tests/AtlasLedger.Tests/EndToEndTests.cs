@@ -106,6 +106,7 @@ namespace AtlasLedger.Tests
                 "--urls", "http://127.0.0.1:0",
                 "--Batch:MaximumOperations=3",
                 "--Logging:LogLevel:Default=None",
+                "--Logging:LogLevel:Bellerophon.Runtime=None",   // appsettings.json raises it; tests stay quiet
             });
             await limited.StartAsync(cancellationToken);
             using var http = new HttpClient { BaseAddress = new Uri(limited.Urls.First() + "/") };

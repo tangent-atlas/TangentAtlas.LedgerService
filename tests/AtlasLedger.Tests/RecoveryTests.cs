@@ -36,6 +36,7 @@ namespace AtlasLedger.Tests
             "--environment", "Development",
             "--urls", "http://127.0.0.1:0",
             "--Logging:LogLevel:Default=None",
+            "--Logging:LogLevel:Bellerophon.Runtime=None",   // appsettings.json raises it; tests stay quiet
             "--Persistence:RetryAttempts=3",
             "--Persistence:RetryDelay=00:00:00.010",
         };

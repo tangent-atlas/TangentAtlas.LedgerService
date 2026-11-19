@@ -64,6 +64,7 @@ namespace AtlasLedger.Tests
                 "--MarketFeed:BadPrintInterval=00:00:01",
                 "--Services:StartOn=",   // every test starts with every service off, and turns on what it needs
                 "--Logging:LogLevel:Default=None",
+                "--Logging:LogLevel:Bellerophon.Runtime=None",   // appsettings.json raises it; tests stay quiet
                 "--Logging:LogLevel:Microsoft.Hosting.Lifetime=None",
                 "--Logging:LogLevel:AtlasLedger=None",
             }.Concat(this.extraArgs).ToArray(), this.configureServices);

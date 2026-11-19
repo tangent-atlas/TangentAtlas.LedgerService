@@ -37,8 +37,9 @@ namespace AtlasLedger.Client
     /// <remarks>
     /// <para>
     /// Holdings are not rows anyone deletes: the rules fold them from the event log, which is never changed or deleted.  So
-    /// the holdings leave the way they would leave a real account: each security is transferred out in kind and the cash is
-    /// withdrawn, one transaction per account.  The log keeps the whole story; the account then holds nothing.
+    /// the holdings leave the way a real account is closed: its securities are sold at their current prices and all of its
+    /// cash is withdrawn, one transaction per account.  The log keeps the whole story; the account then holds nothing, and
+    /// what it was paid in (deposits less withdrawals) stays true.
     /// </para>
     /// <para>
     /// An account is deleted with what names it (its brokerage row, its custodian number, its links to other nodes, its
@@ -59,8 +60,11 @@ namespace AtlasLedger.Client
         public static readonly TimeSpan RulesTimeout = TimeSpan.FromSeconds(30);
 
         /// <summary>
-        /// Builds the transactions that take every holding out of its account: per account, one transaction holding a
-        /// transfer out in kind of its securities (at their market value, when there is one) and a withdrawal of its cash.
+        /// Builds the transactions that take every holding out of its account, the way an account is closed: per account, one
+        /// transaction that sells its securities at their current prices into its cash (one trade, which balances), then
+        /// withdraws all of its cash.  So the deposits less the withdrawals (what the account was paid in) stay true, and an
+        /// account loaded again later starts from them.  A security with no price, or an account with no cash in its own
+        /// currency to sell into, is transferred out in kind instead.
         /// </summary>
         /// <param name="holdings">The tenant's holdings.</param>
         /// <param name="now">When the holdings leave.</param>
@@ -75,31 +79,54 @@ namespace AtlasLedger.Client
             foreach (var account in holdings.Holdings.Where(holding => holding.Quantity != 0m).GroupBy(holding => holding.AccountId).OrderBy(group => group.Key))
             {
                 var events = new List<EventMessage>();
-                var securities = account.Where(holding => holding.AssetType != AssetType.Cash).OrderBy(holding => holding.AssetId).ToArray();
-                if (securities.Length > 0)
+                void Add(LedgerEvent value)
                 {
-                    var transfer = new ReceiveAndDeliverEvent
+                    var eventId = newId();
+                    events.Add(EventMessages.From(value, eventId, EventSource.Operator, $"clear/{eventId}", now, sourceSequence: events.Count + 1));
+                }
+
+                var cash = account.Where(holding => holding.AssetType == AssetType.Cash).OrderBy(holding => holding.AssetId).ToArray();
+                var proceedsInto = cash.FirstOrDefault(holding => holding.QuoteCurrency == holding.Currency);
+                var securities = account.Where(holding => holding.AssetType != AssetType.Cash).OrderBy(holding => holding.AssetId).ToArray();
+                var sold = proceedsInto is null ? Array.Empty<Holding>() : securities.Where(holding => holding.MarketValue is not null).ToArray();
+                var proceeds = sold.Sum(holding => holding.MarketValue!.Value);
+                if (sold.Length > 0)
+                {
+                    Add(new TradeEvent
+                    {
+                        AccountId = account.Key,
+                        TradeDate = day,
+                        Items = sold
+                            .Select(holding => new ActivityItem(holding.AssetId, -holding.Quantity, -holding.MarketValue, holding.Price, PositionEffect.Closing))
+                            .Append(new ActivityItem(proceedsInto!.AssetId, proceeds, proceeds))
+                            .ToArray(),
+                    });
+                }
+
+                var unsold = securities.Except(sold).ToArray();
+                if (unsold.Length > 0)
+                {
+                    Add(new ReceiveAndDeliverEvent
                     {
                         AccountId = account.Key,
                         TradeDate = day,
                         Reason = DeliveryReason.TransferOut,
-                        Items = securities.Select(holding => new ActivityItem(holding.AssetId, -holding.Quantity, -holding.MarketValue, holding.Price, PositionEffect.Closing)).ToArray(),
-                    };
-                    var eventId = newId();
-                    events.Add(EventMessages.From(transfer, eventId, EventSource.Operator, $"clear/{eventId}", now));
+                        Items = unsold.Select(holding => new ActivityItem(holding.AssetId, -holding.Quantity, -holding.MarketValue, holding.Price, PositionEffect.Closing)).ToArray(),
+                    });
                 }
 
-                var cash = account.Where(holding => holding.AssetType == AssetType.Cash).OrderBy(holding => holding.AssetId).ToArray();
-                if (cash.Length > 0)
+                var withdrawn = cash
+                    .Select(holding => (holding.AssetId, Quantity: holding.Quantity + (holding == proceedsInto ? proceeds : 0m), Amount: (holding.MarketValue ?? holding.Quantity) + (holding == proceedsInto ? proceeds : 0m)))
+                    .Where(item => item.Quantity != 0m)
+                    .ToArray();
+                if (withdrawn.Length > 0)
                 {
-                    var withdrawal = new CashMovementEvent
+                    Add(new CashMovementEvent
                     {
                         AccountId = account.Key,
                         TradeDate = day,
-                        Items = cash.Select(holding => new ActivityItem(holding.AssetId, -holding.Quantity, -(holding.MarketValue ?? holding.Quantity))).ToArray(),
-                    };
-                    var eventId = newId();
-                    events.Add(EventMessages.From(withdrawal, eventId, EventSource.Operator, $"clear/{eventId}", now));
+                        Items = withdrawn.Select(item => new ActivityItem(item.AssetId, -item.Quantity, -item.Amount)).ToArray(),
+                    });
                 }
 
                 result.Add((account.Key, new TransactionMessage { TransactionId = newId(), Events = events }));

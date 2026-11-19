@@ -5,9 +5,9 @@ using System.Globalization;
 using Microsoft.Data.SqlClient;
 
 /// <summary>
-/// Clears the load test's tenants out of the ledger's database: every row of every tenant <c>ledger-load load</c> made
-/// (their keys are <see cref="Tenants.IdOf"/> of an index), in every table with a TenantId, the watermark among them, in
-/// one transaction.  Other tenants are not touched, unless every tenant is asked for.
+/// Deletes tenants from the ledger's database: every row of each, in every table with a TenantId, the watermark among
+/// them, in one transaction.  The tenants are the ones named, or else the load test's (every tenant <c>ledger-load load</c>
+/// made: their keys are <see cref="Tenants.IdOf"/> of an index), or every tenant if asked.  Others are not touched.
 /// </summary>
 /// <remarks>
 /// This is test-data housekeeping, done to the database and not through the ledger: the event log is append-only, so no
@@ -24,19 +24,22 @@ public static class LoadTestDatabase
     /// Deletes tenants from the database.
     /// </summary>
     /// <param name="connectionString">The database.</param>
-    /// <param name="everyTenant">True to delete every tenant, not only the load test's.</param>
+    /// <param name="named">The tenants to delete; if none, the load test's.</param>
+    /// <param name="everyTenant">True to delete every tenant.</param>
     /// <param name="dryRun">True to count what would be deleted and delete nothing.</param>
     /// <param name="output">Where to report.</param>
     /// <returns>The number of tenants deleted (or that would be).</returns>
-    public static async Task<int> ClearAsync(string connectionString, bool everyTenant, bool dryRun, TextWriter output)
+    public static async Task<int> ClearAsync(string connectionString, IReadOnlyCollection<Guid> named, bool everyTenant, bool dryRun, TextWriter output)
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync();
         var tables = await TenantTablesAsync(connection);
         var present = await TenantsPresentAsync(connection, tables);
         var loadTest = Enumerable.Range(0, MaximumIndex + 1).Select(Tenants.IdOf).ToHashSet();
-        var doomed = present.Where(tenant => everyTenant || loadTest.Contains(tenant)).Order().ToArray();
-        output.WriteLine($"{connection.DataSource}/{connection.Database}: {present.Count} tenant(s), {present.Count(loadTest.Contains)} of them the load test's.");
+        var doomed = present.Where(tenant => everyTenant || (named.Count > 0 ? named.Contains(tenant) : loadTest.Contains(tenant))).Order().ToArray();
+        output.WriteLine(named.Count > 0 && !everyTenant
+            ? $"{connection.DataSource}/{connection.Database}: {present.Count} tenant(s); {doomed.Length} of the {named.Count} named are there."
+            : $"{connection.DataSource}/{connection.Database}: {present.Count} tenant(s), {present.Count(loadTest.Contains)} of them the load test's.");
         if (doomed.Length == 0)
         {
             output.WriteLine("Nothing to delete.");
@@ -95,8 +98,9 @@ public static class LoadTestDatabase
         using var http = new HttpClient { BaseAddress = new Uri(server.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(2) };
         try
         {
+            // A stopped App Service still answers, with an error page: only a ledger that answers its version is running.
             using var response = await http.GetAsync("version");
-            return true;
+            return response.IsSuccessStatusCode;
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
         {

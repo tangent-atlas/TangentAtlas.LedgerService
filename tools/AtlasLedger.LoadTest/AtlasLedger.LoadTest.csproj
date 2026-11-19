@@ -17,6 +17,8 @@
   <ItemGroup>
     <!-- clear-database: deletes the load test's tenants from the ledger's database (the ledger stopped). -->
     <PackageReference Include="Microsoft.Data.SqlClient" />
+    <!-- Authentication=Active Directory Default, to reach Azure SQL as the signed-in administrator (Reset-Tenant.ps1). -->
+    <PackageReference Include="Microsoft.Data.SqlClient.Extensions.Azure" />
   </ItemGroup>
 
   <ItemGroup>

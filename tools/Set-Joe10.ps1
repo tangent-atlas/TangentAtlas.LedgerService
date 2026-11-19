@@ -14,8 +14,10 @@
       3. script-loader loads the reference (the account at the simulated broker, its model and assets), the history
          (the deposit and the purchases at the state's close), the jobs (orders at 3:45 pm New York on market days) and
          the model's weights.
-    It loads a new tenant: if the tenant already has events, it stops and says so (name another with -TenantId, or
-    start from an empty database).
+    It loads an empty tenant: if the tenant already has events, it stops and says so.  To load it again and watch it
+    arrive, empty the tenant first with .\tools\Reset-Tenant.ps1 (in the database, with the ledger stopped: the event
+    log is append-only), then run this again.  The history goes in one transaction every -PauseSeconds (the deposit,
+    then each purchase), so a page open on the dashboard shows each step.
 
 .PARAMETER TenantId
     The tenant (default: the Joe 10's own, the same every time).
@@ -27,6 +29,10 @@
 
 .PARAMETER Generic
     Load the generic Joe 10 instead (bought at $100 a share: real closes value it as a large gain or loss).
+
+.PARAMETER PauseSeconds
+    How long to wait between the history's transactions, to watch each arrive in the website (default 1; 0 loads them
+    at once).
 
 .PARAMETER NoBuild
     Use the programs as last built.
@@ -42,12 +48,17 @@
 
 .EXAMPLE
     .\tools\Set-Joe10.ps1 -Production
+
+.EXAMPLE
+    .\tools\Reset-Tenant.ps1 -Production; .\tools\Set-Joe10.ps1 -Production
+    Empty the Joe 10's tenant, then load it again while the dashboard is watched.
 #>
 [CmdletBinding()]
 param(
     [guid]$TenantId = '4a6f6531-3020-7061-7065-720000000001',
     [string]$StatePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'TangentAtlas.ForwardTest\state\joe10.json'),
     [switch]$Generic,
+    [ValidateRange(0, 60)][double]$PauseSeconds = 1,
     [switch]$NoBuild,
     [switch]$Production,
     [switch]$SignOut
@@ -109,7 +120,7 @@ try {
     # A new tenant answers 404 here, which is what we want: its message isn't shown.
     $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1 2>$null) -join ''
     if ($LASTEXITCODE -eq 0 -and $existing.Trim()) {
-        throw "Tenant $TenantId already has events: it is loaded.  Name another with -TenantId, or start from an empty database."
+        throw "Tenant $TenantId already has events: it is loaded.  Empty it first: .\tools\Reset-Tenant.ps1 -TenantId $TenantId$(if ($Production) { ' -Production' })"
     }
     Write-Host "`n== The test person signs in; they become a user of the tenant" -ForegroundColor Cyan
     if ($SignOut) { Invoke-Program $programs.AccessTest @('sign-out') }
@@ -122,7 +133,8 @@ try {
     Invoke-Program $programs.Loader @("$TenantId", $member)
     Write-Host "`n== Loading the Joe 10" -ForegroundColor Cyan
     Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'))
+    Start-Sleep -Seconds $PauseSeconds
+    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'), '--pause', $PauseSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
     Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
     Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
     Write-Host "`nDone: the Joe 10 is tenant $TenantId, and $($identity.subject) is its user.  Sign in to the website as the test person." -ForegroundColor Green

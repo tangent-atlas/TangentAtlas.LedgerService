@@ -19,7 +19,7 @@ namespace AtlasLedger.ScriptLoader
     internal static class Program
     {
         private const string Usage = """
-            Usage: script-loader <tenant> <script.json> [--server <url>]
+            Usage: script-loader <tenant> <script.json> [--pause <seconds>] [--server <url>]
                    script-loader clear <tenant> [--holdings-only] [--remove-users] [--pause <seconds>] [--server <url>]
 
             Reads the script and sends it to the server, into the tenant. A table script goes in as one batch
@@ -33,13 +33,14 @@ namespace AtlasLedger.ScriptLoader
                                 "eventType": "Trade", ..., "payload": { ... } } ] } ], or the same as JSON Lines (.jsonl:
                                 one transaction per line).
             clear: empties the tenant, in two stages a page open on it shows as they happen. First the holdings
-            leave each account (its securities transferred out in kind, its cash withdrawn: events, since the log is
-            never changed), then each account is deleted with its node, custodian number and links. Institutions,
+            leave each account (its securities sold at their current prices, all of its cash withdrawn: events, since
+            the log is never changed), then each account is deleted with its node, custodian number and links. Institutions,
             models and assets stay. Clearing a clear tenant changes nothing. The rules service must be on. It reads
             as the operator and writes as the script loader (each tool has only its own half).
               --holdings-only   Keep the accounts; only take the holdings out.
               --remove-users    Also remove the tenant's users, so no person sees it any more.
-              --pause <seconds> Wait between accounts, to watch it in the website (default 0).
+              --pause <seconds> Wait between accounts (for a load, between transactions), to watch it in the
+                                website (default 0).
 
               --server <url>    The server (default: ATLAS_LEDGER_SERVER, else the settings file's, else
                                 http://127.0.0.1:5180).
@@ -76,7 +77,7 @@ namespace AtlasLedger.ScriptLoader
             }
 
             var isClear = positional.Count == 2 && positional[0] == "clear";
-            if (positional.Count != 2 || !Guid.TryParse(positional[isClear ? 1 : 0], out var tenantId) || (!isClear && (holdingsOnly || removeUsers || pause > TimeSpan.Zero)))
+            if (positional.Count != 2 || !Guid.TryParse(positional[isClear ? 1 : 0], out var tenantId) || (!isClear && (holdingsOnly || removeUsers)))
             {
                 Console.Error.WriteLine(Usage);
                 return 2;
@@ -100,7 +101,7 @@ namespace AtlasLedger.ScriptLoader
                 }
                 else
                 {
-                    await Commands.LoadAsync(connection.Api, tenantId, positional[1], Console.Out, cancellation.Token).ConfigureAwait(false);
+                    await Commands.LoadAsync(connection.Api, tenantId, positional[1], Console.Out, cancellation.Token, pause).ConfigureAwait(false);
                 }
 
                 return 0;

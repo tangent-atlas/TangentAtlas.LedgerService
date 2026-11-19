@@ -49,9 +49,11 @@ namespace AtlasLedger.Client
         /// <param name="path">The script file.</param>
         /// <param name="output">Where to write.</param>
         /// <param name="cancellationToken">Cancels the command.</param>
+        /// <param name="pause">For a transaction script, how long to wait after each transaction, so its effect can be
+        /// watched (zero: all at once).</param>
         /// <returns>A task that completes when the script is applied.</returns>
         /// <exception cref="InvalidOperationException">A transaction was refused (the others were committed).</exception>
-        public static async Task LoadAsync(LedgerApiClient api, Guid tenantId, string path, TextWriter output, CancellationToken cancellationToken)
+        public static async Task LoadAsync(LedgerApiClient api, Guid tenantId, string path, TextWriter output, CancellationToken cancellationToken, TimeSpan pause = default)
         {
             ArgumentNullException.ThrowIfNull(api);
             ArgumentNullException.ThrowIfNull(output);
@@ -62,7 +64,20 @@ namespace AtlasLedger.Client
                 var transactions = isLines
                     ? text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(EventMessages.ReadLine).ToArray()
                     : EventMessages.ReadScript(text);
-                var results = await api.CommitTransactionsAsync(tenantId, transactions, cancellationToken).ConfigureAwait(false);
+                var results = new List<TransactionResult>();
+                if (pause <= TimeSpan.Zero)
+                {
+                    results.AddRange(await api.CommitTransactionsAsync(tenantId, transactions, cancellationToken).ConfigureAwait(false));
+                }
+                else
+                {
+                    foreach (var transaction in transactions)
+                    {
+                        results.AddRange(await api.CommitTransactionsAsync(tenantId, [transaction], cancellationToken).ConfigureAwait(false));
+                        await Task.Delay(pause, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
                 var committed = results.Count(result => result.Status == TransactionStatus.Committed);
                 output.WriteLine($"Loaded {transactions.Count} transaction(s) ({transactions.Sum(transaction => transaction.Events.Count)} event(s)) from {path} into {tenantId}: {committed} committed, {results.Count - committed} already committed.");
                 return;

@@ -5,8 +5,9 @@
 
 .DESCRIPTION
     For each tenant, script-loader clear does it in two stages, each account a step of its own:
-      1. The holdings leave each account the way they would leave a real one: its securities are transferred out in kind
-         and its cash is withdrawn, as events (the log is never changed or deleted).  The account stays, holding nothing.
+      1. The holdings leave each account the way a real account is closed: its securities are sold at their current
+         prices and all of its cash is withdrawn, as events (the log is never changed or deleted).  What it was paid in
+         (deposits less withdrawals) stays true.  The account stays, holding nothing.
       2. Each account is deleted, with its node, its custodian number and its links to other nodes.  Its institution,
          model and assets stay (shared reference data), and so do its events.
     With -RemoveUsers it then removes the tenant's users, so no person sees the tenant any more.

@@ -26,7 +26,7 @@ switch (command)
     case "clear-database":
         return await ClearDatabaseAsync();
     default:
-        Console.Error.WriteLine("ledger-load vendor [--port 5199] | clear-database [--connection CS] [--server URL] [--all] [--dry-run] | load --server URL --from I --to J [--years 3] [--trades-per-week 3] | measure --server URL --tenants N [--clients 1] [--seconds 60] [--pid P] [--label L] [--out FILE]");
+        Console.Error.WriteLine("ledger-load vendor [--port 5199] | clear-database [--connection CS] [--server URL] [--tenant ID]... [--all] [--dry-run] | load --server URL --from I --to J [--years 3] [--trades-per-week 3] | measure --server URL --tenants N [--clients 1] [--seconds 60] [--pid P] [--label L] [--out FILE]");
         return 2;
 }
 
@@ -51,12 +51,13 @@ static async Task RunVendorAsync(int port)
     await app.RunAsync();
 }
 
-// Deletes the load test's tenants (or, with --all, every tenant) from a stopped ledger's database.
+// Deletes tenants from a stopped ledger's database: those named (--tenant, any number), else the load test's; --all, every one.
 async Task<int> ClearDatabaseAsync()
 {
     var connection = Option("connection", "Server=localhost;Database=AtlasLedger;Trusted_Connection=True;TrustServerCertificate=True");
     var servers = args.Contains("--server") ? [Option("server", "")] : new[] { "http://127.0.0.1:5180", "http://127.0.0.1:5100" };
-    foreach (var server in servers)
+    // A dry run only counts, so it may run beside a ledger; deleting may not.
+    foreach (var server in args.Contains("--dry-run") ? [] : servers)
     {
         if (await LoadTestDatabase.IsServerRunningAsync(server))
         {
@@ -67,10 +68,11 @@ async Task<int> ClearDatabaseAsync()
 
     try
     {
-        await LoadTestDatabase.ClearAsync(connection, args.Contains("--all"), args.Contains("--dry-run"), Console.Out);
+        var named = args.Select((value, index) => (value, index)).Where(item => item.value == "--tenant" && item.index + 1 < args.Length).Select(item => Guid.Parse(args[item.index + 1])).ToHashSet();
+        await LoadTestDatabase.ClearAsync(connection, named, args.Contains("--all"), args.Contains("--dry-run"), Console.Out);
         return 0;
     }
-    catch (Exception exception) when (exception is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+    catch (Exception exception) when (exception is Microsoft.Data.SqlClient.SqlException or InvalidOperationException or FormatException)
     {
         Console.Error.WriteLine($"Clearing the database failed (nothing was deleted): {exception.Message}");
         return 1;

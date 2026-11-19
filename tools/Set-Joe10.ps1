@@ -11,13 +11,18 @@
       2. access-test whoami signs the test person in (a browser opens the first time: sign in as the test person,
          ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant, first, so a page they have open
          shows the account as it loads (within the website's tenant refresh, ten seconds).
-      3. script-loader loads the reference (the account at the simulated broker, its model and assets), the history
-         (the deposit and the purchases at the state's close), the jobs (orders at 3:45 pm New York on market days) and
-         the model's weights.
-    It loads an empty tenant: if the tenant already has events, it stops and says so.  To load it again and watch it
-    arrive, empty the tenant first with .\tools\Reset-Tenant.ps1 (in the database, with the ledger stopped: the event
-    log is append-only), then run this again.  The history goes in one transaction every -PauseSeconds (the deposit,
-    then each purchase), so a page open on the dashboard shows each step.
+      3. The account (-Account): script-loader loads the reference (the account at the simulated broker, its model
+         and assets), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
+         appears at $0.
+      4. The holdings (-Holdings): script-loader loads the history (the deposit, then the purchases at the state's
+         close), one transaction every -PauseSeconds, so a page open on the account shows each arrive.
+    Without -Account or -Holdings, it does both, one after the other.  Separately, the account can be opened in the
+    website before its holdings load:
+      .\tools\Set-Joe10.ps1 -Production -Account      (then open the Joe 10 in the website)
+      .\tools\Set-Joe10.ps1 -Production -Holdings
+    The account is created in an empty tenant: if the tenant already has events, it stops and says so.  To load it again
+    and watch it arrive, empty the tenant first with .\tools\Reset-Tenant.ps1 (in the database, with the ledger
+    stopped: the event log is append-only).  The holdings need the account; loading them twice changes nothing.
 
 .PARAMETER TenantId
     The tenant (default: the Joe 10's own, the same every time).
@@ -29,6 +34,12 @@
 
 .PARAMETER Generic
     Load the generic Joe 10 instead (bought at $100 a share: real closes value it as a large gain or loss).
+
+.PARAMETER Account
+    Only create the account (with its model, assets, jobs and weights), empty.
+
+.PARAMETER Holdings
+    Only load the holdings (the deposit and the purchases) into the account already created.
 
 .PARAMETER PauseSeconds
     How long to wait between the history's transactions, to watch each arrive in the website (default 1; 0 loads them
@@ -50,14 +61,16 @@
     .\tools\Set-Joe10.ps1 -Production
 
 .EXAMPLE
-    .\tools\Reset-Tenant.ps1 -Production; .\tools\Set-Joe10.ps1 -Production
-    Empty the Joe 10's tenant, then load it again while the dashboard is watched.
+    .\tools\Reset-Tenant.ps1 -Production; .\tools\Set-Joe10.ps1 -Production -Account; .\tools\Set-Joe10.ps1 -Production -Holdings
+    Empty the Joe 10's tenant, create the account, then (with the account open in the website) load its holdings.
 #>
 [CmdletBinding()]
 param(
     [guid]$TenantId = '4a6f6531-3020-7061-7065-720000000001',
     [string]$StatePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'TangentAtlas.ForwardTest\state\joe10.json'),
     [switch]$Generic,
+    [switch]$Account,
+    [switch]$Holdings,
     [ValidateRange(0, 60)][double]$PauseSeconds = 1,
     [switch]$NoBuild,
     [switch]$Production,
@@ -116,28 +129,47 @@ try {
     }
     Invoke-Program $programs.TestData $testDataArguments
 
-    Write-Host "`n== Tenant $TenantId" -ForegroundColor Cyan
-    # A new tenant answers 404 here, which is what we want: its message isn't shown.
-    $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1 2>$null) -join ''
-    if ($LASTEXITCODE -eq 0 -and $existing.Trim()) {
-        throw "Tenant $TenantId already has events: it is loaded.  Empty it first: .\tools\Reset-Tenant.ps1 -TenantId $TenantId$(if ($Production) { ' -Production' })"
+    $both = -not $Account -and -not $Holdings
+    if ($Account -or $both) {
+        Write-Host "`n== Tenant $TenantId" -ForegroundColor Cyan
+        # A new tenant answers 404 here, which is what we want: its message isn't shown.
+        $existing = (& dotnet $programs.Operator.Path events "$TenantId" --json --last 1 2>$null) -join ''
+        if ($LASTEXITCODE -eq 0 -and $existing.Trim()) {
+            throw "Tenant $TenantId already has events: it is loaded.  Empty it first: .\tools\Reset-Tenant.ps1 -TenantId $TenantId$(if ($Production) { ' -Production' })"
+        }
+        Write-Host "`n== The test person signs in; they become a user of the tenant" -ForegroundColor Cyan
+        if ($SignOut) { Invoke-Program $programs.AccessTest @('sign-out') }
+        $identity = (& dotnet $programs.AccessTest.Path whoami) -join '' | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or -not $identity.subject) { throw 'access-test whoami failed.' }
+        Write-Host "   Signed in: $($identity.subject) ($($identity.issuer))"
+        $member = Join-Path $work 'member.json'
+        @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = (Get-UserId $identity.issuer $identity.subject); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
+            ConvertTo-Json -Depth 5 | Set-Content -Path $member -Encoding utf8
+        Invoke-Program $programs.Loader @("$TenantId", $member)
+        Write-Host "`n== The account at the simulated broker" -ForegroundColor Cyan
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
+        Write-Host "`nThe Joe 10's account is in tenant $TenantId, empty, and $($identity.subject) is its user." -ForegroundColor Green
     }
-    Write-Host "`n== The test person signs in; they become a user of the tenant" -ForegroundColor Cyan
-    if ($SignOut) { Invoke-Program $programs.AccessTest @('sign-out') }
-    $identity = (& dotnet $programs.AccessTest.Path whoami) -join '' | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or -not $identity.subject) { throw 'access-test whoami failed.' }
-    Write-Host "   Signed in: $($identity.subject) ($($identity.issuer))"
-    $member = Join-Path $work 'member.json'
-    @{ operations = @(@{ action = 'Insert'; table = 'User'; row = @{ userId = (Get-UserId $identity.issuer $identity.subject); identityIssuer = $identity.issuer; identitySubject = $identity.subject } }) } |
-        ConvertTo-Json -Depth 5 | Set-Content -Path $member -Encoding utf8
-    Invoke-Program $programs.Loader @("$TenantId", $member)
-    Write-Host "`n== Loading the Joe 10" -ForegroundColor Cyan
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
-    Start-Sleep -Seconds $PauseSeconds
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'), '--pause', $PauseSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
-    Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
-    Write-Host "`nDone: the Joe 10 is tenant $TenantId, and $($identity.subject) is its user.  Sign in to the website as the test person." -ForegroundColor Green
+
+    if ($Holdings -or $both) {
+        if ($Holdings) {
+            # The holdings go into the account already created: read as the operator.
+            $export = Join-Path $work 'tenant.json'
+            & dotnet $programs.Operator.Path export "$TenantId" $export 2>$null | Out-Null
+            $accounts = if ($LASTEXITCODE -eq 0) { @((Get-Content $export -Raw | ConvertFrom-Json).operations | Where-Object { $_.table -eq 'Account' }) } else { @() }
+            if ($accounts.Count -eq 0) {
+                throw "Tenant $TenantId has no account yet: create it first with .\tools\Set-Joe10.ps1$(if ($Production) { ' -Production' }) -Account"
+            }
+        } else {
+            Start-Sleep -Seconds $PauseSeconds
+        }
+
+        Write-Host "`n== The holdings: the deposit, then each purchase" -ForegroundColor Cyan
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'), '--pause', $PauseSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
+        Write-Host "`nThe Joe 10's holdings are loaded into tenant $TenantId." -ForegroundColor Green
+    }
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }

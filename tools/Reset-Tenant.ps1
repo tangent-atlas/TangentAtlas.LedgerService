@@ -68,8 +68,11 @@ function Invoke-Delete {
     $arguments = @('clear-database', '--connection', $ConnectionString) + $tenantArguments
     if ($Server) { $arguments += @('--server', $Server) }
     if ($DryRun) { $arguments += '--dry-run' }
-    & dotnet $tool @arguments
-    if ($LASTEXITCODE -ne 0) { throw "Deleting the tenants failed (exit code $LASTEXITCODE): nothing was deleted." }
+    # Captured, both streams, and shown here: some terminals drop or reorder a child program's output.
+    $said = @(& dotnet $tool @arguments 2>&1 | ForEach-Object { "$_" })
+    $exitCode = $LASTEXITCODE
+    $said | ForEach-Object { Write-Host "   $_" }
+    if ($exitCode -ne 0) { throw "Deleting the tenants failed (exit code $exitCode): nothing was deleted.  It said: $($said -join ' ')" }
 }
 
 if (-not $Production) {

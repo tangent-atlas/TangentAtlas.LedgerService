@@ -43,14 +43,19 @@ namespace AtlasLedger.Persistence.Tests
             var keys = new Keys();
             using var transaction = partition.BeginTransaction();
 
-            // A model (the ledger's table, not this class), for the first account: the others are not rebalanced.
+            // A model (the ledger's table, not this class), on a portfolio in the household that holds the first two accounts:
+            // the others are in no portfolio.
             var model = transaction.InsertModel(new server::AtlasLedger.Model.Primary.Model { ModelId = Guid.NewGuid(), Name = "Model" });
+            var household = transaction.InsertNode(NewNode("Household", NodeType.Household));
+            var portfolio = transaction.InsertNode(NewNode("Portfolio", NodeType.Portfolio));
+            transaction.InsertPortfolio(new Portfolio { PortfolioId = portfolio.NodeId, ModelId = model.ModelId });
+            transaction.InsertEdge(new Edge { ParentNodeId = household.NodeId, ChildNodeId = portfolio.NodeId, Position = 0, Since = new DateOnly(2026, 11, 2) });
             for (var index = 0; index < 4; index++)
             {
                 var node = NewNode("Account" + index);
                 node.Description = index % 2 == 0 ? null : "Described " + index;
                 keys.Accounts.Add(transaction.InsertNode(node).NodeId);
-                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountRole = (AccountRole)(index % 3), AccountType = AccountType.Brokerage, Currency = "USD", ModelId = index == 0 ? model.ModelId : null });
+                transaction.InsertAccount(new Account { AccountId = node.NodeId, AccountType = AccountType.Brokerage, Currency = "USD" });
                 transaction.InsertSymbol(new Symbol { Scheme = "Custodian", Code = "C" + index.ToString(CultureInfo.InvariantCulture), NodeId = node.NodeId });
             }
 
@@ -65,7 +70,8 @@ namespace AtlasLedger.Persistence.Tests
             }
 
             transaction.InsertDossier(new Dossier { PersonId = keys.Persons[0] });
-            transaction.InsertEdge(new Edge { ParentNodeId = keys.Accounts[0], ChildNodeId = keys.Accounts[1] });
+            transaction.InsertEdge(new Edge { ParentNodeId = portfolio.NodeId, ChildNodeId = keys.Accounts[0], Position = 0, Since = new DateOnly(2026, 11, 2) });
+            transaction.InsertEdge(new Edge { ParentNodeId = portfolio.NodeId, ChildNodeId = keys.Accounts[1], Position = 1, Since = new DateOnly(2026, 11, 3) });
             transaction.InsertEdge(new Edge { ParentNodeId = keys.Accounts[0], ChildNodeId = keys.Persons[0] });
             transaction.InsertAlert(new Alert { AlertId = Guid.NewGuid(), NodeId = keys.Accounts[2], Rule = "Cap", Message = "Over the cap." });
             transaction.Commit();
@@ -97,8 +103,8 @@ namespace AtlasLedger.Persistence.Tests
             transaction.InsertSymbol(new Symbol { Scheme = "Custodian", Code = "C3", NodeId = keys.Accounts[2] });
             var gone = partition.FindSymbol("Custodian", "C2")!;
             transaction.DeleteSymbol(gone.Scheme, gone.Code, gone.RowVersion);
-            var edge = partition.FindEdge(keys.Accounts[0], keys.Accounts[1])!;
-            transaction.DeleteEdge(edge.ParentNodeId, edge.ChildNodeId, edge.RowVersion);
+            var edge = partition.FindEdge(keys.Accounts[1])!;
+            transaction.DeleteEdge(edge.ChildNodeId, edge.RowVersion);
             transaction.InsertSymbol(new Symbol { Scheme = "Exchange", Code = "NEW", NodeId = keys.Accounts[3] });
             transaction.Commit();
         }

@@ -300,6 +300,24 @@ namespace AtlasLedger.Server.Events
                 }
             }
 
+            foreach (var move in events.OfType<NodeMovedEvent>())
+            {
+                if (partition.FindNode(move.NodeId) is not { } node || node.NodeType is not (NodeType.Portfolio or NodeType.Account))
+                {
+                    problems.Add($"Event {move.EventId}: node {move.NodeId} isn't one of the tenant's portfolios or accounts.");
+                }
+
+                if (partition.FindNode(move.ToParentNodeId) is not { NodeType: NodeType.Portfolio or NodeType.Household })
+                {
+                    problems.Add($"Event {move.EventId}: the parent it moves to, {move.ToParentNodeId}, isn't one of the tenant's portfolios or its household.");
+                }
+
+                if (move.FromParentNodeId is { } from && partition.FindNode(from) is not { NodeType: NodeType.Portfolio or NodeType.Household })
+                {
+                    problems.Add($"Event {move.EventId}: the parent it moves from, {from}, isn't one of the tenant's portfolios or its household.");
+                }
+            }
+
             var orderEvents = events.OfType<OrderEvent>().ToArray();
             if (orderEvents.Length > 0)
             {

@@ -11,7 +11,7 @@ namespace AtlasLedger.Server.Holdings
 
     /// <summary>
     /// Writes what the rules derive into the model's derived tables (Position, EffectivePrice, CurrencyRate, AccountFlow,
-    /// AccountDay, AccountStatistic): ephemeral, written only by the server, read through the API and client sync like any
+    /// AccountDay, AccountStatistic, PortfolioDay, PortfolioStatistic): ephemeral, written only by the server, read through the API and client sync like any
     /// other table.  Each cycle replaces each table with what the rules hold, in the cycle's one transaction; only rows that
     /// differ are written, so unchanged rows keep their versions and nothing about them reaches the change feed.
     /// </summary>
@@ -35,19 +35,22 @@ namespace AtlasLedger.Server.Holdings
         /// <param name="rates">Every rate.</param>
         /// <param name="flows">Every account's net contributions.</param>
         /// <param name="histories">Every account's history and statistics.</param>
+        /// <param name="portfolios">Every portfolio's history and statistics.</param>
         /// <returns>The change.</returns>
         public static Action<LedgerTransaction> Materialize(
             IReadOnlyList<PositionState> positions,
             IReadOnlyList<EffectivePrice> prices,
             IReadOnlyList<CurrencyRate> rates,
             IReadOnlyList<AccountFlow> flows,
-            IReadOnlyList<AccountHistory> histories)
+            IReadOnlyList<AccountHistory> histories,
+            IReadOnlyList<Accounting.PortfolioHistory> portfolios)
         {
             ArgumentNullException.ThrowIfNull(positions);
             ArgumentNullException.ThrowIfNull(prices);
             ArgumentNullException.ThrowIfNull(rates);
             ArgumentNullException.ThrowIfNull(flows);
             ArgumentNullException.ThrowIfNull(histories);
+            ArgumentNullException.ThrowIfNull(portfolios);
             return transaction =>
             {
                 var partition = transaction.Partition;
@@ -103,6 +106,32 @@ namespace AtlasLedger.Server.Holdings
                 transaction.ReplaceAccountStatistics(measured.Select(history => history.Statistics).Select(statistics => new AccountStatistic
                 {
                     AccountId = statistics.AccountId,
+                    From = statistics.From,
+                    Through = statistics.Through,
+                    Value = Round(statistics.Value, MoneyPlaces),
+                    NetFlows = Math.Round(statistics.NetFlows, MoneyPlaces),
+                    Returns = statistics.Returns,
+                    TotalReturn = Round(statistics.TotalReturn, PricePlaces),
+                    AnnualizedReturn = Round(statistics.AnnualizedReturn, PricePlaces),
+                    Volatility = Round(statistics.Volatility, PricePlaces),
+                    SharpeRatio = Round(statistics.SharpeRatio, PricePlaces),
+                    MaximumDrawdown = Round(statistics.MaximumDrawdown, PricePlaces),
+                    IsRanked = statistics.IsRanked,
+                }));
+
+                var books = portfolios.Where(history => partition.FindPortfolio(history.PortfolioId) is not null).ToArray();
+                transaction.ReplacePortfolioDays(books.SelectMany(history => history.Days.Select(day => new PortfolioDay
+                {
+                    PortfolioId = history.PortfolioId,
+                    Date = day.Date,
+                    Value = Round(day.Value, MoneyPlaces),
+                    Flow = Math.Round(day.Flow, MoneyPlaces),
+                    Return = Round(day.Return, PricePlaces),
+                    RiskFreeReturn = Round(day.RiskFreeReturn, PricePlaces),
+                })));
+                transaction.ReplacePortfolioStatistics(books.Select(history => history.Statistics).Select(statistics => new PortfolioStatistic
+                {
+                    PortfolioId = statistics.AccountId,
                     From = statistics.From,
                     Through = statistics.Through,
                     Value = Round(statistics.Value, MoneyPlaces),

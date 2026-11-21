@@ -147,8 +147,8 @@ namespace AtlasLedger.Tests
             var tenantId = Guid.NewGuid();
             var state = ReadState();
             await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
-            var account = (await tool.ListAsync<AccountDto>(tenantId, "Account", cancellationToken)).Single();
-            await tool.ApplyAsync(tenantId, new LedgerScript().Update("Account", new { account.AccountId }, new AccountDto { AccountId = account.AccountId, AccountRole = account.AccountRole, AccountType = account.AccountType, Currency = account.Currency, InstitutionId = account.InstitutionId, ExternalAccountId = account.ExternalAccountId, ModelId = null, RowVersion = account.RowVersion }), cancellationToken);
+            var portfolio = (await tool.ListAsync<PortfolioDto>(tenantId, "Portfolio", cancellationToken)).Single();
+            await tool.ApplyAsync(tenantId, new LedgerScript().Update("Portfolio", new { portfolio.PortfolioId }, new PortfolioDto { PortfolioId = portfolio.PortfolioId, ModelId = null, RowVersion = portfolio.RowVersion }), cancellationToken);
             await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
             await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
 
@@ -158,6 +158,58 @@ namespace AtlasLedger.Tests
             Assert.Empty((await tool.GetOrdersAsync(tenantId, cancellationToken)).Proposals);
             Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
             Assert.Equal((null, null, null), (holdings.Accounts.Single().ModelId, holdings.Accounts.Single().TargetCash, holdings.Accounts.Single().ProposedTrades));
+        }
+
+        [Fact]
+        public async Task AModelGoverningTwoAccountsWaitsWithAnAlertUntilOneMovesOut()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(Trading);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
+
+            // The household holds the Joe 10 portfolio, which holds the account: the tree is sound and the model trades.
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
+            Assert.DoesNotContain(await tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken), alert => alert.Rule is "PortfolioTree" or "ModelNotTrading");
+
+            // A second account in the same portfolio: the model would have to place whole shares across two accounts, which
+            // comes with Commit Changes.  Until then it proposes nothing and says why, on the portfolio.
+            var second = Guid.NewGuid();
+            await tool.ApplyAsync(
+                tenantId,
+                new LedgerScript()
+                    .Insert("Node", new NodeDto { NodeId = second, DisplayName = "Joe 10 IRA", FullName = "Joe 10 IRA", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
+                    .Insert("Account", new AccountDto { AccountId = second, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = Joe10Account.InstitutionId, ExternalAccountId = "PAPER-100011" })
+                    .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = "PAPER-100011", NodeId = second })
+                    .Insert("Edge", new EdgeDto { ChildNodeId = second, ParentNodeId = Joe10Account.PortfolioId, Position = 1, Since = new DateOnly(2026, 11, 6) }),
+                cancellationToken);
+            var alerts = await WaitForAsync(() => tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken), found => found.Any(alert => alert.Rule == "ModelNotTrading"));
+            Assert.StartsWith("Its model governs 2 accounts.", alerts.Single(alert => alert.Rule == "ModelNotTrading" && alert.NodeId == Joe10Account.PortfolioId).Message);
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.Count == 0);
+            Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+
+            // Moved to a portfolio of its own, with no model: the Joe 10 trades again and the alert clears.
+            var picks = Guid.NewGuid();
+            var edge = (await tool.ListAsync<EdgeDto>(tenantId, "Edge", cancellationToken)).Single(item => item.ChildNodeId == second);
+            await tool.ApplyAsync(
+                tenantId,
+                new LedgerScript()
+                    .Insert("Node", new NodeDto { NodeId = picks, DisplayName = "Picks", FullName = "Stock picks", NodeStatus = NodeStatus.Active, NodeType = NodeType.Portfolio })
+                    .Insert("Portfolio", new PortfolioDto { PortfolioId = picks })
+                    .Insert("Edge", new EdgeDto { ChildNodeId = picks, ParentNodeId = Joe10Account.HouseholdId, Position = 1, Since = new DateOnly(2026, 11, 9) })
+                    .Update("Edge", new { edge.ChildNodeId }, new EdgeDto { ChildNodeId = second, ParentNodeId = picks, Position = 0, Since = new DateOnly(2026, 11, 9), RowVersion = edge.RowVersion }),
+                cancellationToken);
+            await WaitForAsync(() => tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken), found => !found.Any(alert => alert.Rule is "ModelNotTrading" or "PortfolioTree"));
+            var proposals = await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
+            Assert.Equal(Joe10Account.AccountId, proposals.Proposals.Single().AccountId);
+            var holdings = await tool.GetHoldingsAsync(tenantId, cancellationToken);
+            Assert.Equal(Joe10Account.ModelId, holdings.Accounts.Single(account => account.AccountId == Joe10Account.AccountId).ModelId);
+            Assert.DoesNotContain(holdings.Accounts, account => account.AccountId == second && account.ModelId is not null);
         }
 
         [Fact]

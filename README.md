@@ -59,7 +59,11 @@ through the API stays on for four hours unless told otherwise (at most 24).  No 
 compliance alerts all come from the rules engine, so while it is off the holdings endpoint answers 409, and switching it
 on rebuilds them from the log.
 
-The rules propose, continuously, the trades each account's model calls for; nothing is ordered until a scheduled
+The household is a tree: the household at the root, portfolios beneath it to any depth, each account in exactly one
+portfolio.  Models belong to portfolios: a portfolio's model governs every account beneath it unless a lower portfolio
+has its own, and a node whose place in the tree is wrong carries a `PortfolioTree` alert.  For now only a fixed-weights
+model with no cash rule, governing a single account, trades; any other carries a `ModelNotTrading` alert saying why.
+The rules propose, continuously, the trades the model governing each account calls for; nothing is ordered until a scheduled
 `GenerateOrders` job or an operator (`ledger-operator trade <tenant>`) turns the proposals into orders.  The `trading`
 switch stops the whole system's scheduled order generation: while it is off, a scheduled run does nothing.  The `broker`
 service is the order router: it sends broker orders to their brokers and records what they report; nothing is sent to a

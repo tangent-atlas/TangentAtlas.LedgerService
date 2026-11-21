@@ -107,6 +107,12 @@ namespace AtlasLedger.Client.TestData
         /// <summary>The default tenant for the Joe 10 test account.</summary>
         public static readonly Guid DefaultTenantId = KeyFor("tenant");
 
+        /// <summary>The household: the root of the tenant's tree of portfolios.</summary>
+        public static readonly Guid HouseholdId = KeyFor("household");
+
+        /// <summary>The Joe 10 portfolio: holds the account, and the model that governs it.</summary>
+        public static readonly Guid PortfolioId = KeyFor("portfolio");
+
         /// <summary>The account.</summary>
         public static readonly Guid AccountId = KeyFor("account");
 
@@ -114,7 +120,9 @@ namespace AtlasLedger.Client.TestData
         public static readonly Guid DollarId = KeyFor("asset/USD");
 
         /// <summary>
-        /// The Joe 10 model: the weights the account is to hold.
+        /// The Joe 10 model: the weights the portfolio is to hold.  For now a fixed-weights model whose weights the history
+        /// script sets, with the thermostat's cash already taken out of them; it becomes a Constant Weight index with a
+        /// volatility target once the ledger runs those itself.
         /// </summary>
         public static readonly Guid ModelId = KeyFor("model");
 
@@ -145,11 +153,18 @@ namespace AtlasLedger.Client.TestData
         public static LedgerScript Reference(Joe10State state, EventSource broker = EventSource.Simulator)
         {
             ArgumentNullException.ThrowIfNull(state);
+            // The household holds the Joe 10 portfolio, which holds the account, from the close of the first day.
+            var since = DateOnly.FromDateTime(state.Close.UtcDateTime);
             var script = new LedgerScript()
                 .Insert("Institution", new InstitutionDto { InstitutionId = InstitutionId, Name = broker == EventSource.Simulator ? PaperBrokerageName : broker.ToString(), Source = broker })
-                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10", Band = 0.005m })
+                .Insert("Model", new ModelDto { ModelId = ModelId, Name = "Joe 10", ModelKind = ModelKind.FixedWeights, CashRule = CashRule.None, Band = 0.005m })
+                .Insert("Node", new NodeDto { NodeId = HouseholdId, DisplayName = "Household", FullName = "Household", NodeStatus = NodeStatus.Active, NodeType = NodeType.Household })
+                .Insert("Node", new NodeDto { NodeId = PortfolioId, DisplayName = "Joe 10", FullName = "Joe 10", NodeStatus = NodeStatus.Active, NodeType = NodeType.Portfolio })
+                .Insert("Portfolio", new PortfolioDto { PortfolioId = PortfolioId, ModelId = ModelId })
+                .Insert("Edge", new EdgeDto { ChildNodeId = PortfolioId, ParentNodeId = HouseholdId, Position = 0, Since = since })
                 .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 paper account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = AccountId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber, ModelId = ModelId })
+                .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber })
+                .Insert("Edge", new EdgeDto { ChildNodeId = AccountId, ParentNodeId = PortfolioId, Position = 0, Since = since })
                 .Insert("Brokerage", new BrokerageDto { AccountId = AccountId, BrokerageType = BrokerageType.Taxable })
                 .Insert("Symbol", new SymbolDto { Scheme = SymbolScheme.Custodian, Code = ExternalAccountNumber, NodeId = AccountId })
                 .Insert("Node", new NodeDto { NodeId = DollarId, DisplayName = CurrencyCode.UnitedStatesDollar, FullName = "US dollar", NodeStatus = NodeStatus.Active, NodeType = NodeType.Asset })

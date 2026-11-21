@@ -276,7 +276,7 @@ namespace AtlasLedger.Tests
             await tool.ApplyAsync(theirs, new LedgerScript().Insert("User", new client::AtlasLedger.Model.UserDto { UserId = Guid.NewGuid(), IdentityIssuer = DevelopmentCallers.Issuer, IdentitySubject = DevelopmentCallers.AdvisorSubject }), cancellationToken);
             await WaitForAsync(tool, theirs, found => found.Holdings.Count == 3, cancellationToken);
 
-            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution"];
+            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution", "Edge", "Portfolio", "PortfolioDay", "PortfolioStatistic"];
             var sync = person.Sync(new client::AtlasLedger.Model.Ledger(), theirs, website);
             var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
             while (sync.Partition.Positions.Count < 3 && DateTimeOffset.UtcNow < deadline)
@@ -289,6 +289,20 @@ namespace AtlasLedger.Tests
             Assert.NotEmpty(sync.Partition.Weights);
             Assert.Equal(Joe10Account.AccountId, sync.Partition.Accounts.Single().AccountId);
             Assert.Empty(sync.Partition.Events);   // only what the website asked for
+
+            // The household's tree, and the Joe 10 portfolio's books: one account, so the same as the account's.
+            while (sync.Partition.PortfolioStatistics.Count == 0 && DateTimeOffset.UtcNow < deadline.AddSeconds(15))
+            {
+                await sync.SyncAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            Assert.Equal(2, sync.Partition.Edges.Count);
+            Assert.Equal(Joe10Account.ModelId, sync.Partition.Portfolios.Single().ModelId);
+            var portfolio = sync.Partition.PortfolioStatistics.Single();
+            var account = sync.Partition.AccountStatistics.Single();
+            Assert.Equal(Joe10Account.PortfolioId, portfolio.PortfolioId);
+            Assert.Equal((account.From, account.Through, account.Value, account.Returns, account.TotalReturn, account.SharpeRatio), (portfolio.From, portfolio.Through, portfolio.Value, portfolio.Returns, portfolio.TotalReturn, portfolio.SharpeRatio));
+            Assert.Equal(sync.Partition.AccountDays.Count, sync.Partition.PortfolioDays.Count);
 
             var elsewhere = person.Sync(new client::AtlasLedger.Model.Ledger(), another, website);
             var refused = await Assert.ThrowsAsync<client::AtlasLedger.Model.Replica.LedgerSyncException>(() => elsewhere.SyncAsync(TimeSpan.Zero, cancellationToken));

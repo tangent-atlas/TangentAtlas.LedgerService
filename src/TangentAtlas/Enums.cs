@@ -5,21 +5,6 @@
 namespace AtlasLedger.Model
 {
     /// <summary>
-    /// An account's place in an adviser's tree of accounts.
-    /// </summary>
-    public enum AccountRole
-    {
-        /// <summary>An account that groups other accounts.</summary>
-        GroupAccount,
-
-        /// <summary>An account managed against a model.</summary>
-        ManagedAccount,
-
-        /// <summary>An account whose members are weighted.</summary>
-        WeightedAccount,
-    }
-
-    /// <summary>
     /// The kinds of account: the first level of the account hierarchy.  Each has an extension table with its more
     /// specific type (only Brokerage so far).
     /// </summary>
@@ -120,29 +105,86 @@ namespace AtlasLedger.Model
     }
 
     /// <summary>
-    /// The lifecycle status of a node.
+    /// The lifecycle status of a node.  Stored as a number: never renumber.
     /// </summary>
     public enum NodeStatus
     {
         /// <summary>The node is active.</summary>
-        Active,
+        Active = 0,
 
-        // The remaining members are not known yet; add them here.
+        /// <summary>Closed: hidden, its history kept and still counted in its portfolios' records.  An account with history
+        /// is closed, never deleted.</summary>
+        Closed = 1,
     }
 
     /// <summary>
-    /// The kinds of node in the hierarchy.
+    /// The kinds of node.  Stored as a number: never renumber.
     /// </summary>
     public enum NodeType
     {
         /// <summary>An account.</summary>
-        Account,
+        Account = 0,
 
         /// <summary>A person.</summary>
-        Person,
+        Person = 1,
 
         /// <summary>An asset: anything that can be held, named by its symbols.</summary>
-        Asset,
+        Asset = 2,
+
+        /// <summary>The household: the root of the tree of portfolios, one per tenant.  It holds only portfolios.</summary>
+        Household = 3,
+
+        /// <summary>A portfolio: holds portfolios and accounts, may have a model, and keeps its own statistics.</summary>
+        Portfolio = 4,
+    }
+
+    /// <summary>
+    /// What a model holds: the first level of the model hierarchy.  Each kind but fixed weights has an extension table.
+    /// Stored as a number: never renumber.
+    /// </summary>
+    public enum ModelKind
+    {
+        /// <summary>Named assets at fixed fractions of the book (its Weight rows).</summary>
+        FixedWeights = 0,
+
+        /// <summary>The N largest US companies by full market value, traded back to their weights every day.</summary>
+        ConstantWeightIndex = 1,
+
+        /// <summary>The same companies held like an index fund: quantities change only at the index's rebalances.</summary>
+        IndexWeightIndex = 2,
+
+        /// <summary>Companies the customer names, weighted by a published method.</summary>
+        CustomList = 3,
+    }
+
+    /// <summary>
+    /// How a model decides how much cash to keep.  Stored as a number: never renumber.
+    /// </summary>
+    public enum CashRule
+    {
+        /// <summary>Fully invested: only what whole shares leave over (and, for fixed weights, what the weights leave) is cash.</summary>
+        None = 0,
+
+        /// <summary>A fixed amount of cash ("I need $100,000").</summary>
+        FixedAmount = 1,
+
+        /// <summary>The thermostat: cash set each day so the portfolio's volatility stays at the target.</summary>
+        VolatilityTarget = 2,
+    }
+
+    /// <summary>
+    /// How a custom list's companies are weighted.  Stored as a number: never renumber.
+    /// </summary>
+    public enum ListWeighting
+    {
+        /// <summary>Each the same.</summary>
+        Equal = 0,
+
+        /// <summary>By full market value.</summary>
+        MarketValue = 1,
+
+        /// <summary>By the fractions the customer gives.</summary>
+        Fixed = 2,
     }
 
     /// <summary>

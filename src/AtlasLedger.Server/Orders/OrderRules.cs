@@ -11,6 +11,7 @@ namespace AtlasLedger.Server.Orders
     using AtlasLedger.Model.Primary;
     using AtlasLedger.Server.Compliance;
     using AtlasLedger.Server.Holdings;
+    using AtlasLedger.Server.Portfolios;
     using EffectivePrice = AtlasLedger.Server.Holdings.EffectivePrice;
     using CurrencyRate = AtlasLedger.Server.Holdings.CurrencyRate;
     using NRules.Fluent.Dsl;
@@ -106,8 +107,9 @@ namespace AtlasLedger.Server.Orders
     }
 
     /// <summary>
-    /// An account's proposed allocations: the trades its model calls for now (<see cref="Rebalancing.Plan"/>), kept current
-    /// as prices, holdings and orders change.  Derived and never saved: nothing is ordered until the order generator turns
+    /// An account's proposed allocations: the trades the model that governs it calls for now (<see cref="Rebalancing.Plan"/>),
+    /// kept current as prices, holdings and orders change.  Only a model that trades proposes (<see cref="PortfolioRules.Trades"/>):
+    /// fixed weights with no cash rule, governing a single account.  Derived and never saved: nothing is ordered until the order generator turns
     /// them into orders.  It fires after every other rule (lowest priority), so it sees the holdings, prices and order states
     /// of this cycle, not the last.
     /// </summary>
@@ -118,6 +120,7 @@ namespace AtlasLedger.Server.Orders
         /// <inheritdoc/>
         public override void Define()
         {
+            Governance governance = default!;
             AccountFact account = default!;
             ModelFact model = default!;
             ClockFact clock = default!;
@@ -129,8 +132,9 @@ namespace AtlasLedger.Server.Orders
             IEnumerable<OrderState> orders = default!;
 
             this.When()
-                .Match(() => account, candidate => candidate.ModelId != null)
-                .Match(() => model, candidate => candidate.ModelId == account.ModelId)
+                .Match(() => governance, candidate => candidate.ModelId != null)
+                .Match(() => account, candidate => candidate.AccountId == governance.AccountId)
+                .Match(() => model, candidate => candidate.ModelId == governance.ModelId, candidate => PortfolioRules.Trades(governance, candidate))
                 .Match(() => clock)
                 .Query(() => weights, query => query.Match<WeightFact>(item => item.ModelId == model.ModelId).Collect())
                 .Query(() => positions, query => query.Match<PositionState>(item => item.AccountId == account.AccountId).Collect())

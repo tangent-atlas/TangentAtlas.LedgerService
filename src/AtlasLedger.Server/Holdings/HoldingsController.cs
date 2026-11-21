@@ -56,9 +56,10 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Cash">The value of its cash.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     /// <param name="Gain">Market value less net contributions.</param>
-    /// <param name="ModelId">The account's model; null when it is not rebalanced.</param>
+    /// <param name="ModelId">The model that governs the account (its portfolio's, or a parent portfolio's); null when none
+    /// does.</param>
     /// <param name="ModelName">The model's name.</param>
-    /// <param name="TargetCash">The share the model's weights leave in cash, if it has a model.</param>
+    /// <param name="TargetCash">The share a fixed-weights model's weights leave in cash; null for any other model, or none.</param>
     /// <param name="ProposedTrades">How many trades its model calls for now, if it has a model.</param>
     /// <param name="IsWaiting">True when a price is missing or stale, so no trade can be proposed yet.</param>
     public sealed record AccountSummaryDto(
@@ -140,10 +141,11 @@ namespace AtlasLedger.Server.Holdings
                     return accountValues.Any(value => value is null) ? (decimal?)null : accountValues.Sum(value => value!.Value);
                 });
             var accountFacts = snapshot.Accounts.ToDictionary(account => account.AccountId);
+            var governed = snapshot.Governances.Where(governance => governance.ModelId is not null).ToDictionary(governance => governance.AccountId, governance => governance.ModelId!.Value);
             var models = snapshot.Models.ToDictionary(model => model.ModelId);
             var weights = accountIds.ToDictionary(
                 accountId => accountId,
-                accountId => accountFacts.TryGetValue(accountId, out var account) && account.ModelId is { } modelId ? Rebalancing.WeightsOf(snapshot.Weights, modelId) : new Dictionary<Guid, decimal>());
+                accountId => governed.TryGetValue(accountId, out var modelId) ? Rebalancing.WeightsOf(snapshot.Weights, modelId) : new Dictionary<Guid, decimal>());
 
             var holdings = held
                 .OrderBy(position => position.AccountId)
@@ -168,7 +170,7 @@ namespace AtlasLedger.Server.Holdings
                         position.AccountCurrency,
                         value,
                         value is { } worth && total is > 0m ? worth / total.Value : null,
-                        accountFacts.GetValueOrDefault(position.AccountId)?.ModelId is null || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
+                        !governed.ContainsKey(position.AccountId) || position.AssetType == AssetType.Cash ? null : targets.GetValueOrDefault(position.AssetId));
                 })
                 .ToArray();
 
@@ -180,7 +182,7 @@ namespace AtlasLedger.Server.Holdings
                     var cash = positions.Where(position => position.AssetType == AssetType.Cash).Sum(position => values[(position.AccountId, position.AssetId)] ?? 0m);
                     var contributions = snapshot.Flows.FirstOrDefault(flow => flow.AccountId == accountId)?.NetContributions ?? 0m;
                     var total = totals[accountId];
-                    var modelId = accountFacts.TryGetValue(accountId, out var account) ? account.ModelId : null;
+                    Guid? modelId = governed.TryGetValue(accountId, out var governing) ? governing : null;
                     var targets = weights[accountId];
                     var proposal = snapshot.Proposals.FirstOrDefault(item => item.AccountId == accountId);
                     return new AccountSummaryDto(
@@ -192,7 +194,7 @@ namespace AtlasLedger.Server.Holdings
                         total - contributions,
                         modelId,
                         modelId is { } id && models.TryGetValue(id, out var model) ? model.Name : null,
-                        modelId is null ? null : 1m - targets.Values.Sum(),
+                        modelId is { } fixedId && models.TryGetValue(fixedId, out var kind) && kind.ModelKind == ModelKind.FixedWeights ? 1m - targets.Values.Sum() : null,
                         proposal?.Trades.Count,
                         proposal?.IsWaiting ?? false);
                 })

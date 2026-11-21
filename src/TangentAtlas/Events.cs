@@ -72,6 +72,9 @@ namespace AtlasLedger.Model
 
         /// <summary>A broker order expired (<see cref="OrderExpiredEvent"/>).</summary>
         OrderExpired = 214,
+
+        /// <summary>A portfolio or account moved to another parent in the household's tree (<see cref="NodeMovedEvent"/>).</summary>
+        NodeMoved = 300,
     }
 
     /// <summary>
@@ -375,6 +378,30 @@ namespace AtlasLedger.Model
         public string? Reason { get; init; }
     }
 
+    /// <summary>
+    /// A portfolio or an account moved to another parent in the household's tree, at the close of <see cref="Date"/>: from
+    /// then on its value and flows count in its new parents, not its old.  Recorded in the same transaction as the change to
+    /// its <c>Edge</c>, whose <c>Since</c> is the same day.  A move is a transfer at that close, out of the old portfolios and
+    /// into the new; nothing before it is rewritten.
+    /// </summary>
+    public sealed record NodeMovedEvent : LedgerEvent
+    {
+        /// <summary>Gets the portfolio or account that moved.</summary>
+        public required Guid NodeId { get; init; }
+
+        /// <summary>Gets its parent before the move; null when it had none (it was just added).</summary>
+        public Guid? FromParentNodeId { get; init; }
+
+        /// <summary>Gets its parent after the move.</summary>
+        public required Guid ToParentNodeId { get; init; }
+
+        /// <summary>Gets the market day at whose close it moved.</summary>
+        public required DateOnly Date { get; init; }
+
+        /// <summary>Gets why, in the customer's words, if he gave a reason.</summary>
+        public string? Reason { get; init; }
+    }
+
     /// <summary>One account's share of a leg.</summary>
     /// <param name="AccountId">The account.</param>
     /// <param name="Quantity">Its share.</param>
@@ -539,6 +566,7 @@ namespace AtlasLedger.Model
             [EventType.OrderCancelled] = typeof(OrderCancelledEvent),
             [EventType.OrderRejected] = typeof(OrderRejectedEvent),
             [EventType.OrderExpired] = typeof(OrderExpiredEvent),
+            [EventType.NodeMoved] = typeof(NodeMovedEvent),
         };
 
         private static readonly Dictionary<Type, EventType> Codes = Types.ToDictionary(item => item.Value, item => item.Key);

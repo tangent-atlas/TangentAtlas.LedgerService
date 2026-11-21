@@ -37,7 +37,7 @@ namespace AtlasLedger.Client.Api
     /// <param name="Cash">The value of its cash.</param>
     /// <param name="NetContributions">Deposits less withdrawals.</param>
     /// <param name="Gain">Market value less net contributions.</param>
-    /// <param name="ModelId">The account's model.</param>
+    /// <param name="ModelId">The model that governs the account: its portfolio's, or a parent portfolio's.</param>
     /// <param name="ModelName">The model's name.</param>
     /// <param name="TargetCash">The share the model's weights leave in cash.</param>
     /// <param name="ProposedTrades">How many trades its model calls for now, if it has a model.</param>

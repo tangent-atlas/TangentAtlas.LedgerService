@@ -39,6 +39,7 @@ namespace AtlasLedger.Tests
             new OrderCancelledEvent { OrderId = Guid.NewGuid(), BrokerOrderId = Guid.NewGuid(), ReportTime = DateTimeOffset.UnixEpoch },
             new OrderRejectedEvent { OrderId = Guid.NewGuid(), BrokerOrderId = Guid.NewGuid(), ReportTime = DateTimeOffset.UnixEpoch, Text = "No price." },
             new OrderExpiredEvent { OrderId = Guid.NewGuid(), BrokerOrderId = Guid.NewGuid(), ReportTime = DateTimeOffset.UnixEpoch },
+            new NodeMovedEvent { NodeId = Account, FromParentNodeId = Guid.NewGuid(), ToParentNodeId = Guid.NewGuid(), Date = new DateOnly(2026, 11, 20), Reason = "Rebalanced across the household" },
         ];
 
         [Theory]

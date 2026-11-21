@@ -23,7 +23,7 @@ namespace AtlasLedger.Tests
     /// </summary>
     public sealed class ReloadTests : IClassFixture<ServerFixture>
     {
-        private static readonly string[] WebsiteTables = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution"];
+        private static readonly string[] WebsiteTables = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution", "Edge", "Portfolio", "PortfolioDay", "PortfolioStatistic"];
 
         private readonly ServerFixture server;
 

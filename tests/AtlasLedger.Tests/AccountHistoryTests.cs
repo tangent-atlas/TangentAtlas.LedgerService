@@ -216,7 +216,7 @@ namespace AtlasLedger.Tests
         private static AccountHistory Build(IEnumerable<PostedLine> lines, bool isPaper)
         {
             var institution = Guid.NewGuid();
-            var account = new AccountFact(new AccountDto { AccountId = Account, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = "USD", InstitutionId = institution });
+            var account = new AccountFact(new AccountDto { AccountId = Account, AccountType = AccountType.Brokerage, Currency = "USD", InstitutionId = institution });
             var assets = new[]
             {
                 new AssetFact(new AssetDto { AssetId = Stock, AssetType = AssetType.Equity, QuoteCurrency = "USD", QuantityFactor = 1m, PriceFactor = 1m }),

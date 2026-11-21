@@ -139,7 +139,7 @@ namespace AtlasLedger.Tests
             var nodeId = Guid.NewGuid();
             var accountWithoutCustodian = new LedgerScript()
                 .Insert("Node", new NodeDto { NodeId = nodeId, DisplayName = "Jones IRA", FullName = "Jones IRA", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
-                .Insert("Account", new AccountDto { AccountId = nodeId, AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar });
+                .Insert("Account", new AccountDto { AccountId = nodeId, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar });
             await tool.ApplyAsync(tenant, accountWithoutCustodian, cancellationToken);
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
@@ -158,7 +158,10 @@ namespace AtlasLedger.Tests
             Assert.Contains(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken), alert => alert.Rule == "MissingCustodian");
 
             await tool.SetServiceAsync(ServiceSwitchboard.Rules, true, TimeSpan.FromMinutes(5), cancellationToken);
-            await WaitUntilAsync(async () => !(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken)).Any());
+            await WaitUntilAsync(async () => !(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken)).Any(alert => alert.Rule == "MissingCustodian"));
+
+            // The account is in no portfolio, so its place in the household's tree stays wrong, and says so.
+            Assert.Contains(await tool.ListAsync<AlertDto>(tenant, "Alert", cancellationToken), alert => alert.Rule == "PortfolioTree" && alert.NodeId == nodeId);
         }
 
         private static async Task WaitUntilAsync(Func<Task<bool>> condition)

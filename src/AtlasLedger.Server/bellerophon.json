@@ -1,11 +1,11 @@
 {
   "access": { "read": ["Ledger.Read"], "write": ["Ledger.Write"] },
   "datatypes": {
-    "accountRole": "AtlasLedger.Model.AccountRole",
     "accountType": "AtlasLedger.Model.AccountType",
+    "assetType": "AtlasLedger.Model.AssetType",
     "bool": "System.Boolean",
     "brokerageType": "AtlasLedger.Model.BrokerageType",
-    "assetType": "AtlasLedger.Model.AssetType",
+    "cashRule": "AtlasLedger.Model.CashRule",
     "cashType": "AtlasLedger.Model.CashType",
     "cryptoType": "AtlasLedger.Model.CryptoType",
     "date": "System.DateOnly",
@@ -22,7 +22,9 @@
     "jobRunReason": "AtlasLedger.Model.JobRunReason",
     "jobRunStatus": "AtlasLedger.Model.JobRunStatus",
     "jobStatus": "AtlasLedger.Model.JobStatus",
+    "listWeighting": "AtlasLedger.Model.ListWeighting",
     "long": "System.Int64",
+    "modelKind": "AtlasLedger.Model.ModelKind",
     "money": { "precision": 19, "scale": 4, "type": "System.Decimal" },
     "nodeStatus": "AtlasLedger.Model.NodeStatus",
     "nodeType": "AtlasLedger.Model.NodeType",
@@ -39,21 +41,18 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
-      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type; AccountRole is its place in an adviser's tree of accounts. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry); both are empty for an account held nowhere, such as a group. Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. ModelId is its model: a value says the account is to be rebalanced to that model's weights; null says it is not rebalanced.",
+      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry). Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. An account has no model of its own: it is in exactly one portfolio (its Edge), and follows the model that governs that portfolio.",
       "columns": {
         "AccountId": "guid",
-        "AccountRole": "accountRole",
         "AccountType": "accountType",
         "Currency": { "maxLength": 3, "type": "string" },
         "ExternalAccountId": { "maxLength": 64, "type": "string?" },
-        "InstitutionId": "guid?",
-        "ModelId": "guid?"
+        "InstitutionId": "guid?"
       },
       "key": ["AccountId"],
       "references": {
         "Node": { "columns": ["AccountId"] },
-        "Institution": { "columns": ["InstitutionId"] },
-        "Model": { "columns": ["ModelId"] }
+        "Institution": { "columns": ["InstitutionId"] }
       }
     },
     "Brokerage": {
@@ -161,11 +160,14 @@
       "sync": false
     },
     "Edge": {
+      "description": "A link in the household's tree: ChildNodeId is in ParentNodeId. Keyed on the child alone, so every node has at most one parent. The household is the root and holds only portfolios; a portfolio holds portfolios and accounts. Position orders a parent's children (the household's order, the same on every device). Since is the market day the child has been in this parent, from that day's close: a move between portfolios is dated, and is also recorded in the log as a NodeMoved event, so a portfolio's history is never rewritten.",
       "columns": {
         "ChildNodeId": "guid",
-        "ParentNodeId": "guid"
+        "ParentNodeId": "guid",
+        "Position": "int",
+        "Since": "date"
       },
-      "key": ["ParentNodeId", "ChildNodeId"],
+      "key": ["ChildNodeId"],
       "references": {
         "Child": { "columns": ["ChildNodeId"], "table": "Node" },
         "Parent": { "columns": ["ParentNodeId"], "table": "Node" }
@@ -234,6 +236,7 @@
       }
     },
     "Node": {
+      "description": "Anything in the tenant with a name: the household, a portfolio, an account, a person or an asset (NodeType), and whether it is active or closed (NodeStatus). A closed node keeps its history and is hidden; it is never deleted once it has history.",
       "columns": {
         "Description": "string?",
         "DisplayName": { "maxLength": 16, "type": "string" },
@@ -349,16 +352,22 @@
       }
     },
     "Model": {
-      "description": "A model: the weights an account is to hold, as a set of Weight rows (each asset's fraction of the account's value), and Band, the smallest trade worth making as a fraction of the account's value. Many accounts may share one. What the weights don't add up to stays in cash, and an asset held but not in the model is to be sold: a model with no weights is all cash.",
+      "description": "A model: a complete recipe for a portfolio, what to hold (ModelKind, with an extension table per kind) and how much of it (the cash rule). Fixed weights are its Weight rows; an index model's are its IndexModel row; a custom list's its CustomListModel and CustomListMember rows. CashRule None is fully invested; FixedAmount keeps CashAmount in cash; VolatilityTarget sets cash each day so the whole portfolio's volatility, measured over VolatilityWindow market days, stays within VolatilityBand of VolatilityTarget. Band is the smallest trade worth making, as a fraction of the book's value. Targets are whole shares, rounded down. Many portfolios may share one model, and so share its risk.",
       "key": ["ModelId"],
       "columns": {
         "Band": "rate",
+        "CashAmount": "money?",
+        "CashRule": "cashRule",
         "ModelId": "guid",
-        "Name": { "maxLength": 64, "type": "string" }
+        "ModelKind": "modelKind",
+        "Name": { "maxLength": 64, "type": "string" },
+        "VolatilityBand": "rate?",
+        "VolatilityTarget": "rate?",
+        "VolatilityWindow": "int?"
       }
     },
     "Weight": {
-      "description": "One asset's weight in a model: its fraction of the account's value (0.25 for a quarter).",
+      "description": "One asset's weight in a fixed-weights model: its fraction of the book's value (0.25 for a quarter). What the weights don't add up to stays in cash.",
       "key": ["ModelId", "AssetId"],
       "columns": {
         "AssetId": "guid",
@@ -506,7 +515,110 @@
         "StopSchedule": { "maxLength": 128, "type": "string?" },
         "TimeZone": { "maxLength": 64, "type": "string?" }
       }
+    },
+    "Portfolio": {
+      "description": "A portfolio: a node that holds portfolios and accounts (through Edge) and keeps its own statistics. ModelId is its model: a value governs every account beneath it, except those beneath a lower portfolio with a model of its own; null inherits its parent's (a top-level portfolio without one is tracked, not managed). Its restricted list is its Restriction rows, added to its parents'.",
+      "key": ["PortfolioId"],
+      "columns": {
+        "ModelId": "guid?",
+        "PortfolioId": "guid"
+      },
+      "references": {
+        "Node": { "columns": ["PortfolioId"] },
+        "Model": { "columns": ["ModelId"] }
+      }
+    },
+    "Restriction": {
+      "description": "A company a portfolio won't hold, by symbol (a ticker, say). Restrictions accumulate down the tree: a portfolio excludes its own and every parent's.",
+      "key": ["PortfolioId", "Scheme", "Code"],
+      "columns": {
+        "Code": { "maxLength": 32, "type": "string" },
+        "PortfolioId": "guid",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "references": {
+        "Portfolio": { "columns": ["PortfolioId"] }
+      }
+    },
+    "IndexModel": {
+      "description": "An index model (ModelKind ConstantWeightIndex or IndexWeightIndex): the Companies largest US companies by full market value under the published rules of the index IndexCode names (TA500), less the portfolio's restrictions, weighted by market value at each quarterly rebalance. Constant Weight trades back to those weights every day; Index Weight holds the quantities until the next rebalance. Its weights are derived each day from the ranking data, never saved.",
+      "key": ["ModelId"],
+      "columns": {
+        "Companies": "int",
+        "IndexCode": { "maxLength": 32, "type": "string" },
+        "ModelId": "guid"
+      },
+      "references": {
+        "Model": { "columns": ["ModelId"] }
+      }
+    },
+    "CustomListModel": {
+      "description": "A custom list model (ModelKind CustomList): the companies the customer names (its CustomListMember rows), weighted equally, by market value, or by the fractions he gives (ListWeighting), and traded back to those weights every day (IsConstantWeight) or only when the list or the weights change.",
+      "key": ["ModelId"],
+      "columns": {
+        "IsConstantWeight": "bool",
+        "ListWeighting": "listWeighting",
+        "ModelId": "guid"
+      },
+      "references": {
+        "Model": { "columns": ["ModelId"] }
+      }
+    },
+    "CustomListMember": {
+      "description": "A company on a custom list, by symbol; Fraction is its weight when the list is weighted by the customer's fractions, and empty otherwise.",
+      "key": ["ModelId", "Scheme", "Code"],
+      "columns": {
+        "Code": { "maxLength": 32, "type": "string" },
+        "Fraction": "rate?",
+        "ModelId": "guid",
+        "Scheme": { "maxLength": 32, "type": "string" }
+      },
+      "references": {
+        "CustomListModel": { "columns": ["ModelId"] }
+      }
+    },
+    "PortfolioDay": {
+      "description": "A portfolio at one market day's close: the combined value of the accounts beneath it that day, the day's flows (theirs, plus an account's value when it joins and less it when it leaves), its time-weighted return and the risk-free rate's. Rough for now: the first piece of the mini-accounting system. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["PortfolioId", "Date"],
+      "columns": {
+        "Date": "date",
+        "Flow": "money",
+        "PortfolioId": "guid",
+        "Return": "price?",
+        "RiskFreeReturn": "price?",
+        "Value": "money?"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Portfolio": { "columns": ["PortfolioId"], "onDelete": "Cascade" }
+      }
+    },
+    "PortfolioStatistic": {
+      "description": "A portfolio's performance measured from its daily returns, as an account's is: total and annualized return, volatility, Sharpe ratio and worst drawdown; ranked after 20 returns. Derived by the rules; ephemeral, written only by the server.",
+      "key": ["PortfolioId"],
+      "columns": {
+        "AnnualizedReturn": "price?",
+        "From": "date?",
+        "IsRanked": "bool",
+        "MaximumDrawdown": "price?",
+        "NetFlows": "money",
+        "PortfolioId": "guid",
+        "Returns": "int",
+        "SharpeRatio": "price?",
+        "Through": "date?",
+        "TotalReturn": "price?",
+        "Value": "money?",
+        "Volatility": "price?"
+      },
+      "persistence": "Ephemeral",
+      "writeMode": "ServerOnly",
+      "facts": false,
+      "references": {
+        "Portfolio": { "columns": ["PortfolioId"], "onDelete": "Cascade" }
+      }
     }
   },
-  "version": "1.0"
+  "version": "1.1"
 }

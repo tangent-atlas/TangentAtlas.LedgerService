@@ -11,8 +11,8 @@
       2. access-test whoami signs the test person in (a browser opens the first time: sign in as the test person,
          ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant, first, so a page they have open
          shows the account as it loads (within the website's tenant refresh, ten seconds).
-      3. The account (-Account): script-loader loads the reference (the account at the simulated broker, its model
-         and assets), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
+      3. The account (-Account): script-loader loads the reference (the household, the Joe 10 portfolio with its
+         model, the account at the simulated broker in that portfolio, and the assets), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
          appears at $0.
       4. The holdings (-Holdings): script-loader loads the history (the deposit, then the purchases at the state's
          close), one transaction every -PauseSeconds, so a page open on the account shows each arrive.
@@ -36,7 +36,7 @@
     Load the generic Joe 10 instead (bought at $100 a share: real closes value it as a large gain or loss).
 
 .PARAMETER Account
-    Only create the account (with its model, assets, jobs and weights), empty.
+    Only create the household, the Joe 10 portfolio and its account (with the model, assets, jobs and weights), empty.
 
 .PARAMETER Holdings
     Only load the holdings (the deposit and the purchases) into the account already created.

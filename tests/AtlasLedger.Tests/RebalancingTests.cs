@@ -25,7 +25,7 @@ namespace AtlasLedger.Tests
         // 3:50 pm in New York on Monday, November 9, 2026 (standard time).
         private static readonly DateTimeOffset Monday = new DateTimeOffset(2026, 11, 9, 20, 50, 0, TimeSpan.Zero);
 
-        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountRole = AccountRole.ManagedAccount, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, ModelId = Guid.NewGuid() });
+        private static readonly AccountFact Account = new AccountFact(new AccountDto { AccountId = Guid.NewGuid(), AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar });
 
         private static readonly AssetFact Dollar = Asset(AssetType.Cash);
 

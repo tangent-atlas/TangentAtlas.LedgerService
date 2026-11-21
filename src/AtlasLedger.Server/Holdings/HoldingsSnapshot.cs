@@ -23,7 +23,8 @@ namespace AtlasLedger.Server.Holdings
     /// <param name="Rates">Every published rate between currencies.</param>
     /// <param name="Orders">Every order's state.</param>
     /// <param name="Flows">Every account's net contributions.</param>
-    /// <param name="Accounts">Every account (for its model).</param>
+    /// <param name="Accounts">Every account.</param>
+    /// <param name="Governances">Every account's governance: the model that governs it, and its book.</param>
     /// <param name="Models">Every model.</param>
     /// <param name="Weights">Every model's weights.</param>
     /// <param name="Proposals">Every account's proposed allocations.</param>
@@ -37,6 +38,7 @@ namespace AtlasLedger.Server.Holdings
         IReadOnlyList<Orders.OrderState> Orders,
         IReadOnlyList<AccountFlow> Flows,
         IReadOnlyList<AccountFact> Accounts,
+        IReadOnlyList<Portfolios.Governance> Governances,
         IReadOnlyList<ModelFact> Models,
         IReadOnlyList<WeightFact> Weights,
         IReadOnlyList<Orders.ProposedAllocations> Proposals,
@@ -159,6 +161,7 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<Orders.OrderState>().ToArray(),
                     session.Query<AccountFlow>().ToArray(),
                     session.Query<AccountFact>().ToArray(),
+                    session.Query<Portfolios.Governance>().ToArray(),
                     session.Query<ModelFact>().ToArray(),
                     session.Query<WeightFact>().ToArray(),
                     session.Query<Orders.ProposedAllocations>().ToArray(),
@@ -169,7 +172,8 @@ namespace AtlasLedger.Server.Holdings
                     session.Query<EffectivePrice>().ToArray(),
                     session.Query<CurrencyRate>().ToArray(),
                     session.Query<AccountFlow>().ToArray(),
-                    session.Query<AccountHistory>().ToArray()));
+                    session.Query<AccountHistory>().ToArray(),
+                    session.Query<Accounting.PortfolioHistory>().ToArray()));
                 return fired;
             }
         }

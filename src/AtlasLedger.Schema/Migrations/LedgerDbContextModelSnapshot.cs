@@ -16,7 +16,7 @@ partial class LedgerDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261120035912_Portfolios";
+    public override string LastMigrationId => "20261121014236_Favorites";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -353,6 +353,29 @@ partial class LedgerDbContextModelSnapshot : ModelSnapshot
                     .HasName("PK_Event");
 
                 b.ToTable("Event", "dbo");
+            });
+
+        modelBuilder.Entity("AtlasLedger.Model.Schema.Favorite", b =>
+            {
+                b.Property<Guid>("TenantId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("UserId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("PortfolioId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<int>("Position")
+                    .HasColumnType("int");
+
+                b.Property<long>("RowVersion")
+                    .HasColumnType("bigint");
+
+                b.HasKey("TenantId", "UserId", "PortfolioId")
+                    .HasName("PK_Favorite");
+
+                b.ToTable("Favorite", "dbo");
             });
 
         modelBuilder.Entity("AtlasLedger.Model.Schema.FixedIncome", b =>

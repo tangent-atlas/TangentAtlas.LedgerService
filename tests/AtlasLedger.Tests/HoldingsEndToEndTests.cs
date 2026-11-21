@@ -273,10 +273,16 @@ namespace AtlasLedger.Tests
             }
 
             await tool.ApplyAsync(theirs, Joe10Account.Weights(state), cancellationToken);
-            await tool.ApplyAsync(theirs, new LedgerScript().Insert("User", new client::AtlasLedger.Model.UserDto { UserId = Guid.NewGuid(), IdentityIssuer = DevelopmentCallers.Issuer, IdentitySubject = DevelopmentCallers.AdvisorSubject }), cancellationToken);
+            var userId = Guid.NewGuid();
+            await tool.ApplyAsync(
+                theirs,
+                new LedgerScript()
+                    .Insert("User", new client::AtlasLedger.Model.UserDto { UserId = userId, IdentityIssuer = DevelopmentCallers.Issuer, IdentitySubject = DevelopmentCallers.AdvisorSubject })
+                    .Insert("Favorite", new client::AtlasLedger.Model.FavoriteDto { UserId = userId, PortfolioId = Joe10Account.PortfolioId, Position = 0 }),
+                cancellationToken);
             await WaitForAsync(tool, theirs, found => found.Holdings.Count == 3, cancellationToken);
 
-            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution", "Edge", "Portfolio", "PortfolioDay", "PortfolioStatistic"];
+            string[] website = ["Position", "EffectivePrice", "CurrencyRate", "AccountFlow", "AccountDay", "AccountStatistic", "Weight", "Symbol", "Institution", "Edge", "Portfolio", "PortfolioDay", "PortfolioStatistic", "Favorite", "Restriction"];
             var sync = person.Sync(new client::AtlasLedger.Model.Ledger(), theirs, website);
             var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
             while (sync.Partition.Positions.Count < 3 && DateTimeOffset.UtcNow < deadline)
@@ -303,6 +309,12 @@ namespace AtlasLedger.Tests
             Assert.Equal(Joe10Account.PortfolioId, portfolio.PortfolioId);
             Assert.Equal((account.From, account.Through, account.Value, account.Returns, account.TotalReturn, account.SharpeRatio), (portfolio.From, portfolio.Through, portfolio.Value, portfolio.Returns, portfolio.TotalReturn, portfolio.SharpeRatio));
             Assert.Equal(sync.Partition.AccountDays.Count, sync.Partition.PortfolioDays.Count);
+
+            // The person's own favorites: the ledger tells them their user key (and no one else's); the tenant's users
+            // aren't theirs to read.
+            Assert.Equal(userId, await person.GetMyUserIdAsync(theirs, cancellationToken));
+            Assert.Equal(Joe10Account.PortfolioId, sync.Partition.Favorites.Single(favorite => favorite.UserId == userId).PortfolioId);
+            Assert.Equal(HttpStatusCode.NotFound, (await Assert.ThrowsAsync<LedgerApiException>(() => tool.GetMyUserIdAsync(theirs, cancellationToken))).StatusCode);   // a tool is no one
 
             var elsewhere = person.Sync(new client::AtlasLedger.Model.Ledger(), another, website);
             var refused = await Assert.ThrowsAsync<client::AtlasLedger.Model.Replica.LedgerSyncException>(() => elsewhere.SyncAsync(TimeSpan.Zero, cancellationToken));

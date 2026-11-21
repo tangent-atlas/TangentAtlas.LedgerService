@@ -618,6 +618,19 @@
       "references": {
         "Portfolio": { "columns": ["PortfolioId"], "onDelete": "Cascade" }
       }
+    },
+    "Favorite": {
+      "description": "A portfolio a person has starred: it shows as a card on their dashboard, in the order of Position. Favorites belong to the person (UserId), not the household, so each user of a tenant has their own; the first portfolio added is starred by default. Only portfolios can be favorites. UserId is the person's user key (the ledger's \"me\" endpoint tells a person theirs); it doesn't reference the User table, whose rows a person can't read.",
+      "key": ["UserId", "PortfolioId"],
+      "columns": {
+        "PortfolioId": "guid",
+        "Position": "int",
+        "UserId": "guid"
+      },
+      "facts": false,
+      "references": {
+        "Portfolio": { "columns": ["PortfolioId"], "onDelete": "Cascade" }
+      }
     }
   },
   "version": "1.1"

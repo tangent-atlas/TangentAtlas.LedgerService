@@ -11,6 +11,9 @@
     <BellerophonRole>Primary</BellerophonRole>
     <!-- Write the generated files to obj/.../generated so they can be inspected, diffed, and archived with each release. -->
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <!-- Development only: tools\Start-LocalLedger.ps1 -PrepareOnly keeps the local sign-in and database settings here (outside
+         the repository), so the server runs from Visual Studio as the script runs it. -->
+    <UserSecretsId>atlasledger-server-development</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

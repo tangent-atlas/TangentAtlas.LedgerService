@@ -12,7 +12,8 @@
          ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant, first, so a page they have open
          shows the account as it loads (within the website's tenant refresh, ten seconds).
       3. The account (-Account): script-loader loads the reference (the household, the Joe 10 portfolio with its
-         model, the account at the simulated broker in that portfolio, and the assets), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
+         model, the account at the simulated broker in that portfolio, and the assets), stars the portfolio for the
+         test person (the first portfolio added is a favorite by default), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
          appears at $0.
       4. The holdings (-Holdings): script-loader loads the history (the deposit, then the purchases at the state's
          close), one transaction every -PauseSeconds, so a page open on the account shows each arrive.
@@ -148,6 +149,14 @@ try {
         Invoke-Program $programs.Loader @("$TenantId", $member)
         Write-Host "`n== The account at the simulated broker" -ForegroundColor Cyan
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
+
+        # The first portfolio added is starred by default: the Joe 10 is a favorite of the test person.
+        $reference = Get-Content (Join-Path $work 'joe10-reference.json') -Raw | ConvertFrom-Json
+        $portfolioId = ($reference.operations | Where-Object { $_.table -eq 'Portfolio' } | Select-Object -First 1).row.portfolioId
+        $favorite = Join-Path $work 'favorite.json'
+        @{ operations = @(@{ action = 'Insert'; table = 'Favorite'; row = @{ userId = (Get-UserId $identity.issuer $identity.subject); portfolioId = $portfolioId; position = 0 } }) } |
+            ConvertTo-Json -Depth 5 | Set-Content -Path $favorite -Encoding utf8
+        Invoke-Program $programs.Loader @("$TenantId", $favorite)
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
         Write-Host "`nThe Joe 10's account is in tenant $TenantId, empty, and $($identity.subject) is its user." -ForegroundColor Green

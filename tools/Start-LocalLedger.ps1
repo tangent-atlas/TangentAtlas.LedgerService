@@ -21,6 +21,11 @@
     script applies the schema's migrations and prepares it first, so what is loaded survives a restart.  -InMemory keeps
     everything in memory instead, gone when the server stops.  Ctrl+C stops the server.
 
+    -PrepareOnly does everything but run the server: it builds, brings the database up to the current schema, and keeps
+    the server's settings (sign-in, tools, services, the database) in the server project's user secrets, which the
+    Development environment reads.  Then run the server from Visual Studio (the AtlasLedger.Server launch profile, at
+    http://127.0.0.1:5180) and it behaves as it does here.  Run it again after pulling a change to the schema.
+
 .PARAMETER Port
     The port (default 5180, the server's launch profile).
 
@@ -36,11 +41,18 @@
 .PARAMETER InMemory
     Keep the ledger in memory: nothing survives the server stopping.
 
+.PARAMETER PrepareOnly
+    Build, update the database and keep the settings for Visual Studio; don't run the server.
+
 .PARAMETER ReplaceToken
     Ask for the EODHD token again and keep the new one (after it changes at EODHD).
 
 .EXAMPLE
     .\tools\Start-LocalLedger.ps1 -MarketHistory
+
+.EXAMPLE
+    .\tools\Start-LocalLedger.ps1 -PrepareOnly
+    Then F5 on AtlasLedger.Server in Visual Studio.
 #>
 [CmdletBinding()]
 param(
@@ -49,8 +61,10 @@ param(
     [switch]$NoBuild,
     [string]$Connection = 'Server=localhost;Database=AtlasLedger;Trusted_Connection=True;TrustServerCertificate=True',
     [switch]$InMemory,
+    [switch]$PrepareOnly,
     [switch]$ReplaceToken
 )
+if ($PrepareOnly -and $InMemory) { throw '-PrepareOnly prepares the database: it can''t be used with -InMemory.' }
 
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
@@ -123,6 +137,21 @@ if (-not $InMemory) {
     dotnet run --project (Join-Path $repository 'src/AtlasLedger.Server') --no-build --no-launch-profile -- prepare-database --ConnectionStrings:Ledger=$Connection
     if ($LASTEXITCODE -ne 0) { throw 'Preparing the database failed.' }
     $environment.ConnectionStrings__Ledger = $Connection
+}
+
+if ($PrepareOnly) {
+    # Visual Studio runs the server with the launch profile's environment only: keep the rest in user secrets.  The EODHD
+    # token is not kept there (it stays encrypted for you alone); market history runs through this script.
+    $project = Join-Path $repository 'src/AtlasLedger.Server'
+    dotnet user-secrets clear --project $project | Out-Null
+    foreach ($name in $environment.Keys) {
+        if ($name -in 'ASPNETCORE_ENVIRONMENT', 'ASPNETCORE_URLS', 'MarketHistory__EodhdApiToken') { continue }
+        $value = if ($name -eq 'Services__StartOn') { $environment[$name] -replace ',market-history', '' } else { $environment[$name] }
+        dotnet user-secrets set ($name -replace '__', ':') $value --project $project | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Keeping $name in the user secrets failed." }
+    }
+    Write-Host "Ready for Visual Studio: the database is current and the settings are in AtlasLedger.Server's user secrets.  Run the AtlasLedger.Server profile (http://127.0.0.1:5180)." -ForegroundColor Green
+    return
 }
 
 $saved = @{}

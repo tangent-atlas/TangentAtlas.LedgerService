@@ -9,6 +9,12 @@ namespace AtlasLedger.Client.Api
     using AtlasLedger.Model;
 
     /// <summary>
+    /// The caller's own user key in a tenant, as the server's "me" endpoint returns it.
+    /// </summary>
+    /// <param name="UserId">The key of the caller's user row.</param>
+    public sealed record MyUser(Guid UserId);
+
+    /// <summary>
     /// A holding, as the server's holdings endpoint returns it: an account's quantity of one asset (cash, a stock, a fund,
     /// a bond, an option, a future or a coin, all alike).
     /// </summary>

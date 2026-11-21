@@ -190,6 +190,16 @@ namespace AtlasLedger.Client.Api
             ?? throw new InvalidOperationException("The server returned no holdings.");
 
         /// <summary>
+        /// Gets the caller's own user key in a tenant: what their own rows (their favorites) are keyed by.
+        /// </summary>
+        /// <param name="tenantId">The tenant.</param>
+        /// <param name="cancellationToken">Cancels the request.</param>
+        /// <returns>The key.  The server answers 404 for a caller with no user row there (a tool, or not a member).</returns>
+        public async Task<Guid> GetMyUserIdAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            (await this.SendAsync<MyUser>(HttpMethod.Get, $"v1/tenants/{tenantId}/me", null, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The server returned no user.")).UserId;
+
+        /// <summary>
         /// Gets each account's performance: statistics measured from its daily returns, and its days if asked for.
         /// </summary>
         /// <param name="tenantId">The tenant.</param>

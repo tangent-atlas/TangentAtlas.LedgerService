@@ -16,7 +16,7 @@ partial class LedgerDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121014236_Favorites";
+    public override string LastMigrationId => "20261122003000_AccountReadOnly";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -49,6 +49,9 @@ partial class LedgerDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid?>("InstitutionId")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("IsReadOnly")
+                    .HasColumnType("bit");
 
                 b.Property<long>("RowVersion")
                     .HasColumnType("bigint");

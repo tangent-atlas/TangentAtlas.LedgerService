@@ -20,7 +20,7 @@ namespace AtlasLedger.TestData
     internal static class Program
     {
         private const string Usage = """
-            Usage: test-data joe10 [--state <joe10.json>] [--deposit <dollars>] [--out <folder>]
+            Usage: test-data joe10 [--state <joe10.json>] [--spy <spy-closes.json>] [--deposit <dollars>] [--out <folder>]
 
             Writes a test account holding the Joe 10, as scripts for script-loader:
               joe10-reference.json   the account, its institution and model, and its assets (US dollars and the
@@ -41,16 +41,27 @@ namespace AtlasLedger.TestData
                                      ledger-operator weights <tenant> joe10-weights.json
               joe10-jobs.json        the schedule that generates the account's orders: 3:45 pm New York on
                                      market days, while the trading switch is on (ledger-operator jobs <tenant>)
+              household-reference.json  the rest of the household (after joe10-reference.json): a Bank of America
+                                     checking account and a Mastercard in the Joe 10 portfolio (entered by hand;
+                                     no model trades them), and the SPY Benchmark portfolio beside it, with its
+                                     model and its Play Money account
+              household-weights.json the SPY Benchmark's weight: SPY at the Joe 10's thermostat (15% volatility)
+              household-history.json the checking and card balances, then the benchmark's deposit (the Joe 10's)
+                                     and its purchase of SPY at the close (after joe10-history.json)
 
               --state <joe10.json>   Optional. Without it, a generic Joe 10: ten large US companies at equal
                                      weights, half the account in stocks, each at $100 (where the simulated
                                      feed starts), at the last weekday close; nothing licensed in it.
                                      With it, the forward test's state file (tangent-atlas/TangentAtlas.ForwardTest, state/joe10.json):
                                      the weights, the share in stocks and the last close's prices.
+              --spy <spy-closes.json> Optional. SPY's daily closes from EODHD's end-of-day API (a JSON array with
+                                     date, close and adjusted_close), at least 22 up to the state's close: they
+                                     set the benchmark's share in SPY (15% over its 21-day volatility, at most
+                                     all of it) and its price.  Without it, SPY at $100 with half in it.
               --deposit <dollars>    The opening deposit (default 1000000).
               --out <folder>         Where to write (default: artifacts/test-data, which git ignores).
 
-            With --state, the prices come from EODHD through the forward test and are licensed, not ours to
+            With --state or --spy, the prices come from EODHD through the forward test and are licensed, not ours to
             publish: keep those files out of public repositories.
 
             Then, against a local server (development sign-in):
@@ -67,6 +78,7 @@ namespace AtlasLedger.TestData
         private static async Task<int> Main(string[] args)
         {
             string? statePath = null;
+            string? spyPath = null;
             var deposit = 1_000_000m;
             var folder = Path.Combine("artifacts", "test-data");
             var positional = new List<string>();
@@ -75,6 +87,7 @@ namespace AtlasLedger.TestData
                 switch (args[index])
                 {
                     case "--state" when index + 1 < args.Length: statePath = args[++index]; break;
+                    case "--spy" when index + 1 < args.Length: spyPath = args[++index]; break;
                     case "--deposit" when index + 1 < args.Length: deposit = decimal.Parse(args[++index], CultureInfo.InvariantCulture); break;
                     case "--out" when index + 1 < args.Length: folder = args[++index]; break;
                     case "--help" or "-h" or "-?": Console.WriteLine(Usage); return 0;
@@ -99,6 +112,18 @@ namespace AtlasLedger.TestData
                 return 2;
             }
 
+            SpyState spy;
+            try
+            {
+                var closeDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(state.Close, TimeZoneInfo.FindSystemTimeZoneById("America/New_York")).DateTime);
+                spy = spyPath is null ? SpyState.Generic() : SpyState.Read(spyPath, closeDate);
+            }
+            catch (Exception exception) when (exception is IOException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+            {
+                Console.Error.WriteLine($"Cannot read SPY's closes {spyPath}: {exception.Message}");
+                return 2;
+            }
+
             Directory.CreateDirectory(folder);
             var referencePath = Path.Combine(folder, "joe10-reference.json");
             var historyPath = Path.Combine(folder, "joe10-history.json");
@@ -112,6 +137,12 @@ namespace AtlasLedger.TestData
             await WriteAsync(Joe10Account.Opening(state, deposit), openingPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Weights(state), weightsPath).ConfigureAwait(false);
             await WriteAsync(Joe10Account.Jobs(), jobsPath).ConfigureAwait(false);
+            var householdReferencePath = Path.Combine(folder, "household-reference.json");
+            var householdWeightsPath = Path.Combine(folder, "household-weights.json");
+            var householdHistoryPath = Path.Combine(folder, "household-history.json");
+            await WriteAsync(Joe10Household.Reference(state), householdReferencePath).ConfigureAwait(false);
+            await WriteAsync(Joe10Household.Weights(spy), householdWeightsPath).ConfigureAwait(false);
+            await WriteAsync(Joe10Household.History(state, spy, deposit), householdHistoryPath).ConfigureAwait(false);
 
             var english = CultureInfo.GetCultureInfo("en-US");
             var purchases = Joe10Account.Purchases(state, deposit);
@@ -123,7 +154,18 @@ namespace AtlasLedger.TestData
             }
 
             Console.WriteLine(string.Format(english, "  Deposit {0:C2}; stocks {1:C2}; dollars left {2:C2}.", deposit, spent, deposit - spent));
-            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath}, {weightsPath} and {jobsPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
+            var spyShares = Joe10Household.Shares(spy, deposit);
+            Console.WriteLine(string.Format(
+                english,
+                "The SPY Benchmark: {0} in SPY{1}; buy {2:#,0} SPY at {3:C2} = {4:C2}; dollars left {5:C2}.",
+                spy.StockShare.ToString("P1", english),
+                spy.Volatility is { } volatility ? $" (15% over its 21-day volatility, {volatility.ToString("P1", english)})" : " (generic)",
+                spyShares,
+                spy.Price,
+                spyShares * spy.Price,
+                deposit - (spyShares * spy.Price)));
+            Console.WriteLine(string.Format(english, "  Checking {0:C2}; Mastercard owed {1:C2}.", Joe10Household.CheckingBalance, Joe10Household.CardBalance));
+            Console.WriteLine($"Wrote {referencePath}, {historyPath}, {tradingPath}, {openingPath}, {weightsPath}, {jobsPath}, {householdReferencePath}, {householdWeightsPath} and {householdHistoryPath}. Tenant (suggested): {Joe10Account.DefaultTenantId}");
             return 0;
         }
 

@@ -56,6 +56,38 @@ namespace AtlasLedger.Tests
             Assert.Equal(Picks, tree.GovernanceOf(PicksAccount).PortfolioId);
         }
 
+        /// <summary>
+        /// Read-only accounts in the Joe 10 portfolio count toward it but are never traded: a checking account, a credit card,
+        /// and a brokerage account linked read-only are in no book and have no model, so the Joe 10 still governs only its
+        /// tradable brokerage account and keeps trading.
+        /// </summary>
+        [Fact]
+        public void BankAccountsAndCardsAreInThePortfolioButNotInItsModelsBook()
+        {
+            var checking = Guid.NewGuid();
+            var card = Guid.NewGuid();
+            var linkedReadOnly = Guid.NewGuid();
+            var tree = PortfolioTree.From(
+                [Node(Household, NodeType.Household), Node(Joe10, NodeType.Portfolio), Node(Ira, NodeType.Account), Node(checking, NodeType.Account), Node(card, NodeType.Account), Node(linkedReadOnly, NodeType.Account)],
+                [Edge(Joe10, Household), Edge(Ira, Joe10), Edge(checking, Joe10, 1), Edge(card, Joe10, 2), Edge(linkedReadOnly, Joe10, 3)],
+                [Portfolio(Joe10, Joe10Model)],
+                [Account(Ira, AccountType.Brokerage), Account(checking, AccountType.Deposit, isReadOnly: true), Account(card, AccountType.CreditCard, isReadOnly: true), Account(linkedReadOnly, AccountType.Brokerage, isReadOnly: true)]);
+
+            Assert.Equal(new[] { Ira }, tree.BookOf(Joe10));
+            Assert.Equal(new[] { Ira }, tree.GovernanceOf(Ira).Book);
+            foreach (var account in new[] { checking, card, linkedReadOnly })
+            {
+                var governance = tree.GovernanceOf(account);
+                Assert.Equal(Joe10, governance.PortfolioId);
+                Assert.Null(governance.ModelId);
+                Assert.Empty(governance.Book);
+                Assert.Null(tree.ProblemOf(account));
+            }
+
+            Assert.True(PortfolioRules.Trades(tree.GovernanceOf(Ira), Model(ModelKind.FixedWeights, CashRule.None)));
+            Assert.False(PortfolioTree.IsTraded(AccountType.Deposit, isReadOnly: false));   // the flag can't make a bank account tradable
+        }
+
         [Fact]
         public void APortfolioWithNoModelAboveItIsTrackedNotManaged()
         {
@@ -165,6 +197,9 @@ namespace AtlasLedger.Tests
 
         private static PortfolioFact Portfolio(Guid id, Guid? modelId) =>
             new PortfolioFact(new PortfolioDto { PortfolioId = id, ModelId = modelId });
+
+        private static AccountFact Account(Guid id, AccountType type, bool isReadOnly = false) =>
+            new AccountFact(new AccountDto { AccountId = id, AccountType = type, IsReadOnly = isReadOnly, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = Guid.Empty, ExternalAccountId = id.ToString() });
 
         private static ModelFact Model(ModelKind kind, CashRule cashRule) =>
             new ModelFact(new ModelDto { ModelId = Joe10Model, Name = "Joe 10", ModelKind = kind, CashRule = cashRule, Band = 0.005m });

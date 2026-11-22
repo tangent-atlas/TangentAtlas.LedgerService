@@ -138,9 +138,15 @@ namespace AtlasLedger.Client.TestData
         public static readonly Guid GenerateOrdersScheduleId = KeyFor("job/GenerateOrders");
 
         /// <summary>
-        /// The fictional brokerage's name: Tangent Atlas's own paper-trading broker, the simulator.
+        /// The fictional brokerage's name: Tangent Atlas's own paper-trading broker, the simulator.  "Play money" says at a
+        /// glance that nothing in it is real, beside real accounts in the same tree.
         /// </summary>
-        public const string PaperBrokerageName = "Tangent Atlas Paper Brokerage";
+        public const string PaperBrokerageName = "Play Money Brokerage";
+
+        /// <summary>
+        /// The name of an account at the paper broker.
+        /// </summary>
+        public const string PaperAccountName = "Play Money";
 
         private const string ExternalAccountNumber = "PAPER-100010";
 
@@ -162,7 +168,7 @@ namespace AtlasLedger.Client.TestData
                 .Insert("Node", new NodeDto { NodeId = PortfolioId, DisplayName = "Joe 10", FullName = "Joe 10", NodeStatus = NodeStatus.Active, NodeType = NodeType.Portfolio })
                 .Insert("Portfolio", new PortfolioDto { PortfolioId = PortfolioId, ModelId = ModelId })
                 .Insert("Edge", new EdgeDto { ChildNodeId = PortfolioId, ParentNodeId = HouseholdId, Position = 0, Since = since })
-                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = "Joe 10", FullName = "Joe 10 paper account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
+                .Insert("Node", new NodeDto { NodeId = AccountId, DisplayName = PaperAccountName, FullName = "Joe 10's Play Money account", NodeStatus = NodeStatus.Active, NodeType = NodeType.Account })
                 .Insert("Account", new AccountDto { AccountId = AccountId, AccountType = AccountType.Brokerage, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = InstitutionId, ExternalAccountId = ExternalAccountNumber })
                 .Insert("Edge", new EdgeDto { ChildNodeId = AccountId, ParentNodeId = PortfolioId, Position = 0, Since = since })
                 .Insert("Brokerage", new BrokerageDto { AccountId = AccountId, BrokerageType = BrokerageType.Taxable })
@@ -359,7 +365,7 @@ namespace AtlasLedger.Client.TestData
 
         // A name-based key (RFC 9562, version 8: SHA-256 of a fixed prefix and the name), so the same name always gives the
         // same key.
-        private static Guid KeyFor(string name)
+        internal static Guid KeyFor(string name)
         {
             var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"tangent-atlas/test-data/joe10/{name}"));
             hash[6] = (byte)((hash[6] & 0x0F) | 0x80);

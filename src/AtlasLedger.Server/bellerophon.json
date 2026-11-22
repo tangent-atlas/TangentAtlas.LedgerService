@@ -41,13 +41,14 @@
   "namespace": "AtlasLedger.Model",
   "tables": {
     "Account": {
-      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry). Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. An account has no model of its own: it is in exactly one portfolio (its Edge), and follows the model that governs that portfolio.",
+      "description": "An account: a node that holds assets. AccountType is what kind of account it is (brokerage, retirement plan, deposit, credit card, loan), with an extension table for the more specific type. It is held at InstitutionId, which knows it as ExternalAccountId (the account's identifier there, which orders sent to it carry). Currency (ISO 4217) is the currency the account is kept in: its transaction lines' amounts and its holdings' market values are in it, as its institution reports them. An account has no model of its own: it is in exactly one portfolio (its Edge), and follows the model that governs that portfolio. IsReadOnly marks an account that is only read, never traded (a bank account, a card, a 401(k), anything linked read-only): it counts toward its portfolio's value and statistics but is outside the part of the portfolio its model rebalances. Only a brokerage account that isn't read-only is traded.",
       "columns": {
         "AccountId": "guid",
         "AccountType": "accountType",
         "Currency": { "maxLength": 3, "type": "string" },
         "ExternalAccountId": { "maxLength": 64, "type": "string?" },
-        "InstitutionId": "guid?"
+        "InstitutionId": "guid?",
+        "IsReadOnly": "bool"
       },
       "key": ["AccountId"],
       "references": {

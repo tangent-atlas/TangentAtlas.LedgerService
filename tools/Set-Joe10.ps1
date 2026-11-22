@@ -7,16 +7,22 @@
     Against the server Start-LocalLedger.ps1 runs (its settings, %APPDATA%\TangentAtlas\ledger-client.local.json), or
     with -Production the server in Azure (%APPDATA%\TangentAtlas\ledger-client.json, which TangentAtlas.Platform's
     Deploy-EntraApplications.ps1 writes; the tools sign in with their certificate, from this computer's address):
-      1. test-data joe10 writes the Joe 10's scripts (from -StatePath, the forward test's state, or a generic Joe 10).
+      1. test-data joe10 writes the household's scripts (from -StatePath, the forward test's state, or a generic Joe 10).
+         With the state, it also reads SPY's last closes from EODHD (the token as Start-LocalLedger.ps1 keeps it: the
+         EODHD_API_TOKEN environment variable, or %APPDATA%\TangentAtlas\eodhd-token.xml, encrypted for you), which set
+         the SPY Benchmark's share in SPY by the Joe 10's thermostat.  The licensed closes stay in the temporary folder.
       2. access-test whoami signs the test person in (a browser opens the first time: sign in as the test person,
          ledger-tester@tangentatlas.com); script-loader makes them a user of the tenant, first, so a page they have open
          shows the account as it loads (within the website's tenant refresh, ten seconds).
-      3. The account (-Account): script-loader loads the reference (the household, the Joe 10 portfolio with its
-         model, the account at the simulated broker in that portfolio, and the assets), stars the portfolio for the
-         test person (the first portfolio added is a favorite by default), the jobs (orders at 3:45 pm New York on market days) and the model's weights.  The account
-         appears at $0.
+      3. The accounts (-Account): script-loader loads the reference (the household; the Joe 10 portfolio with its model
+         and its Play Money account at the simulated broker, Play Money Brokerage; the assets), then the rest of the
+         household (in the Joe 10 portfolio a Bank of America checking account and a Mastercard; beside it the SPY
+         Benchmark portfolio with its model and its own Play Money account), stars the Joe 10 for the test person (the
+         first portfolio added is a favorite by default), the jobs (orders at 3:45 pm New York on market days) and both
+         models' weights.  The accounts appear at $0.
       4. The holdings (-Holdings): script-loader loads the history (the deposit, then the purchases at the state's
-         close), one transaction every -PauseSeconds, so a page open on the account shows each arrive.
+         close), then the household's (the checking and card balances, the benchmark's deposit and its SPY), one
+         transaction every -PauseSeconds, so a page open on the account shows each arrive.
     Without -Account or -Holdings, it does both, one after the other.  Separately, the account can be opened in the
     website before its holdings load:
       .\tools\Set-Joe10.ps1 -Production -Account      (then open the Joe 10 in the website)
@@ -127,6 +133,29 @@ try {
             throw "The forward test's state isn't at ${StatePath}: clone tangent-atlas/TangentAtlas.ForwardTest beside this repository, name it with -StatePath, or load the generic Joe 10 with -Generic."
         }
         $testDataArguments += @('--state', (Resolve-Path $StatePath).Path)
+
+        # SPY's closes for the benchmark's thermostat: licensed, so fetched here, kept in the temporary folder only.
+        $tokenPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'TangentAtlas\eodhd-token.xml'
+        if ($env:EODHD_API_TOKEN) {
+            $token = $env:EODHD_API_TOKEN
+        } else {
+            if (-not (Test-Path $tokenPath)) {
+                New-Item -ItemType Directory -Force -Path (Split-Path $tokenPath) | Out-Null
+                Read-Host -AsSecureString 'EODHD API token (typed hidden; kept encrypted for you on this computer)' | Export-Clixml -Path $tokenPath
+            }
+            $token = [Net.NetworkCredential]::new('', (Import-Clixml -Path $tokenPath)).Password
+        }
+        if (-not $token) { throw "The EODHD token is empty: delete $tokenPath and run again, or use -Generic." }
+        $lastDate = [datetime]::ParseExact((Get-Content $StatePath -Raw | ConvertFrom-Json).last_date, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $from = $lastDate.AddDays(-50).ToString('yyyy-MM-dd')
+        $to = $lastDate.ToString('yyyy-MM-dd')
+        $spyCloses = Join-Path $work 'spy-closes.json'
+        try {
+            Invoke-WebRequest -Uri "https://eodhd.com/api/eod/SPY.US?from=$from&to=$to&period=d&fmt=json&api_token=$token" -OutFile $spyCloses -UseBasicParsing | Out-Null
+        } catch {
+            throw "Couldn't read SPY's closes from EODHD ($($_.Exception.Message)).  Check the token (delete $tokenPath to enter it again), or use -Generic."
+        }
+        $testDataArguments += @('--spy', $spyCloses)
     }
     Invoke-Program $programs.TestData $testDataArguments
 
@@ -149,6 +178,8 @@ try {
         Invoke-Program $programs.Loader @("$TenantId", $member)
         Write-Host "`n== The account at the simulated broker" -ForegroundColor Cyan
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-reference.json'))
+        Write-Host "`n== The rest of the household: checking and a Mastercard in the Joe 10; the SPY Benchmark beside it" -ForegroundColor Cyan
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'household-reference.json'))
 
         # The first portfolio added is starred by default: the Joe 10 is a favorite of the test person.
         $reference = Get-Content (Join-Path $work 'joe10-reference.json') -Raw | ConvertFrom-Json
@@ -159,7 +190,8 @@ try {
         Invoke-Program $programs.Loader @("$TenantId", $favorite)
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-jobs.json'))
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-weights.json'))
-        Write-Host "`nThe Joe 10's account is in tenant $TenantId, empty, and $($identity.subject) is its user." -ForegroundColor Green
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'household-weights.json'))
+        Write-Host "`nThe household's accounts are in tenant $TenantId, empty, and $($identity.subject) is their user." -ForegroundColor Green
     }
 
     if ($Holdings -or $both) {
@@ -177,7 +209,9 @@ try {
 
         Write-Host "`n== The holdings: the deposit, then each purchase" -ForegroundColor Cyan
         Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'joe10-history.json'), '--pause', $PauseSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
-        Write-Host "`nThe Joe 10's holdings are loaded into tenant $TenantId." -ForegroundColor Green
+        Write-Host "`n== The household: checking and card balances, then the SPY Benchmark's deposit and its SPY" -ForegroundColor Cyan
+        Invoke-Program $programs.Loader @("$TenantId", (Join-Path $work 'household-history.json'), '--pause', $PauseSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
+        Write-Host "`nThe household's holdings are loaded into tenant $TenantId." -ForegroundColor Green
     }
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

@@ -144,6 +144,73 @@ namespace AtlasLedger.Tests
         /// can't write them.
         /// </summary>
         /// <returns>A task.</returns>
+        /// <summary>
+        /// The whole test household: the Joe 10 portfolio holds its Play Money account, a checking account and a card; the
+        /// SPY Benchmark beside it holds a Play Money account of SPY.  The card's balance is owed (negative dollars); the
+        /// Joe 10 still governs only its brokerage account, so its model still trades it; the benchmark's model governs its
+        /// own account.
+        /// </summary>
+        [Fact]
+        public async Task TheHouseholdAddsCheckingACardAndTheSpyBenchmarkAndTheJoe10StillTrades()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var tool = new LedgerApiClient(this.server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            var spy = new SpyState(500m, 0.6m, 0.25m);
+            await tool.SetServiceAsync("rules", isOn: true, cancellationToken: cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Household.Reference(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Account.Weights(state), cancellationToken);
+            await tool.ApplyAsync(tenantId, Joe10Household.Weights(spy), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.History(state, 1_000_000m), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Household.History(state, spy, 1_000_000m), cancellationToken);
+
+            var holdings = await WaitForAsync(tool, tenantId, found => found.Accounts.Count == 4 && found.Holdings.Any(holding => holding.AssetId == Joe10Household.SpyId), cancellationToken);
+            decimal Held(Guid accountId, Guid assetId) => holdings.Holdings.Single(holding => holding.AccountId == accountId && holding.AssetId == assetId).Quantity;
+            Assert.Equal(1_200m, Held(Joe10Household.BenchmarkAccountId, Joe10Household.SpyId));   // 60% of $1,000,000 at $500
+            Assert.Equal(400_000m, Held(Joe10Household.BenchmarkAccountId, Joe10Account.DollarId));
+            Assert.Equal(25_000m, Held(Joe10Household.CheckingId, Joe10Account.DollarId));
+            Assert.Equal(-18_500m, Held(Joe10Household.CardId, Joe10Account.DollarId));
+
+            AccountSummary Summary(Guid accountId) => holdings.Accounts.Single(account => account.AccountId == accountId);
+            Assert.Equal("Joe 10", Summary(Joe10Account.AccountId).ModelName);
+            Assert.Equal("SPY at 15%", Summary(Joe10Household.BenchmarkAccountId).ModelName);
+            Assert.Null(Summary(Joe10Household.CheckingId).ModelId);   // counted in the Joe 10 portfolio, never traded
+            Assert.Null(Summary(Joe10Household.CardId).ModelId);
+            Assert.Equal(-18_500m, Summary(Joe10Household.CardId).MarketValue);
+        }
+
+        [Fact]
+        public void TheBenchmarksShareInSpyIsTheThermostatsFromItsCloses()
+        {
+            // 22 closes: SPY alternating up and down 1%, so its daily returns' standard deviation is about 1% (about 16% a year).
+            var path = Path.Combine(Path.GetTempPath(), $"spy-closes-{Guid.NewGuid():N}.json");
+            var day = new DateOnly(2026, 10, 7);
+            var rows = new List<string>();
+            var adjusted = 500m;
+            for (var index = 0; index < 22; index++, day = day.AddDays(1))
+            {
+                adjusted = index == 0 ? adjusted : adjusted * (index % 2 == 0 ? 1.01m : 0.99m);
+                rows.Add($$"""{ "date": "{{day:yyyy-MM-dd}}", "close": {{(adjusted + 2m).ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "adjusted_close": {{adjusted.ToString(System.Globalization.CultureInfo.InvariantCulture)}} }""");
+            }
+
+            File.WriteAllText(path, $"[{string.Join(",", rows)}]");
+            try
+            {
+                var close = day.AddDays(-1);
+                var spy = SpyState.Read(path, close);
+                Assert.InRange(spy.Volatility!.Value, 0.158m, 0.166m);
+                Assert.Equal(Math.Min(1m, 0.15m / spy.Volatility.Value), spy.StockShare);
+                Assert.Equal(adjusted + 2m, spy.Price);   // bought at the close, not the adjusted close
+                Assert.Throws<InvalidOperationException>(() => SpyState.Read(path, close.AddDays(5)));   // no row for that close
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
         [Fact]
         public async Task TheDerivedTablesReachAReplicaThroughSync()
         {

@@ -106,13 +106,15 @@ namespace AtlasLedger.Server.Portfolios
             IEnumerable<NodeFact> nodes = default!;
             IEnumerable<EdgeFact> edges = default!;
             IEnumerable<PortfolioFact> portfolios = default!;
+            IEnumerable<AccountFact> accounts = default!;
             this.When()
                 .Match(() => account)
                 .Query(() => nodes, query => query.Match<NodeFact>(node => PortfolioTree.IsInTree(node.NodeType)).Collect())
                 .Query(() => edges, query => query.Match<EdgeFact>().Collect())
-                .Query(() => portfolios, query => query.Match<PortfolioFact>().Collect());
+                .Query(() => portfolios, query => query.Match<PortfolioFact>().Collect())
+                .Query(() => accounts, query => query.Match<AccountFact>().Collect());
             this.Then()
-                .Yield(_ => PortfolioTree.From(nodes, edges, portfolios).GovernanceOf(account.AccountId));
+                .Yield(_ => PortfolioTree.From(nodes, edges, portfolios, accounts).GovernanceOf(account.AccountId));
         }
     }
 

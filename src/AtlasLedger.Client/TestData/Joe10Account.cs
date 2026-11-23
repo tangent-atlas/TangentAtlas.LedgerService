@@ -44,7 +44,9 @@ namespace AtlasLedger.Client.TestData
             var lastDate = DateOnly.ParseExact(root.GetProperty("last_date").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
             var value = root.GetProperty("joe10").GetDecimal();
             var portfolio = root.GetProperty("portfolio");
-            var stockShare = portfolio.GetProperty("stocks_after").GetDecimal();
+            // stocks_after is the stock holdings' value, in the track's units (1.0 at its start): the share is that over
+            // the track's value, which is 1.0 only on the first day.
+            var stockShare = portfolio.GetProperty("stocks_after").GetDecimal() / value;
             var units = portfolio.GetProperty("units");
             var holdings = portfolio.GetProperty("weights").EnumerateObject()
                 .Select(weight =>

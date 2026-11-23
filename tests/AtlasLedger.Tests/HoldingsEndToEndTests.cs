@@ -40,11 +40,33 @@ namespace AtlasLedger.Tests
             }
             """;
 
+        // The same holdings after the track has lost a fifth: the stocks are worth 0.4 of a value of 0.8, still half.
+        private const string MovedStateJson = """
+            {
+              "joe10": 0.8,
+              "last_date": "2026-11-06",
+              "portfolio": {
+                "stocks_after": 0.4,
+                "units": { "AAA": 0.0024, "BBB": 0.0048004800480048005 },
+                "weights": { "AAA": 0.6, "BBB": 0.4 }
+              }
+            }
+            """;
+
         private readonly ServerFixture server;
 
         public HoldingsEndToEndTests(ServerFixture server)
         {
             this.server = server;
+        }
+
+        [Fact]
+        public void TheStockShareAndPricesHoldWhenTheTracksValueHasMoved()
+        {
+            var state = ReadState(MovedStateJson);
+
+            Assert.Equal(0.5m, state.StockShare);
+            Assert.Equal([("AAA", 100m), ("BBB", 33.33m)], state.Holdings.Select(holding => (holding.Ticker, holding.Price)));
         }
 
         [Fact]
@@ -475,10 +497,10 @@ namespace AtlasLedger.Tests
         private static decimal Quantity(TenantHoldings holdings, Guid assetId) =>
             holdings.Holdings.Single(holding => holding.AssetId == assetId).Quantity;
 
-        private static Joe10State ReadState()
+        private static Joe10State ReadState(string json = StateJson)
         {
             var path = Path.Combine(Path.GetTempPath(), $"joe10-state-{Guid.NewGuid():N}.json");
-            File.WriteAllText(path, StateJson);
+            File.WriteAllText(path, json);
             try
             {
                 return Joe10State.Read(path);

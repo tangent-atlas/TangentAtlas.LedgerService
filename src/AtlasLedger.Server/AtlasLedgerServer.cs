@@ -26,6 +26,7 @@ namespace AtlasLedger.Server
     using Microsoft.AspNetCore.Authentication.JwtBearer;
     using Microsoft.AspNetCore.Builder;
     using Microsoft.Extensions.Configuration;
+    using Microsoft.Extensions.Configuration.Json;
     using Microsoft.Extensions.DependencyInjection;
     using Microsoft.Extensions.DependencyInjection.Extensions;
     using Microsoft.Extensions.Hosting;
@@ -85,6 +86,18 @@ namespace AtlasLedger.Server
             });
             var configuration = builder.Configuration;
 
+            // User secrets belong to the server run by hand (Start-LocalLedger.ps1 -PrepareOnly keeps its settings there for
+            // Visual Studio: sign-in, tools, the database).  Naming this assembly as the application makes WebApplication load
+            // them for any host in Development, a test's included, which would then sign in against Entra and use this
+            // computer's database.  A host that isn't this program doesn't get them.
+            if (Assembly.GetEntryAssembly() != typeof(AtlasLedgerServer).Assembly)
+            {
+                foreach (var secrets in configuration.Sources.OfType<JsonConfigurationSource>().Where(source => source.Path == "secrets.json").ToList())
+                {
+                    configuration.Sources.Remove(secrets);
+                }
+            }
+
             // The ledger: every write answers only once the flusher has made it durable.
             builder.Services.AddSingleton(new Ledger { UsesWriteBehind = true });
             builder.Services.AddLedger();
@@ -138,13 +151,28 @@ namespace AtlasLedger.Server
             builder.Services.AddHostedService<SimulatedMarketFeed>();
 
             // Closing prices, dividends and splits (EODHD) and the risk-free rate (the Treasury), loaded into each tenant on the
-            // market-history switch: ephemeral, reloaded at startup.
+            // market-history switch.  Kept in our own database (the market schema) when there is one: fetched from the vendor
+            // once, then only what is new, so a restart reads the database instead of the vendor.  In memory otherwise.
             builder.Services.Configure<MarketHistoryOptions>(configuration.GetSection(MarketHistoryOptions.SectionName));
-            builder.Services.AddHttpClient<IMarketHistorySource, EodhdTreasurySource>(client =>
+            builder.Services.AddHttpClient<EodhdTreasurySource>(client =>
             {
                 client.Timeout = TimeSpan.FromSeconds(30);
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("TangentAtlas-Ledger/1.0");   // some public data sites stall requests that name no agent
             });
+            if (configuration.GetConnectionString(PersistenceOptions.ConnectionName) is { Length: > 0 } marketConnection)
+            {
+                builder.Services.AddSingleton<IMarketHistoryStore>(new SqlMarketHistoryStore(marketConnection));
+            }
+            else
+            {
+                builder.Services.AddSingleton<IMarketHistoryStore, InMemoryMarketHistoryStore>();
+            }
+
+            builder.Services.AddSingleton<IMarketHistorySource>(services => new StoredMarketHistorySource(
+                services.GetRequiredService<EodhdTreasurySource>(),
+                services.GetRequiredService<IMarketHistoryStore>(),
+                services.GetRequiredService<TimeProvider>(),
+                services.GetRequiredService<ILogger<StoredMarketHistorySource>>()));
             builder.Services.AddSingleton<MarketHistoryService>();
             builder.Services.AddHostedService(services => services.GetRequiredService<MarketHistoryService>());
 

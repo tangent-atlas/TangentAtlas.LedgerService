@@ -148,7 +148,7 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
-        public void OnlyFixedWeightsWithNoCashRuleOnASingleAccountTrade()
+        public void OnlyFixedWeightsFullyInvestedOrUnderAVolatilityTargetOnASingleAccountTrade()
         {
             var nodes = new[] { Node(Joe10, NodeType.Portfolio) };
             var portfolios = new[] { Portfolio(Joe10, Joe10Model) };
@@ -163,8 +163,17 @@ namespace AtlasLedger.Tests
             Assert.Equal("Its model, Joe 10, is a Constant Weight index, which doesn't trade yet: only fixed weights do.", Why(index, One(Ira)));
             Assert.False(PortfolioRules.Trades(One(Ira), index));
 
-            var thermostat = Model(ModelKind.FixedWeights, CashRule.VolatilityTarget);
-            Assert.StartsWith("Its model, Joe 10, has a cash rule", Why(thermostat, One(Ira)));
+            var noFigure = Model(ModelKind.FixedWeights, CashRule.VolatilityTarget);
+            Assert.Equal("Its model, Joe 10, has a volatility target but no figure for it.", Why(noFigure, One(Ira)));
+            Assert.False(PortfolioRules.Trades(One(Ira), noFigure));
+
+            var thermostat = Model(ModelKind.FixedWeights, CashRule.VolatilityTarget, 0.15m);
+            Assert.Null(Why(thermostat, One(Ira)));
+            Assert.True(PortfolioRules.Trades(One(Ira), thermostat));
+
+            var fixedCash = Model(ModelKind.FixedWeights, CashRule.FixedAmount);
+            Assert.StartsWith("Its model, Joe 10, keeps a fixed amount in cash", Why(fixedCash, One(Ira)));
+            Assert.False(PortfolioRules.Trades(One(Ira), fixedCash));
 
             var two = new[] { new Governance(Ira, Joe10, Joe10, Joe10Model, [Ira, RothIra]), new Governance(RothIra, Joe10, Joe10, Joe10Model, [Ira, RothIra]) };
             Assert.StartsWith("Its model governs 2 accounts.", Why(fixedWeights, two));
@@ -201,7 +210,7 @@ namespace AtlasLedger.Tests
         private static AccountFact Account(Guid id, AccountType type, bool isReadOnly = false) =>
             new AccountFact(new AccountDto { AccountId = id, AccountType = type, IsReadOnly = isReadOnly, Currency = CurrencyCode.UnitedStatesDollar, InstitutionId = Guid.Empty, ExternalAccountId = id.ToString() });
 
-        private static ModelFact Model(ModelKind kind, CashRule cashRule) =>
-            new ModelFact(new ModelDto { ModelId = Joe10Model, Name = "Joe 10", ModelKind = kind, CashRule = cashRule, Band = 0.005m });
+        private static ModelFact Model(ModelKind kind, CashRule cashRule, decimal? volatilityTarget = null) =>
+            new ModelFact(new ModelDto { ModelId = Joe10Model, Name = "Joe 10", ModelKind = kind, CashRule = cashRule, VolatilityTarget = volatilityTarget, Band = 0.005m });
     }
 }

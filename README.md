@@ -42,8 +42,12 @@ migrations first (`LEDGER_SCHEMA_CONNECTION` names the database; LocalDB's `Atla
 
 ```
 dotnet tool restore
-dotnet ef database update --project src/AtlasLedger.Schema
+dotnet ef database update --project src/AtlasLedger.Schema --context LedgerDbContext
+dotnet ef database update --project src/AtlasLedger.Schema --context MarketDbContext
 ```
+
+The second is the market history kept in our own database (the `market` schema: daily closes, dividends, splits and the
+risk-free rate, the same for every tenant): fetched from the vendor once, then only what is new each day.
 
 Sign-in: with `IdentityProvider:Authority` and `IdentityProvider:Audiences` set (TangentAtlas.Platform's
 `Deploy-EntraApplications.ps1` sets them in Azure), the server accepts bearer tokens from Entra External ID; otherwise it

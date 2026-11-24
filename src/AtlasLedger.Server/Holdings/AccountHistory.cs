@@ -260,43 +260,23 @@ namespace AtlasLedger.Server.Holdings
         public static AccountStatistics Statistics(Guid accountId, IReadOnlyList<AccountDay> days, IEnumerable<string> gaps)
         {
             ArgumentNullException.ThrowIfNull(days);
-            var returns = days.Where(day => day.Return is not null).Select(day => (double)day.Return!.Value).ToArray();
-            var excess = days.Where(day => day.Return is not null).Select(day => (double)(day.Return!.Value - (day.RiskFreeReturn ?? 0m))).ToArray();
-            var annual = Math.Sqrt(MarketDaysAYear);
-            double? total = returns.Length > 0 ? returns.Aggregate(1d, (product, item) => product * (1d + item)) - 1d : null;
-            double? annualized = total is { } compounded && compounded > -1d ? Math.Pow(1d + compounded, (double)MarketDaysAYear / returns.Length) - 1d : null;
-            double? volatility = returns.Length > 1 ? StandardDeviation(returns) * annual : null;
-            var excessDeviation = excess.Length > 1 ? StandardDeviation(excess) : 0d;
-            double? sharpe = excessDeviation > 0d ? excess.Average() / excessDeviation * annual : null;
-            double? drawdown = null;
-            if (returns.Length > 0)
-            {
-                var level = 1d;
-                var peak = 1d;
-                var worst = 0d;
-                foreach (var item in returns)
-                {
-                    level *= 1d + item;
-                    peak = Math.Max(peak, level);
-                    worst = Math.Max(worst, 1d - (level / peak));
-                }
-
-                drawdown = worst;
-            }
-
+            var measured = days.Where(day => day.Return is not null).ToArray();
+            var figures = Performance.Measure(
+                measured.Select(day => (double)day.Return!.Value).ToArray(),
+                measured.Select(day => (double)(day.RiskFreeReturn ?? 0m)).ToArray());
             return new AccountStatistics(
                 accountId,
                 days.Count > 0 ? days[0].Date : null,
                 days.Count > 0 ? days[^1].Date : null,
                 days.Count > 0 ? days[^1].Value : null,
                 days.Sum(day => day.Flow),
-                returns.Length,
-                Round(total),
-                Round(annualized),
-                Round(volatility),
-                Round(sharpe),
-                Round(drawdown),
-                returns.Length >= ReturnsToRank && sharpe is not null,
+                figures.Returns,
+                figures.TotalReturn,
+                figures.AnnualizedReturn,
+                figures.Volatility,
+                figures.SharpeRatio,
+                figures.MaximumDrawdown,
+                figures.Returns >= ReturnsToRank && figures.SharpeRatio is not null,
                 gaps.ToArray());
         }
 
@@ -428,14 +408,6 @@ namespace AtlasLedger.Server.Holdings
             return found >= 0 ? list.Values[found] : null;
         }
 
-        private static double StandardDeviation(IReadOnlyList<double> values)
-        {
-            var mean = values.Average();
-            return Math.Sqrt(values.Sum(value => (value - mean) * (value - mean)) / (values.Count - 1));
-        }
-
         private static decimal? Round(decimal? value, int places) => value is { } number ? Math.Round(number, places, MidpointRounding.ToEven) : null;
-
-        private static decimal? Round(double? value) => value is { } number && double.IsFinite(number) ? Math.Round((decimal)number, 6, MidpointRounding.ToEven) : null;
     }
 }

@@ -138,6 +138,56 @@ namespace AtlasLedger.Tests
         }
 
         [Fact]
+        public async Task AVolatilityTargetWaitsForClosesThenInvestsTheThermostatsShare()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+            await using var server = ServerFixture.With(Trading);
+            await server.InitializeAsync();
+            var tool = new LedgerApiClient(server.HttpClient, DevelopmentCallers.Tool);
+            var tenantId = Guid.NewGuid();
+            var state = ReadState();
+            await tool.ApplyAsync(tenantId, Joe10Account.Reference(state), cancellationToken);
+            await tool.CommitTransactionsAsync(tenantId, Joe10Account.Opening(state, 1_000_000m), cancellationToken);
+
+            // The model's weights are the whole mix (60/40); the thermostat decides how much of the account they apply to.
+            var model = await tool.GetAsync<ModelDto>(tenantId, "Model", Joe10Account.ModelId.ToString(), cancellationToken);
+            await tool.ApplyAsync(
+                tenantId,
+                new LedgerScript()
+                    .Update("Model", new { model.ModelId }, new ModelDto { ModelId = model.ModelId, Name = "AAA and BBB at 15%", ModelKind = ModelKind.FixedWeights, CashRule = CashRule.VolatilityTarget, VolatilityTarget = 0.15m, VolatilityWindow = 21, Band = 0.005m, RowVersion = model.RowVersion })
+                    .Insert("Weight", new WeightDto { ModelId = model.ModelId, AssetId = Joe10Account.AssetIdOf("AAA"), Fraction = 0.6m })
+                    .Insert("Weight", new WeightDto { ModelId = model.ModelId, AssetId = Joe10Account.AssetIdOf("BBB"), Fraction = 0.4m }),
+                cancellationToken);
+
+            // Without closes there is no volatility to measure: the account waits, and nothing is ordered.
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: true });
+            Assert.Equal(0, (await tool.GenerateOrdersAsync(tenantId, cancellationToken)).Orders);
+            Assert.DoesNotContain(await tool.ListAsync<AlertDto>(tenantId, "Alert", cancellationToken), alert => alert.Rule == "ModelNotTrading");
+
+            // Thirty closes moving 2% a day, up and down (about 32% a year), published as the market history service would:
+            // about half the account is invested.
+            var partition = server.Services.GetRequiredService<server::AtlasLedger.Model.Ledger>().GetPartition(tenantId);
+            var day = new DateOnly(2026, 9, 1);
+            foreach (var ticker in new[] { "AAA", "BBB" })
+            {
+                var price = 100m;
+                for (var index = 0; index < 30; index++)
+                {
+                    price = index == 0 ? price : Math.Round(price * (index % 2 == 1 ? 1.02m : 0.98m), 6);
+                    partition.PublishClosingPrice(new server::AtlasLedger.Model.Primary.ClosingPrice { Scheme = SymbolScheme.Ticker, Code = ticker, Currency = "USD", Date = day.AddDays(index), Close = price, AsOf = DateTimeOffset.UtcNow.AddDays(index - 60) });
+                }
+            }
+
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Proposals.SingleOrDefault() is { IsWaiting: false, Trades.Count: 2 });
+            var generated = await tool.GenerateOrdersAsync(tenantId, cancellationToken);
+            Assert.Equal(2, generated.Orders);
+            await WaitForAsync(() => tool.GetOrdersAsync(tenantId, cancellationToken), found => found.Orders.Count == 2 && found.Orders.All(order => order.Status == "Filled"));
+            var holdings = await WaitForAsync(() => tool.GetHoldingsAsync(tenantId, cancellationToken), found => found.Holdings.Count(holding => holding.AssetType == AssetType.Equity) == 2);
+            var invested = holdings.Holdings.Where(holding => holding.AssetType == AssetType.Equity).Sum(holding => holding.Weight!.Value);
+            Assert.InRange(invested, 0.44m, 0.50m);
+        }
+
+        [Fact]
         public async Task AnAccountWithoutAModelIsNotRebalanced()
         {
             var cancellationToken = TestContext.Current.CancellationToken;

@@ -76,6 +76,19 @@ namespace AtlasLedger.Server.Orders
         }
 
         /// <summary>
+        /// A model's weights scaled to the share it invests: what they don't add up to stays in cash.
+        /// </summary>
+        /// <param name="weights">The weights of what is invested, adding up to one (or less).</param>
+        /// <param name="share">The share invested, from zero to one.</param>
+        /// <returns>Each asset's fraction of the account's value.</returns>
+        public static IReadOnlyDictionary<Guid, decimal> Scale(IReadOnlyDictionary<Guid, decimal> weights, decimal share)
+        {
+            ArgumentNullException.ThrowIfNull(weights);
+            var bounded = Math.Clamp(share, 0m, 1m);
+            return weights.ToDictionary(pair => pair.Key, pair => Math.Round(pair.Value * bounded, 6, MidpointRounding.ToZero));
+        }
+
+        /// <summary>
         /// Plans an account's rebalance.
         /// </summary>
         /// <param name="account">The account.</param>

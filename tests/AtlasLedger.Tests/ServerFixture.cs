@@ -53,6 +53,11 @@ namespace AtlasLedger.Tests
         /// </summary>
         public HttpClient HttpClient { get; private set; } = new HttpClient();
 
+        /// <summary>
+        /// Gets the running server's services, for what a test stands in for (the market history service publishing closes).
+        /// </summary>
+        public IServiceProvider Services => this.application?.Services ?? throw new InvalidOperationException("The server isn't running.");
+
         /// <inheritdoc/>
         public async ValueTask InitializeAsync()
         {

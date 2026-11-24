@@ -45,16 +45,21 @@ namespace AtlasLedger.Server.Market
         /// <summary>Gets or sets how often the service looks for what's missing (the vendor is asked only for what is).</summary>
         public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromMinutes(1);
 
-        /// <summary>Gets or sets how many days before a tenant's first event its history starts.</summary>
-        public int DaysBeforeFirstEvent { get; set; } = 7;
+        /// <summary>
+        /// Gets or sets how many days before a tenant's first event its history starts: enough for the thermostat's 21
+        /// daily returns (about 30 calendar days) with room for holidays, so a model under a volatility target can trade
+        /// from its first day.
+        /// </summary>
+        public int DaysBeforeFirstEvent { get; set; } = 45;
     }
 
     /// <summary>
-    /// Loads market history into every tenant: for each US ticker it knows, the closes from a week before its first event,
+    /// Loads market history into every tenant: for each US ticker it knows, the closes from 45 days before its first event (DaysBeforeFirstEvent),
     /// its dividends and splits, and the risk-free rate (the Treasury's 13-week bill), as ephemeral facts for the rules; then, each market day after the
     /// close, that day's.  The latest close is also published as the ticker's price where nothing fresher is.  The vendor is
     /// asked once per ticker for what no tenant has yet, so a thousand tenants holding the same stocks cost the same calls
-    /// as one.  Nothing is persisted: a restart loads it all again.
+    /// as one.  Behind it, the source keeps what it fetches in our database (StoredMarketHistorySource), so a restart
+    /// reads the database, and the vendor is asked only for what is new.
     /// </summary>
     internal sealed partial class MarketHistoryService : BackgroundService
     {

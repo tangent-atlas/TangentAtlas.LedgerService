@@ -130,6 +130,7 @@ namespace AtlasLedger.Server.Orders
             IEnumerable<EffectivePrice> prices = default!;
             IEnumerable<CurrencyRate> rates = default!;
             IEnumerable<OrderState> orders = default!;
+            IEnumerable<CashShare> shares = default!;
 
             this.When()
                 .Match(() => governance, candidate => candidate.ModelId != null)
@@ -141,9 +142,10 @@ namespace AtlasLedger.Server.Orders
                 .Query(() => assets, query => query.Match<AssetFact>().Collect())
                 .Query(() => prices, query => query.Match<EffectivePrice>().Collect())
                 .Query(() => rates, query => query.Match<CurrencyRate>().Collect())
-                .Query(() => orders, query => query.Match<OrderState>().Collect());
+                .Query(() => orders, query => query.Match<OrderState>().Collect())
+                .Query(() => shares, query => query.Match<CashShare>(item => item.ModelId == model.ModelId).Collect());
             this.Then()
-                .Yield(_ => Propose(account, model, clock, weights, positions, assets, prices, rates, orders));
+                .Yield(_ => Propose(account, model, clock, weights, positions, assets, prices, rates, orders, shares));
         }
 
         private static ProposedAllocations Propose(
@@ -155,11 +157,25 @@ namespace AtlasLedger.Server.Orders
             IEnumerable<AssetFact> assets,
             IEnumerable<EffectivePrice> prices,
             IEnumerable<CurrencyRate> rates,
-            IEnumerable<OrderState> orders)
+            IEnumerable<OrderState> orders,
+            IEnumerable<CashShare> shares)
         {
+            // Under a volatility target the weights apply to the share the thermostat invests; until it can measure one,
+            // the account waits.
+            var targets = Rebalancing.WeightsOf(weights, model.ModelId);
+            if (model.CashRule == CashRule.VolatilityTarget)
+            {
+                if (shares.FirstOrDefault()?.Share is not { } share)
+                {
+                    return new ProposedAllocations(account.AccountId, model.ModelId, Array.Empty<PlannedTrade>(), true);
+                }
+
+                targets = Rebalancing.Scale(targets, share);
+            }
+
             var plan = Rebalancing.Plan(
                 account,
-                Rebalancing.WeightsOf(weights, model.ModelId),
+                targets,
                 positions,
                 assets.ToDictionary(asset => asset.AssetId),
                 prices.ToDictionary(price => price.AssetId),

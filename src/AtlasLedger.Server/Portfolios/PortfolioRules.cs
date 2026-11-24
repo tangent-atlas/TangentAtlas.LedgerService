@@ -59,9 +59,11 @@ namespace AtlasLedger.Server.Portfolios
                 return $"Its model, {model.Name}, is a {Describe(model.ModelKind)}, which doesn't trade yet: only fixed weights do.";
             }
 
-            if (model.CashRule != CashRule.None)
+            if (!HasTradingCashRule(model))
             {
-                return $"Its model, {model.Name}, has a cash rule, which doesn't trade yet: only fixed weights with no cash rule do.";
+                return model.CashRule == CashRule.VolatilityTarget
+                    ? $"Its model, {model.Name}, has a volatility target but no figure for it."
+                    : $"Its model, {model.Name}, keeps a fixed amount in cash, which doesn't trade yet: fully invested and a volatility target do.";
             }
 
             var book = governances.Count(governance => governance.GoverningPortfolioId == portfolioId);
@@ -71,8 +73,8 @@ namespace AtlasLedger.Server.Portfolios
         }
 
         /// <summary>
-        /// Whether a model trades an account it governs: a fixed-weights model with no cash rule, and the account the only
-        /// one in its book.
+        /// Whether a model trades an account it governs: a fixed-weights model, fully invested or under a volatility target
+        /// (<see cref="Orders.Thermostat"/>), and the account the only one in its book.
         /// </summary>
         /// <param name="governance">The account's governance.</param>
         /// <param name="model">Its model.</param>
@@ -81,8 +83,12 @@ namespace AtlasLedger.Server.Portfolios
         {
             ArgumentNullException.ThrowIfNull(governance);
             ArgumentNullException.ThrowIfNull(model);
-            return governance.ModelId == model.ModelId && governance.Book.Count == 1 && model.ModelKind == ModelKind.FixedWeights && model.CashRule == CashRule.None;
+            return governance.ModelId == model.ModelId && governance.Book.Count == 1 && model.ModelKind == ModelKind.FixedWeights && HasTradingCashRule(model);
         }
+
+        /// <summary>The cash rules that trade: none (fully invested), and a volatility target with a figure.</summary>
+        private static bool HasTradingCashRule(ModelFact model) =>
+            model.CashRule == CashRule.None || (model.CashRule == CashRule.VolatilityTarget && model.VolatilityTarget is > 0m);
 
         private static string Describe(ModelKind kind) => kind switch
         {

@@ -128,8 +128,11 @@ if (-not $InMemory) {
     try {
         dotnet tool restore | Out-Null
         $env:LEDGER_SCHEMA_CONNECTION = $Connection
-        dotnet ef database update --project (Join-Path $repository 'src/AtlasLedger.Schema')
-        if ($LASTEXITCODE -ne 0) { throw "Applying the migrations failed: is SQL Server running, and can you sign in to it?  ($Connection)" }
+        # Two schemas: the ledger's tables, and the market history kept in our database (the market schema, no TenantId).
+        foreach ($context in 'LedgerDbContext', 'MarketDbContext') {
+            dotnet ef database update --project (Join-Path $repository 'src/AtlasLedger.Schema') --context $context
+            if ($LASTEXITCODE -ne 0) { throw "Applying the migrations ($context) failed: is SQL Server running, and can you sign in to it?  ($Connection)" }
+        }
     } finally {
         Remove-Item Env:\LEDGER_SCHEMA_CONNECTION -ErrorAction SilentlyContinue
         Pop-Location
